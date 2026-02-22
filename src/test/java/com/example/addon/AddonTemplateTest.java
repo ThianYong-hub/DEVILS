@@ -1,37 +1,34 @@
 package com.example.addon;
 
-import meteordevelopment.meteorclient.addons.GithubRepo;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AddonTemplateTest {
     @Test
-    void packageNameIsCorrect() {
-        AddonTemplate addon = new AddonTemplate();
-        assertEquals("com.example.addon", addon.getPackage());
+    void addonTemplateContainsExpectedPackageAndRepo() throws IOException {
+        String source = Files.readString(Path.of(
+            "src", "main", "java", "com", "example", "addon", "AddonTemplate.java"
+        ));
+
+        assertTrue(source.contains("class AddonTemplate extends MeteorAddon"));
+        assertTrue(source.contains("return \"com.example.addon\";"));
+        assertTrue(source.contains("new GithubRepo(\"MeteorDevelopment\", \"meteor-addon-template\")"));
     }
 
     @Test
-    void repoContainsExpectedOwnerAndName() throws IllegalAccessException {
-        GithubRepo repo = new AddonTemplate().getRepo();
-        assertNotNull(repo);
+    void addonRegistersCoreModulesAndCommands() throws IOException {
+        String source = Files.readString(Path.of(
+            "src", "main", "java", "com", "example", "addon", "AddonTemplate.java"
+        ));
 
-        List<String> stringFields = new ArrayList<>();
-        for (Field field : repo.getClass().getDeclaredFields()) {
-            if (field.getType() != String.class) continue;
-            field.setAccessible(true);
-            Object value = field.get(repo);
-            if (value instanceof String s) stringFields.add(s);
-        }
-
-        assertTrue(stringFields.contains("MeteorDevelopment"));
-        assertTrue(stringFields.contains("meteor-addon-template"));
+        assertTrue(source.contains("Modules.get().add(new AutoPearl());"));
+        assertTrue(source.contains("Modules.get().add(new AutoAnvilRename());"));
+        assertTrue(source.contains("Commands.add(new CommandExample());"));
+        assertTrue(source.contains("Commands.add(new AutoAnvilRenameCommand());"));
     }
 }

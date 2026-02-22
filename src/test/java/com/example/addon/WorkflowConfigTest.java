@@ -14,7 +14,7 @@ class WorkflowConfigTest {
         String workflow = readWorkflow("pull_request.yml");
         assertTrue(workflow.contains("name: Build Pull Request Artifacts"));
         assertTrue(workflow.contains("java-version: 21"));
-        assertTrue(workflow.contains("./gradlew test"));
+        assertTrue(workflow.contains("./gradlew --no-daemon test"));
     }
 
     @Test
@@ -22,7 +22,7 @@ class WorkflowConfigTest {
         String workflow = readWorkflow("dev_build.yml");
         assertTrue(workflow.contains("name: Publish Development Build"));
         assertTrue(workflow.contains("java-version: 21"));
-        assertTrue(workflow.contains("./gradlew test"));
+        assertTrue(workflow.contains("./gradlew --no-daemon test"));
     }
 
     private String readWorkflow(String fileName) throws IOException {
