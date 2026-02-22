@@ -20,8 +20,11 @@ jobs:
           distribution: 'temurin'
           java-version: 21
 
+      - name: Run tests
+        run: ./gradlew --no-daemon test
+
       - name: Build with Gradle
-        run: ./gradlew build
+        run: ./gradlew --no-daemon build -x test
 
       - name: Release
         uses: marvinpinto/action-automatic-releases@latest

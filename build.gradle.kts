@@ -34,6 +34,11 @@ dependencies {
 
     // Meteor
     modImplementation("meteordevelopment:meteor-client:${properties["minecraft_version"] as String}-SNAPSHOT")
+
+    // Tests
+    testImplementation(platform("org.junit:junit-bom:5.10.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 tasks {
@@ -63,6 +68,10 @@ tasks {
     java {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    test {
+        useJUnitPlatform()
     }
 
     withType<JavaCompile> {
