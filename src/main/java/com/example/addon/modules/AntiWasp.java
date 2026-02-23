@@ -17,7 +17,7 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Vec3d;
 
-public class AntiElytraWasp extends Module {
+public class AntiWasp extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgPath = settings.createGroup("Path");
     private final SettingGroup sgAssist = settings.createGroup("Assist");
@@ -162,8 +162,8 @@ public class AntiElytraWasp extends Module {
     private boolean forcedForward;
     private boolean prevForwardState;
 
-    public AntiElytraWasp() {
-        super(AddonTemplate.CATEGORY, "anti-elytra-wasp", "Autowalk elytra autopilot with large figure flight paths.");
+    public AntiWasp() {
+        super(AddonTemplate.CATEGORY, "anti-wasp", "Autowalk elytra autopilot with large figure flight paths.");
     }
 
     @Override
