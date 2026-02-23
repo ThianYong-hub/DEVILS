@@ -77,6 +77,8 @@ public class AutoAnvilRename extends Module {
      */
     private int stuckCycles;
     private static final int STUCK_TIMEOUT = 4; // cycles × clickDelay ticks
+    private int renameMismatchCycles;
+    private static final int RENAME_MISMATCH_TIMEOUT = 8; // cycles × clickDelay ticks
 
     public AutoAnvilRename() {
         super(AddonTemplate.CATEGORY, "auto-anvil-rename",
@@ -87,6 +89,7 @@ public class AutoAnvilRename extends Module {
     public void onActivate() {
         ticks       = 0;
         stuckCycles = 0;
+        renameMismatchCycles = 0;
     }
 
     // ── Tick ─────────────────────────────────────────────────────────────────
@@ -146,14 +149,26 @@ public class AutoAnvilRename extends Module {
 
             // Shift-click output directly into inventory (QUICK_MOVE).
             // Using PICKUP would leave the item on the cursor, freezing the module.
-            if (output.getName().getString().equals(targetName)) {
+            String outputName = output.getName().getString();
+            if (outputName.equals(targetName)) {
+                renameMismatchCycles = 0;
                 mc.interactionManager.clickSlot(anvil.syncId, 2, 0, SlotActionType.QUICK_MOVE, mc.player);
+            } else {
+                renameMismatchCycles++;
+                if (renameMismatchCycles >= RENAME_MISMATCH_TIMEOUT) {
+                    // Avoid stalling forever when the server keeps forcing another name.
+                    renameMismatchCycles = 0;
+                    mc.interactionManager.clickSlot(anvil.syncId, 2, 0, SlotActionType.QUICK_MOVE, mc.player);
+                } else {
+                    mc.player.networkHandler.sendPacket(new RenameItemC2SPacket(targetName));
+                }
             }
             return;
         }
 
         // ── Step 2: item is in input slot — send rename packet ────────────────
         if (!input0.isEmpty()) {
+            renameMismatchCycles = 0;
             stuckCycles++;
 
             if (stuckCycles >= STUCK_TIMEOUT) {
@@ -171,6 +186,7 @@ public class AutoAnvilRename extends Module {
 
         // ── Step 3: both input slots empty — move next valid item into anvil ──
         stuckCycles = 0;
+        renameMismatchCycles = 0;
 
         // AnvilScreenHandler slots: 0-2 = anvil, 3-29 = player inventory, 30-38 = hotbar
         for (int i = 3; i < 39; i++) {

@@ -26,8 +26,10 @@ class ResourcesConfigTest {
         assertTrue(mixinJson.contains("\"package\": \"com.example.addon.mixin\""));
         assertTrue(mixinJson.contains("\"ExampleMixin\""));
         assertTrue(mixinJson.contains("\"AnvilScreenHandlerAccessor\""));
+        assertTrue(mixinJson.contains("\"ItemListSettingScreenMixin\""));
         assertTrue(Files.exists(Path.of("src", "main", "java", "com", "example", "addon", "mixin", "ExampleMixin.java")));
         assertTrue(Files.exists(Path.of("src", "main", "java", "com", "example", "addon", "mixin", "AnvilScreenHandlerAccessor.java")));
+        assertTrue(Files.exists(Path.of("src", "main", "java", "com", "example", "addon", "mixin", "ItemListSettingScreenMixin.java")));
     }
 
     private String readFile(Path path) throws IOException {

@@ -475,15 +475,18 @@ public class AutoPearl extends Module {
 
     private float calculatePitch(float yaw) {
         if (target == null) return -30f;
+        Vec3d targetCenter = target.getPos().add(0, target.getHeight() * 0.5, 0);
+        return calculatePitchToPoint(yaw, targetCenter);
+    }
 
+    private float calculatePitchToPoint(float yaw, Vec3d targetPoint) {
         Vec3d eye     = mc.player.getEyePos();
-        Vec3d tCentre = target.getPos().add(0, target.getHeight() * 0.5, 0);
 
         float  bestPitch = -30f;
         double bestScore = Double.MAX_VALUE;
 
         for (int deg = -5; deg >= -80; deg--) {
-            double score = scorePitch(eye, yaw, deg, tCentre);
+            double score = scorePitch(eye, yaw, deg, targetPoint);
             if (score < bestScore) {
                 bestScore = score;
                 bestPitch = deg;
@@ -596,7 +599,7 @@ public class AutoPearl extends Module {
         double ldx = landSpot.x - playerPos.x;
         double ldz = landSpot.z - playerPos.z;
         float yaw = (float) Math.toDegrees(-Math.atan2(ldx, ldz));
-        float pitch = calculatePitch(yaw);
+        float pitch = calculatePitchToPoint(yaw, landSpot);
 
         final int slot = pearlSlot;
         posBeforeThrow     = mc.player.getPos();
@@ -631,8 +634,11 @@ public class AutoPearl extends Module {
         double fadeStart = radius * 2.0;
         double fadeEnd   = stopRange.get();
         double factor    = 1.0;
+        double fadeRange = fadeStart - fadeEnd;
+        if (fadeRange <= 0) return baseYaw;
+
         if (distToTarget < fadeStart) {
-            factor = Math.max(0, (distToTarget - fadeEnd) / (fadeStart - fadeEnd));
+            factor = Math.max(0, Math.min(1, (distToTarget - fadeEnd) / fadeRange));
         }
 
         float offsetDeg = index * 90.0f * (float) factor;

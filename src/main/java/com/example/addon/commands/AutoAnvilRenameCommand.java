@@ -7,6 +7,8 @@ import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.command.CommandSource;
 
+import java.util.ArrayList;
+
 public class AutoAnvilRenameCommand extends Command {
     public AutoAnvilRenameCommand() {
         super("autoraname", "Sets AutoAnvilRename options");
@@ -26,7 +28,7 @@ public class AutoAnvilRenameCommand extends Command {
         builder.then(literal("clearitems").executes(ctx -> {
             AutoAnvilRename module = Modules.get().get(AutoAnvilRename.class);
             if (module != null) {
-                module.getItemsSetting().get().clear();
+                module.getItemsSetting().set(new ArrayList<>());
                 info("Cleared item filter list.");
             } else info("AutoAnvilRename module not found");
             return SINGLE_SUCCESS;
