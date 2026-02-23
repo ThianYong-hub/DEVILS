@@ -1,5 +1,7 @@
 name: Publish Development Build
-on: push
+on:
+  push:
+  workflow_dispatch:
 permissions:
   contents: write
 
@@ -34,9 +36,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: snapshot
-          name: Dev Build
-          prerelease: true
-          make_latest: false
+          name: Latest Build
+          draft: false
+          prerelease: false
+          make_latest: true
           files: ./build/libs/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
