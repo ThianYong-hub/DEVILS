@@ -38,6 +38,7 @@ public class AutoPearl extends Module {
 
     private final SettingGroup sgGeneral   = settings.getDefaultGroup();
     private final SettingGroup sgTargeting = settings.createGroup("Targeting");
+    private final SettingGroup sgOrbit    = settings.createGroup("Orbit");
     private final SettingGroup sgRemote    = settings.createGroup("Remote Command");
     private final SettingGroup sgRender    = settings.createGroup("Render");
 
@@ -97,6 +98,31 @@ public class AutoPearl extends Module {
         .defaultValue(true)
         .build());
 
+    // Orbit
+    private final Setting<Integer> botIndex = sgOrbit.add(new IntSetting.Builder()
+        .name("bot-index")
+        .description("Index of this bot (0-3). Each bot approaches the target from a different side: 0=front, 1=right, 2=back, 3=left. Set a unique index per bot.")
+        .defaultValue(0).min(0).max(3).sliderRange(0, 3)
+        .build());
+
+    private final Setting<Double> orbitRadius = sgOrbit.add(new DoubleSetting.Builder()
+        .name("orbit-radius")
+        .description("Ideal distance from target for orbit positioning. Pearls aim at this offset instead of directly at the target.")
+        .defaultValue(5.0).min(2.0).max(15.0).sliderRange(2.0, 15.0)
+        .build());
+
+    private final Setting<Boolean> enableDescent = sgGeneral.add(new BoolSetting.Builder()
+        .name("enable-descent")
+        .description("When target is below, throw pearls downward to descend from platforms step by step.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Double> descentStepMax = sgGeneral.add(new DoubleSetting.Builder()
+        .name("descent-max-drop")
+        .description("Maximum vertical drop per descent pearl (blocks). Larger = more fall damage risk.")
+        .defaultValue(10.0).min(3.0).max(30.0).sliderRange(3.0, 30.0)
+        .build());
+
     // Remote Command
     private final Setting<String> commandPrefix = sgRemote.add(new StringSetting.Builder()
         .name("command-prefix")
@@ -151,6 +177,9 @@ public class AutoPearl extends Module {
 
     private int stuckTicks;
 
+    /** true while performing a multi-step descent (target is below). */
+    private boolean descending;
+
     /**
      * When set via chat command ({@code !pearl Nick}), overrides auto-targeting.
      * All filters (height, gliding, friends) are ignored — the bots chase this
@@ -176,6 +205,7 @@ public class AutoPearl extends Module {
         prevTargetPos      = null;
         targetHorizSpeed   = 0;
         stuckTicks         = 0;
+        descending         = false;
         // forcedTargetName is NOT reset — persists across toggle so you
         // can do !pearl off / !pearl on without losing the forced target.
     }
@@ -188,6 +218,7 @@ public class AutoPearl extends Module {
         prevTarget         = null;
         prevTargetPos      = null;
         stuckTicks         = 0;
+        descending         = false;
     }
 
     // ── Chat command listener ─────────────────────────────────────────────────
@@ -318,6 +349,15 @@ public class AutoPearl extends Module {
         // Don't waste a pearl if the target is beyond throw range
         if (distToTarget > range.get()) return;
 
+        // ── Descent: if target is significantly below us, pearl down first ────
+        double heightDiff = mc.player.getY() - target.getY();
+        if (enableDescent.get() && heightDiff > 3.0 && distToTarget > stopRange.get()) {
+            descending = true;
+            if (tryDescentPearl(pearlSlot)) return;
+        } else {
+            descending = false;
+        }
+
         // Within sword range: keep timer ready for instant throw when they leave
         if (distToTarget <= stopRange.get()) {
             tickTimer = delay.get();
@@ -334,8 +374,10 @@ public class AutoPearl extends Module {
         tickTimer++;
         if (tickTimer < delay.get()) return;
 
-        float yaw   = (float) Rotations.getYaw(target);
-        float pitch = calculatePitch(yaw);
+        // ── Apply orbit offset to yaw ──────────────────────────────────────────
+        float baseYaw = (float) Rotations.getYaw(target);
+        float yaw     = applyOrbitOffset(baseYaw, distToTarget);
+        float pitch   = calculatePitch(yaw);
 
         final int slot = pearlSlot;
 
@@ -491,6 +533,110 @@ public class AutoPearl extends Module {
         }
 
         return minDist;
+    }
+
+    // ── Vertical descent ───────────────────────────────────────────────────────
+
+    /**
+     * Attempts to throw a pearl downward to descend from a platform.
+     * Strategy: scan outward from the player for a platform edge, then throw
+     * a pearl at the ground below it (limited by descentStepMax).
+     * Returns true if a descent pearl was thrown (caller should return).
+     */
+    private boolean tryDescentPearl(int pearlSlot) {
+        if (mc.player == null || mc.world == null || target == null) return false;
+
+        Vec3d playerPos = mc.player.getPos();
+        double targetY  = target.getY();
+        double maxDrop  = descentStepMax.get();
+
+        // Direction toward target (horizontal)
+        double dx = target.getX() - playerPos.x;
+        double dz = target.getZ() - playerPos.z;
+        double hDist = Math.sqrt(dx * dx + dz * dz);
+        if (hDist < 0.01) return false;
+        double dirX = dx / hDist;
+        double dirZ = dz / hDist;
+
+        // Scan outward up to 5 blocks for an edge (air below feet level)
+        Vec3d edgePos = null;
+        for (int i = 1; i <= 5; i++) {
+            double sx = playerPos.x + dirX * i;
+            double sz = playerPos.z + dirZ * i;
+            BlockPos below = BlockPos.ofFloored(sx, playerPos.y - 1, sz);
+            if (mc.world.getBlockState(below).isAir() || mc.world.getBlockState(below).isReplaceable()) {
+                edgePos = new Vec3d(sx, playerPos.y, sz);
+                break;
+            }
+        }
+
+        // No edge found — platform extends, try throwing at target directly
+        if (edgePos == null) return false;
+
+        // Find landing Y: scan downward from edge for a solid block
+        double landY = playerPos.y;
+        for (int dy = 1; dy <= (int) maxDrop; dy++) {
+            BlockPos check = BlockPos.ofFloored(edgePos.x, playerPos.y - dy, edgePos.z);
+            BlockState state = mc.world.getBlockState(check);
+            if (!state.isAir() && !state.isReplaceable()) {
+                landY = playerPos.y - dy + 1;
+                break;
+            }
+            if (playerPos.y - dy <= targetY) {
+                landY = targetY;
+                break;
+            }
+        }
+
+        // Don't bother descending if we'd only drop 1-2 blocks
+        if (playerPos.y - landY < 2.0) return false;
+
+        // Calculate yaw/pitch toward the landing spot
+        Vec3d landSpot = new Vec3d(edgePos.x, landY, edgePos.z);
+        double ldx = landSpot.x - playerPos.x;
+        double ldz = landSpot.z - playerPos.z;
+        float yaw = (float) Math.toDegrees(-Math.atan2(ldx, ldz));
+        float pitch = calculatePitch(yaw);
+
+        final int slot = pearlSlot;
+        posBeforeThrow     = mc.player.getPos();
+        waitingForTeleport = true;
+        waitTicks          = 0;
+        tickTimer          = 0;
+
+        if (rotate.get()) {
+            Rotations.rotate(yaw, pitch, () -> doThrow(slot));
+        } else {
+            doThrow(slot);
+        }
+        return true;
+    }
+
+    // ── Pearl orbit offset ───────────────────────────────────────────────────────
+
+    /**
+     * Applies an angular offset to the yaw based on bot-index.
+     * When bots are far from the target, they approach from different angles
+     * (0°, 90°, 180°, 270°) creating a surrounding formation.
+     * As the bot gets closer than orbit-radius, the offset decreases to zero
+     * so the bot converges on the actual target position for combat.
+     */
+    private float applyOrbitOffset(float baseYaw, double distToTarget) {
+        int index = botIndex.get();
+        if (index == 0) return baseYaw; // bot 0 goes straight at target
+
+        double radius = orbitRadius.get();
+
+        // Smoothly reduce offset as bot approaches: full offset at 2×radius, zero at stopRange
+        double fadeStart = radius * 2.0;
+        double fadeEnd   = stopRange.get();
+        double factor    = 1.0;
+        if (distToTarget < fadeStart) {
+            factor = Math.max(0, (distToTarget - fadeEnd) / (fadeStart - fadeEnd));
+        }
+
+        float offsetDeg = index * 90.0f * (float) factor;
+        return baseYaw + offsetDeg;
     }
 
     // ── Stuck detection: break free from solid blocks ─────────────────────────

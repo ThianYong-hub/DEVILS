@@ -31,11 +31,12 @@ jobs:
 
       - name: Release
         if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch && github.actor != 'dependabot[bot]'
-        uses: marvinpinto/action-automatic-releases@latest
+        uses: softprops/action-gh-release@v2
         with:
-          repo_token: '${{ secrets.GITHUB_TOKEN }}'
-          automatic_release_tag: snapshot
+          tag_name: snapshot
+          name: Dev Build
           prerelease: true
-          title: Dev Build
-          files: |
-            ./build/libs/*.jar
+          make_latest: false
+          files: ./build/libs/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
