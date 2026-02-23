@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -11,6 +12,7 @@ import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
@@ -36,6 +38,7 @@ public class AutoPearl extends Module {
 
     private final SettingGroup sgGeneral   = settings.getDefaultGroup();
     private final SettingGroup sgTargeting = settings.createGroup("Targeting");
+    private final SettingGroup sgRemote    = settings.createGroup("Remote Command");
     private final SettingGroup sgRender    = settings.createGroup("Render");
 
     // General
@@ -94,6 +97,19 @@ public class AutoPearl extends Module {
         .defaultValue(true)
         .build());
 
+    // Remote Command
+    private final Setting<String> commandPrefix = sgRemote.add(new StringSetting.Builder()
+        .name("command-prefix")
+        .description("Chat command that all bots listen to. Usage: !pearl <nick> | !pearl auto | !pearl on | !pearl off")
+        .defaultValue("!pearl")
+        .build());
+
+    private final Setting<String> commandPlayer = sgRemote.add(new StringSetting.Builder()
+        .name("command-player")
+        .description("Only obey commands from this player (your main account nick). Empty = obey anyone.")
+        .defaultValue("")
+        .build());
+
     // Render
     private final Setting<Boolean> showRange = sgRender.add(new BoolSetting.Builder()
         .name("show-range")
@@ -115,25 +131,13 @@ public class AutoPearl extends Module {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    /** Teleport threshold: position delta larger than this in one tick = pearl landed. */
-    private static final double TELEPORT_THRESHOLD = 2.0;
-    /** Give up waiting for the pearl after this many ticks (~10 seconds). */
-    private static final int    MAX_WAIT_TICKS     = 200;
-    /**
-     * Target horizontal speed (blocks/tick) below which we treat them as "standing still".
-     * Walk ≈ 0.13 b/t, sprint ≈ 0.26 b/t — 0.1 is safely below walk speed.
-     */
-    private static final double STILL_THRESHOLD    = 0.1;
-    /**
-     * How many consecutive ticks we must detect the player inside a solid block
-     * before starting to break it. Filters out 1-tick false positives from block
-     * edges or transitions.
-     */
+    private static final double TELEPORT_THRESHOLD  = 2.0;
+    private static final int    MAX_WAIT_TICKS      = 200;
+    private static final double STILL_THRESHOLD     = 0.1;
     private static final int    STUCK_CONFIRM_TICKS = 2;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
-    /** Currently locked target. Cleared only when the target becomes invalid. */
     private PlayerEntity target;
     private int          tickTimer;
 
@@ -141,22 +145,22 @@ public class AutoPearl extends Module {
     private Vec3d   posBeforeThrow;
     private int     waitTicks;
 
-    /** Previous target reference — used to detect a target switch. */
     private PlayerEntity prevTarget;
-    /** Target position last tick — used to compute horizontal movement speed. */
     private Vec3d        prevTargetPos;
-    /** Computed horizontal speed of the current target (blocks/tick). */
     private double       targetHorizSpeed;
 
-    /**
-     * Consecutive ticks the player has been detected inside a solid block.
-     * Reaches STUCK_CONFIRM_TICKS before we start breaking.
-     */
     private int stuckTicks;
+
+    /**
+     * When set via chat command ({@code !pearl Nick}), overrides auto-targeting.
+     * All filters (height, gliding, friends) are ignored — the bots chase this
+     * player unconditionally. {@code null} = auto-targeting mode.
+     */
+    private String forcedTargetName;
 
     public AutoPearl() {
         super(AddonTemplate.CATEGORY, "auto-pearl",
-            "Locks onto a target and chases with ender pearls. Throws only when the target is standing still. Breaks free from stuck blocks with a pickaxe.");
+            "Locks onto a target and chases with ender pearls. Supports remote commands via chat (!pearl <nick>).");
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -172,6 +176,8 @@ public class AutoPearl extends Module {
         prevTargetPos      = null;
         targetHorizSpeed   = 0;
         stuckTicks         = 0;
+        // forcedTargetName is NOT reset — persists across toggle so you
+        // can do !pearl off / !pearl on without losing the forced target.
     }
 
     @Override
@@ -182,6 +188,71 @@ public class AutoPearl extends Module {
         prevTarget         = null;
         prevTargetPos      = null;
         stuckTicks         = 0;
+    }
+
+    // ── Chat command listener ─────────────────────────────────────────────────
+
+    /**
+     * Listens to ALL incoming chat messages (even while the module is off)
+     * and parses commands like:
+     * <ul>
+     *   <li>{@code !pearl Bandit}  — force all bots to chase "Bandit"</li>
+     *   <li>{@code !pearl auto}    — clear forced target, return to auto-select</li>
+     *   <li>{@code !pearl on}      — enable the module</li>
+     *   <li>{@code !pearl off}     — disable the module</li>
+     * </ul>
+     *
+     * The sender must match the {@code command-player} setting (if set).
+     * Chat format is irrelevant — we search for the prefix anywhere in the message.
+     */
+    @EventHandler
+    private void onChatMessage(ReceiveMessageEvent event) {
+        if (mc.player == null) return;
+
+        String msg    = event.getMessage().getString();
+        String prefix = commandPrefix.get().trim();
+        if (prefix.isEmpty()) return;
+
+        int cmdIdx = msg.indexOf(prefix);
+        if (cmdIdx == -1) return;
+
+        // ── Sender check ─────────────────────────────────────────────────────
+        String auth = commandPlayer.get().trim();
+        if (!auth.isEmpty()) {
+            // The authorized player's name must appear before the command.
+            // Covers formats like "<Nick> !pearl X", "[Admin] Nick: !pearl X", etc.
+            String beforeCmd = msg.substring(0, cmdIdx);
+            if (!beforeCmd.toLowerCase().contains(auth.toLowerCase())) return;
+        }
+
+        // ── Extract argument ─────────────────────────────────────────────────
+        String afterCmd = msg.substring(cmdIdx + prefix.length()).trim();
+        if (afterCmd.isEmpty()) return;
+
+        String arg = afterCmd.split("\\s+")[0];
+
+        // ── Dispatch ─────────────────────────────────────────────────────────
+        switch (arg.toLowerCase()) {
+            case "auto", "reset" -> {
+                forcedTargetName = null;
+                target           = null;
+                info("Target reset to auto-select.");
+            }
+            case "on" -> {
+                if (!isActive()) toggle();
+                info("Module enabled via chat command.");
+            }
+            case "off" -> {
+                if (isActive()) toggle();
+                info("Module disabled via chat command.");
+            }
+            default -> {
+                // Treat as player name
+                forcedTargetName = arg;
+                target           = null; // force re-evaluation next tick
+                info("Target forced to: §e" + arg);
+            }
+        }
     }
 
     // ── Tick: all game logic ──────────────────────────────────────────────────
@@ -237,27 +308,29 @@ public class AutoPearl extends Module {
             double dz = target.getZ() - prevTargetPos.z;
             targetHorizSpeed = Math.sqrt(dx * dx + dz * dz);
         } else {
-            targetHorizSpeed = 0; // new target — assume still until we have a second sample
+            targetHorizSpeed = 0;
         }
         prevTarget    = target;
         prevTargetPos = target.getPos();
 
         double distToTarget = mc.player.distanceTo(target);
 
-        // Within sword range: keep timer ready so we throw the instant the target
-        // steps outside stop-range without any extra delay.
+        // Don't waste a pearl if the target is beyond throw range
+        if (distToTarget > range.get()) return;
+
+        // Within sword range: keep timer ready for instant throw when they leave
         if (distToTarget <= stopRange.get()) {
             tickTimer = delay.get();
             return;
         }
 
-        // Target is moving — reset delay so we count from the moment they stop.
+        // Target is moving — reset delay, wait for them to stop
         if (targetHorizSpeed > STILL_THRESHOLD) {
             tickTimer = 0;
             return;
         }
 
-        // Target is standing still — count delay ticks, then throw.
+        // Target is standing still — count delay ticks, then throw
         tickTimer++;
         if (tickTimer < delay.get()) return;
 
@@ -300,12 +373,9 @@ public class AutoPearl extends Module {
         }
     }
 
-    // ── Target selection (with lock) ──────────────────────────────────────────
+    // ── Target selection ──────────────────────────────────────────────────────
 
-    /**
-     * Returns true if {@code p} is a valid target: alive, in range, not a friend,
-     * not gliding (if skip-gliding on), not too far above us.
-     */
+    /** Auto-target filter: alive, in range, not a friend, not gliding, not too high. */
     private boolean isValidTarget(PlayerEntity p) {
         if (p == mc.player)                                    return false;
         if (p.isDead() || p.getHealth() <= 0)                  return false;
@@ -316,28 +386,51 @@ public class AutoPearl extends Module {
     }
 
     /**
-     * Keeps the current locked target as long as it remains valid.
-     * Only picks a new target when the locked target dies, leaves range,
-     * starts gliding, etc. — prevents switching to a player who momentarily
-     * steps 1-2 blocks closer mid-chase.
+     * Resolves the current target:
+     * <ol>
+     *   <li><b>Forced target</b> ({@code !pearl Nick}) — find player by name,
+     *       no filters applied except alive + not self. All bots chase the same
+     *       player regardless of range, height, friends, etc.</li>
+     *   <li><b>Auto-target with lock</b> — keep current target if still valid,
+     *       otherwise pick a new one by priority.</li>
+     * </ol>
      */
     private void updateTarget() {
-        if (target != null && isValidTarget(target)) return; // stay locked
-        // Locked target is gone — find a new one
+        // ── Forced target mode ───────────────────────────────────────────────
+        if (forcedTargetName != null) {
+            PlayerEntity forced = findPlayerByName(forcedTargetName);
+            if (forced != null && forced != mc.player
+                && !forced.isDead() && forced.getHealth() > 0) {
+                target = forced;
+                return;
+            }
+            // Not in render distance or dead — keep waiting, don't fall back
+            target = null;
+            return;
+        }
+
+        // ── Auto-target with lock ────────────────────────────────────────────
+        if (target != null && isValidTarget(target)) return;
         target = (PlayerEntity) TargetUtils.get(
             entity -> entity instanceof PlayerEntity p && isValidTarget(p),
             priority.get()
         );
     }
 
+    /**
+     * Finds a player in the current world by exact name (case-insensitive).
+     * Returns null if the player is not loaded (not in render distance).
+     */
+    private PlayerEntity findPlayerByName(String name) {
+        if (mc.world == null || name == null) return null;
+        for (PlayerEntity p : mc.world.getPlayers()) {
+            if (p.getGameProfile().getName().equalsIgnoreCase(name)) return p;
+        }
+        return null;
+    }
+
     // ── Pitch calculation via trajectory simulation ───────────────────────────
 
-    /**
-     * Scans pitch from -5° (flat) to -80° (steep) and picks the angle that
-     * minimises the minimum 3D distance to the target's centre during flight.
-     * We only throw when the target is standing still, so no movement
-     * prediction is needed — the target centre is treated as fixed.
-     */
     private float calculatePitch(float yaw) {
         if (target == null) return -30f;
 
@@ -357,15 +450,6 @@ public class AutoPearl extends Module {
         return bestPitch;
     }
 
-    /**
-     * Simulates the pearl trajectory and returns the minimum 3D distance to
-     * {@code tCentre} at any point during flight (mid-air passes count too).
-     * Returns {@link Double#MAX_VALUE} if the pearl exits world bounds.
-     *
-     * Physics: gravity 0.03 b/t², drag 0.99/t, initial speed 1.5 b/t.
-     * Lava is NOT checked — pearls travel through lava unimpeded
-     * (lava is replaceable in MC) and following a target into lava is intended.
-     */
     private double scorePitch(Vec3d eyePos, float yawDeg, float pitchDeg, Vec3d tCentre) {
         double yaw      = Math.toRadians(yawDeg);
         double pitch    = Math.toRadians(pitchDeg);
@@ -395,15 +479,12 @@ public class AutoPearl extends Module {
             BlockState state = mc.world.getBlockState(bp);
 
             if (!state.isAir() && !state.isReplaceable()) {
-                // Pearl lands here — score the landing spot and stop
                 Vec3d land = new Vec3d(x, y + 1.0, z);
                 double d = land.distanceTo(tCentre);
                 if (d < minDist) minDist = d;
                 break;
             }
 
-            // Score mid-air position (catches close targets where pearl
-            // passes through the hitbox without hitting a block first)
             double dx = x - tCentre.x, dy = y - tCentre.y, dz = z - tCentre.z;
             double d  = Math.sqrt(dx * dx + dy * dy + dz * dz);
             if (d < minDist) minDist = d;
@@ -414,23 +495,6 @@ public class AutoPearl extends Module {
 
     // ── Stuck detection: break free from solid blocks ─────────────────────────
 
-    /**
-     * Checks three points along the player's body for solid blocks:
-     * <ul>
-     *   <li>+0.05 above feet — catches feet-level blocks (obsidian, bedrock)</li>
-     *   <li>+0.9 body centre</li>
-     *   <li>+1.62 eye level</li>
-     * </ul>
-     *
-     * <p>False-positive filter: if ONLY the feet level is solid AND the player
-     * reports being on the ground, they're standing on a partial block (slab,
-     * stair) — not stuck. We skip breaking in that case.</p>
-     *
-     * <p>Confirmation: we require {@link #STUCK_CONFIRM_TICKS} consecutive
-     * detections before starting to break, to filter one-tick edge artefacts.</p>
-     *
-     * @return true if stuck — caller must skip all other logic this tick.
-     */
     private boolean tryBreakFree() {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
 
@@ -444,14 +508,11 @@ public class AutoPearl extends Module {
         boolean bodySolid = isSolid(body);
         boolean eyesSolid = isSolid(eyes);
 
-        // Standing on a partial block (slab, stair): only feet level is solid
-        // AND the engine reports we are on the ground. Skip — not stuck.
         if (feetSolid && !bodySolid && !eyesSolid && mc.player.isOnGround()) {
             stuckTicks = 0;
             return false;
         }
 
-        // Determine which block to target (highest first gives the most space)
         BlockPos stuckPos = null;
         if      (eyesSolid) stuckPos = eyes;
         else if (bodySolid) stuckPos = body;
@@ -466,14 +527,9 @@ public class AutoPearl extends Module {
         if (stuckTicks >= STUCK_CONFIRM_TICKS) {
             breakFreeFromBlock(stuckPos);
         }
-        return true; // suspend normal logic while stuck (even during confirmation)
+        return true;
     }
 
-    /**
-     * Returns true if {@code pos} contains a solid, non-replaceable, non-fluid block.
-     * Lava and water return false (they are replaceable / fluid and do not trap players
-     * the same way solid blocks do).
-     */
     private boolean isSolid(BlockPos pos) {
         BlockState state = mc.world.getBlockState(pos);
         return !state.isAir()
@@ -481,14 +537,9 @@ public class AutoPearl extends Module {
             && mc.world.getFluidState(pos).isEmpty();
     }
 
-    /**
-     * Swings a pickaxe at {@code pos} to start/continue breaking the block.
-     * No-op for unbreakable blocks (hardness &lt; 0, e.g. bedrock).
-     * Equips the first pickaxe found in the hotbar, attacks, then swaps back.
-     */
     private void breakFreeFromBlock(BlockPos pos) {
         BlockState state = mc.world.getBlockState(pos);
-        if (state.getHardness(mc.world, pos) < 0) return; // bedrock — can't break
+        if (state.getHardness(mc.world, pos) < 0) return;
 
         int pickSlot = findPickaxeSlot();
         if (pickSlot != -1) InvUtils.swap(pickSlot, false);
@@ -516,7 +567,6 @@ public class AutoPearl extends Module {
         return -1;
     }
 
-    /** Returns the hotbar slot of the first pickaxe found, or -1 if none. */
     private int findPickaxeSlot() {
         if (mc.player == null) return -1;
         for (int i = 0; i < 9; i++) {
