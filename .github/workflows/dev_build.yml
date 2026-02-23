@@ -31,6 +31,13 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-build-${{ github.sha }}
+          path: build/libs/*.jar
+          if-no-files-found: error
+
       - name: Release
         if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch && github.actor != 'dependabot[bot]'
         uses: softprops/action-gh-release@v2
