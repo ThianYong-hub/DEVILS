@@ -5,7 +5,7 @@ import com.example.addon.commands.AutoAnvilRenameCommand;
 import com.example.addon.hud.HudExample;
 import com.example.addon.modules.AutoPearl;
 import com.example.addon.modules.AutoAnvilRename;
-import com.example.addon.modules.OpdehTrololo;
+import com.example.addon.modules.AntiElytraWasp;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -28,7 +28,7 @@ public class AddonTemplate extends MeteorAddon {
         // Modules
         Modules.get().add(new AutoPearl());
         Modules.get().add(new AutoAnvilRename());
-        Modules.get().add(new OpdehTrololo());
+        Modules.get().add(new AntiElytraWasp());
 
         // Commands
         Commands.add(new CommandExample());
