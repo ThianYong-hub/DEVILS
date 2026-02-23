@@ -4,25 +4,44 @@ import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixin.AbstractSignEditScreenAccessor;
+import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
+import net.minecraft.block.AbstractSignBlock;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.client.gui.screen.ingame.AbstractSignEditScreen;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.UpdateSignC2SPacket;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+
+import java.util.List;
 
 public class AutoSign extends Module {
 
     // ── Settings groups ──────────────────────────────────────────────────────
 
-    private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgFront   = settings.createGroup("Front Text");
-    private final SettingGroup sgBack    = settings.createGroup("Back Text");
-    private final SettingGroup sgRemote  = settings.createGroup("Remote Command");
+    private final SettingGroup sgGeneral  = settings.getDefaultGroup();
+    private final SettingGroup sgPlace    = settings.createGroup("Auto Place");
+    private final SettingGroup sgFront    = settings.createGroup("Front Text");
+    private final SettingGroup sgBack     = settings.createGroup("Back Text");
+    private final SettingGroup sgRemote   = settings.createGroup("Remote Command");
 
     // General
     private final Setting<Boolean> colorCodes = sgGeneral.add(new BoolSetting.Builder()
@@ -41,6 +60,37 @@ public class AutoSign extends Module {
         .name("enable-back")
         .description("Also write text on the back side of the sign.")
         .defaultValue(false)
+        .build());
+
+    // Auto Place
+    private final Setting<Boolean> autoPlace = sgPlace.add(new BoolSetting.Builder()
+        .name("auto-place")
+        .description("Automatically place signs from hotbar on nearby surfaces.")
+        .defaultValue(false)
+        .build());
+
+    private final Setting<List<Block>> signBlocks = sgPlace.add(new BlockListSetting.Builder()
+        .name("sign-types")
+        .description("Which sign types to place. Empty = place any sign found in hotbar.")
+        .filter(block -> block instanceof AbstractSignBlock)
+        .build());
+
+    private final Setting<Double> placeRange = sgPlace.add(new DoubleSetting.Builder()
+        .name("place-range")
+        .description("Maximum reach distance for placing signs.")
+        .defaultValue(4.5).min(1.0).max(6.0).sliderRange(1.0, 6.0)
+        .build());
+
+    private final Setting<Integer> placeDelay = sgPlace.add(new IntSetting.Builder()
+        .name("place-delay")
+        .description("Ticks between each sign placement.")
+        .defaultValue(10).min(1).sliderMax(60)
+        .build());
+
+    private final Setting<Double> spacing = sgPlace.add(new DoubleSetting.Builder()
+        .name("spacing")
+        .description("Minimum distance between placed signs (blocks). Prevents spam-stacking.")
+        .defaultValue(3.0).min(1.0).max(20.0).sliderRange(1.0, 10.0)
         .build());
 
     // Front text
@@ -78,17 +128,68 @@ public class AutoSign extends Module {
 
     // ── State ─────────────────────────────────────────────────────────────────
 
-    /** When copy-mode captures text from a manually edited sign, it goes here temporarily. */
     private boolean awaitingCopy;
+    private int placeTicks;
+    /** Last position where a sign was placed, to enforce spacing. */
+    private BlockPos lastPlacePos;
 
     public AutoSign() {
         super(AddonTemplate.CATEGORY, "auto-sign",
-            "Instantly fills signs with configured text. Supports front/back, color codes (&), copy mode, and remote chat commands.");
+            "Instantly fills signs with configured text. Auto-places signs, supports front/back, color codes (&), copy mode, and remote chat commands.");
     }
 
     @Override
     public void onActivate() {
-        awaitingCopy = false;
+        awaitingCopy  = false;
+        placeTicks    = 0;
+        lastPlacePos  = null;
+    }
+
+    @Override
+    public void onDeactivate() {
+        lastPlacePos = null;
+    }
+
+    // ── Auto-place: tick logic ────────────────────────────────────────────────
+
+    @EventHandler
+    private void onTick(TickEvent.Pre event) {
+        if (!autoPlace.get()) return;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
+
+        placeTicks++;
+        if (placeTicks < placeDelay.get()) return;
+
+        int signSlot = findSignSlot();
+        if (signSlot == -1) return;
+
+        // Find a valid surface to place the sign on
+        BlockPos placeTarget = findPlaceTarget();
+        if (placeTarget == null) return;
+
+        // Check spacing from last placed sign
+        if (lastPlacePos != null) {
+            double dist = Math.sqrt(lastPlacePos.getSquaredDistance(placeTarget));
+            if (dist < spacing.get()) return;
+        }
+
+        placeTicks = 0;
+
+        // Place the sign
+        Vec3d hitVec = Vec3d.ofCenter(placeTarget).add(0, 0.5, 0);
+        Direction side = Direction.UP;
+
+        // Rotate to face the target block
+        float yaw = (float) Rotations.getYaw(hitVec);
+        float pitch = (float) Rotations.getPitch(hitVec);
+
+        BlockHitResult hitResult = new BlockHitResult(hitVec, side, placeTarget, false);
+
+        InvUtils.swap(signSlot, false);
+        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+        InvUtils.swapBack();
+
+        lastPlacePos = placeTarget.up(); // sign goes on top of the target block
     }
 
     // ── Sign screen intercept ─────────────────────────────────────────────────
@@ -187,8 +288,6 @@ public class AutoSign extends Module {
                 info("Module disabled via chat.");
             }
             default -> {
-                // Parse pipe-separated lines: "line1|line2|line3|line4"
-                // Allow the full remaining text (not just first word)
                 String fullArg = msg.substring(cmdIdx + prefix.length()).trim();
                 String[] lines = fullArg.split("\\|", -1);
                 line1.set(lines.length > 0 ? lines[0] : "");
@@ -200,7 +299,80 @@ public class AutoSign extends Module {
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
+    // ── Auto-place helpers ────────────────────────────────────────────────────
+
+    /**
+     * Finds a sign in the hotbar that matches the sign-types filter.
+     * Returns hotbar slot index, or -1 if not found.
+     */
+    private int findSignSlot() {
+        if (mc.player == null) return -1;
+        List<Block> allowed = signBlocks.get();
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (!(stack.getItem() instanceof BlockItem blockItem)) continue;
+            Block block = blockItem.getBlock();
+            if (!(block instanceof AbstractSignBlock)) continue;
+
+            // If filter list is empty, accept any sign
+            if (allowed != null && !allowed.isEmpty() && !allowed.contains(block)) continue;
+
+            return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Scans nearby blocks for a valid surface to place a sign on top of.
+     * Finds the closest solid block with air above it within place-range.
+     */
+    private BlockPos findPlaceTarget() {
+        if (mc.player == null || mc.world == null) return null;
+
+        Vec3d playerPos = mc.player.getPos();
+        BlockPos playerBlock = mc.player.getBlockPos();
+        int range = (int) Math.ceil(placeRange.get());
+
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        for (int x = -range; x <= range; x++) {
+            for (int z = -range; z <= range; z++) {
+                for (int y = -1; y <= 2; y++) {
+                    BlockPos pos = playerBlock.add(x, y, z);
+                    Vec3d center = Vec3d.ofCenter(pos);
+
+                    if (center.distanceTo(playerPos) > placeRange.get()) continue;
+
+                    // The block must be solid (support surface)
+                    BlockState state = mc.world.getBlockState(pos);
+                    if (!state.isSolidSurface(mc.world, pos, mc.player, Direction.UP)) continue;
+
+                    // The block above must be air (where the sign goes)
+                    BlockPos above = pos.up();
+                    if (!mc.world.getBlockState(above).isAir()) continue;
+
+                    // Check spacing from last placed sign
+                    if (lastPlacePos != null) {
+                        double spaceDist = Math.sqrt(above.getSquaredDistance(lastPlacePos));
+                        if (spaceDist < spacing.get()) continue;
+                    }
+
+                    double dist = center.distanceTo(playerPos);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        best = pos;
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
+
+    // ── Packet helpers ────────────────────────────────────────────────────────
 
     private void sendSignPacket(SignBlockEntity sign, boolean front,
                                 String l1, String l2, String l3, String l4) {
