@@ -4,7 +4,9 @@
       "Bash(./gradlew build:*)",
       "Bash(./gradlew:*)",
       "Bash(java -version:*)",
-      "Bash(JAVA_HOME=\"/c/Program Files/Java/jdk-21\" PATH=\"/c/Program Files/Java/jdk-21/bin:$PATH\" /c/Users/User/Downloads/meteor-addon-template-master/gradlew build:*)"
+      "Bash(JAVA_HOME=\"/c/Program Files/Java/jdk-21\" PATH=\"/c/Program Files/Java/jdk-21/bin:$PATH\" /c/Users/User/Downloads/meteor-addon-template-master/gradlew build:*)",
+      "Bash(unzip:*)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Java/jdk-21\" ./gradlew:*)"
     ]
   }
 }

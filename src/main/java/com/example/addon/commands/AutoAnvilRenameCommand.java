@@ -23,14 +23,13 @@ public class AutoAnvilRenameCommand extends Command {
             } else info("AutoAnvilRename module not found");
             return SINGLE_SUCCESS;
         })));
-        builder.then(literal("selectid").then(argument("id", StringArgumentType.word()).executes(ctx -> {
-            String id = StringArgumentType.getString(ctx, "id");
+        builder.then(literal("clearitems").executes(ctx -> {
             AutoAnvilRename module = Modules.get().get(AutoAnvilRename.class);
             if (module != null) {
-                module.setSelectId(id);
-                info("Set selective id to: " + id);
+                module.getItemsSetting().get().clear();
+                info("Cleared item filter list.");
             } else info("AutoAnvilRename module not found");
             return SINGLE_SUCCESS;
-        })));
+        }));
     }
 }

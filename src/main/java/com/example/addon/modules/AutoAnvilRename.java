@@ -5,6 +5,7 @@ import com.example.addon.mixin.AnvilScreenHandlerAccessor;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.ItemListSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
@@ -18,12 +19,12 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.RenameItemC2SPacket;
-import net.minecraft.registry.Registries;
 import net.minecraft.screen.AnvilScreenHandler;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
-import net.minecraft.util.Identifier;
+
+import java.util.List;
 
 public class AutoAnvilRename extends Module {
 
@@ -37,10 +38,9 @@ public class AutoAnvilRename extends Module {
         .defaultValue("")
         .build());
 
-    private final Setting<String> selective = sgGeneral.add(new StringSetting.Builder()
-        .name("selective")
-        .description("Only rename a specific item ID (e.g. minecraft:diamond_sword). Empty = any item.")
-        .defaultValue("")
+    private final Setting<List<Item>> items = sgGeneral.add(new ItemListSetting.Builder()
+        .name("items")
+        .description("Only rename these items. Empty list = rename any item.")
         .build());
 
     private final Setting<Boolean> onlyShulkers = sgGeneral.add(new BoolSetting.Builder()
@@ -110,9 +110,20 @@ public class AutoAnvilRename extends Module {
         if (ticks < clickDelay.get()) return;
         ticks = 0;
 
+        // ── Safety: if cursor holds an item (interrupted pickup), place it down ─
+        if (!anvil.getCursorStack().isEmpty()) {
+            // Find an empty slot in player inventory (slots 3-38) and click to deposit
+            for (int i = 3; i < 39; i++) {
+                if (anvil.getSlot(i).getStack().isEmpty()) {
+                    mc.interactionManager.clickSlot(anvil.syncId, i, 0, SlotActionType.PICKUP, mc.player);
+                    return;
+                }
+            }
+            return; // inventory full, can't place cursor item
+        }
+
         ItemStack output = anvil.getSlot(2).getStack();
         ItemStack input0 = anvil.getSlot(0).getStack();
-        ItemStack input1 = anvil.getSlot(1).getStack();
 
         // ── Step 1: output slot ready — check XP and take the item ───────────
         if (!output.isEmpty()) {
@@ -133,13 +144,11 @@ public class AutoAnvilRename extends Module {
                 return; // wait until we can afford the rename
             }
 
-            // Verify the output's display name matches what we asked for.
-            // output.getName() returns the custom name if set, otherwise the
-            // item's default translation — reliable across all 1.21.x versions.
+            // Shift-click output directly into inventory (QUICK_MOVE).
+            // Using PICKUP would leave the item on the cursor, freezing the module.
             if (output.getName().getString().equals(targetName)) {
-                mc.interactionManager.clickSlot(anvil.syncId, 2, 0, SlotActionType.PICKUP, mc.player);
+                mc.interactionManager.clickSlot(anvil.syncId, 2, 0, SlotActionType.QUICK_MOVE, mc.player);
             }
-            // If name doesn't match yet (server still processing), wait.
             return;
         }
 
@@ -192,11 +201,9 @@ public class AutoAnvilRename extends Module {
             if (!(item instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock)) return false;
         }
 
-        String sel = selective.get() == null ? "" : selective.get().trim();
-        if (!sel.isEmpty()) {
-            Identifier selId = Identifier.tryParse(sel);
-            if (selId == null) return false;
-            if (!selId.equals(Registries.ITEM.getId(item))) return false;
+        List<Item> allowed = items.get();
+        if (allowed != null && !allowed.isEmpty()) {
+            if (!allowed.contains(item)) return false;
         }
 
         // onlyRenamed = true → only pick items that already have a custom name
@@ -220,7 +227,7 @@ public class AutoAnvilRename extends Module {
         renameText.set(text == null ? "" : text);
     }
 
-    public void setSelectId(String id) {
-        selective.set(id == null ? "" : id);
+    public Setting<List<Item>> getItemsSetting() {
+        return items;
     }
 }
