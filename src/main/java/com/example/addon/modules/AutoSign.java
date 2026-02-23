@@ -2,28 +2,29 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
-import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixin.AbstractSignEditScreenAccessor;
-import meteordevelopment.meteorclient.settings.BlockListSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
+import meteordevelopment.meteorclient.settings.ItemListSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
-import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.AbstractSignBlock;
-import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
+import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.SignBlockEntity;
 import net.minecraft.client.gui.screen.ingame.AbstractSignEditScreen;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSignC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -31,6 +32,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class AutoSign extends Module {
@@ -38,10 +40,10 @@ public class AutoSign extends Module {
     // ── Settings groups ──────────────────────────────────────────────────────
 
     private final SettingGroup sgGeneral  = settings.getDefaultGroup();
+    private final SettingGroup sgAura     = settings.createGroup("Sign Aura");
     private final SettingGroup sgPlace    = settings.createGroup("Auto Place");
     private final SettingGroup sgFront    = settings.createGroup("Front Text");
     private final SettingGroup sgBack     = settings.createGroup("Back Text");
-    private final SettingGroup sgRemote   = settings.createGroup("Remote Command");
 
     // General
     private final Setting<Boolean> colorCodes = sgGeneral.add(new BoolSetting.Builder()
@@ -50,16 +52,37 @@ public class AutoSign extends Module {
         .defaultValue(true)
         .build());
 
+    private final Setting<Boolean> enableBack = sgGeneral.add(new BoolSetting.Builder()
+        .name("enable-back")
+        .description("Also write text on the back side of the sign.")
+        .defaultValue(false)
+        .build());
+
     private final Setting<Boolean> copyMode = sgGeneral.add(new BoolSetting.Builder()
         .name("copy-mode")
         .description("Copy text from the next sign you edit into the line settings instead of writing.")
         .defaultValue(false)
         .build());
 
-    private final Setting<Boolean> enableBack = sgGeneral.add(new BoolSetting.Builder()
-        .name("enable-back")
-        .description("Also write text on the back side of the sign.")
+    // Sign Aura
+    private final Setting<Boolean> signAura = sgAura.add(new BoolSetting.Builder()
+        .name("sign-aura")
+        .description("Automatically find and edit nearby signs, even through blocks.")
         .defaultValue(false)
+        .build());
+
+    private final Setting<Double> signAuraRange = sgAura.add(new DoubleSetting.Builder()
+        .name("range")
+        .description("Maximum range to detect and edit signs.")
+        .defaultValue(4.0).min(1.0).max(6.0).sliderRange(1.0, 6.0)
+        .visible(signAura::get)
+        .build());
+
+    private final Setting<Integer> signAuraDelay = sgAura.add(new IntSetting.Builder()
+        .name("delay")
+        .description("Ticks between editing signs.")
+        .defaultValue(5).min(1).sliderMax(20)
+        .visible(signAura::get)
         .build());
 
     // Auto Place
@@ -69,10 +92,10 @@ public class AutoSign extends Module {
         .defaultValue(false)
         .build());
 
-    private final Setting<List<Block>> signBlocks = sgPlace.add(new BlockListSetting.Builder()
+    private final Setting<List<Item>> signItems = sgPlace.add(new ItemListSetting.Builder()
         .name("sign-types")
         .description("Which sign types to place. Empty = place any sign found in hotbar.")
-        .filter(block -> block instanceof AbstractSignBlock)
+        .filter(item -> item instanceof BlockItem bi && bi.getBlock() instanceof AbstractSignBlock)
         .build());
 
     private final Setting<Double> placeRange = sgPlace.add(new DoubleSetting.Builder()
@@ -89,7 +112,7 @@ public class AutoSign extends Module {
 
     private final Setting<Double> spacing = sgPlace.add(new DoubleSetting.Builder()
         .name("spacing")
-        .description("Minimum distance between placed signs (blocks). Prevents spam-stacking.")
+        .description("Minimum distance between placed signs (blocks).")
         .defaultValue(3.0).min(1.0).max(20.0).sliderRange(1.0, 10.0)
         .build());
 
@@ -105,94 +128,157 @@ public class AutoSign extends Module {
 
     // Back text
     private final Setting<String> backLine1 = sgBack.add(new StringSetting.Builder()
-        .name("back-line-1").description("Back side line 1.").defaultValue("").build());
+        .name("back-line-1").description("Back side line 1.").defaultValue("")
+        .visible(enableBack::get).build());
     private final Setting<String> backLine2 = sgBack.add(new StringSetting.Builder()
-        .name("back-line-2").description("Back side line 2.").defaultValue("").build());
+        .name("back-line-2").description("Back side line 2.").defaultValue("")
+        .visible(enableBack::get).build());
     private final Setting<String> backLine3 = sgBack.add(new StringSetting.Builder()
-        .name("back-line-3").description("Back side line 3.").defaultValue("").build());
+        .name("back-line-3").description("Back side line 3.").defaultValue("")
+        .visible(enableBack::get).build());
     private final Setting<String> backLine4 = sgBack.add(new StringSetting.Builder()
-        .name("back-line-4").description("Back side line 4.").defaultValue("").build());
-
-    // Remote Command
-    private final Setting<String> commandPrefix = sgRemote.add(new StringSetting.Builder()
-        .name("command-prefix")
-        .description("Chat command prefix. Usage: !sign line1|line2|line3|line4 or !sign clear or !sign copy")
-        .defaultValue("!sign")
-        .build());
-
-    private final Setting<String> commandPlayer = sgRemote.add(new StringSetting.Builder()
-        .name("command-player")
-        .description("Only obey commands from this player. Empty = obey anyone.")
-        .defaultValue("")
-        .build());
+        .name("back-line-4").description("Back side line 4.").defaultValue("")
+        .visible(enableBack::get).build());
 
     // ── State ─────────────────────────────────────────────────────────────────
 
     private boolean awaitingCopy;
-    private int placeTicks;
-    /** Last position where a sign was placed, to enforce spacing. */
+
+    /** Signs already edited by sign aura this session. */
+    private final ArrayList<BlockPos> editedSigns = new ArrayList<>();
+
+    private int auraTimer;
+    private int placeTimer;
     private BlockPos lastPlacePos;
+
+    /** Sequence counter for raw interact packets. */
+    private int packetSequence;
+
+    /**
+     * Two-phase back-side editing:
+     * Phase 1 (onOpenScreen): write front, cancel screen, set backEditPos.
+     * Phase 2 (onPostTick):   interact with sign again → server opens new session →
+     *                         send UpdateSignC2SPacket(front=false), set prevBackEditPos
+     *                         so onOpenScreen (fired by the second interact) just cancels.
+     */
+    private BlockPos backEditPos;
+    private BlockPos prevBackEditPos;
 
     public AutoSign() {
         super(AddonTemplate.CATEGORY, "auto-sign",
-            "Instantly fills signs with configured text. Auto-places signs, supports front/back, color codes (&), copy mode, and remote chat commands.");
+            "Instantly fills signs with configured text. Sign Aura edits nearby signs through blocks, Auto Place places new ones.");
     }
 
     @Override
     public void onActivate() {
-        awaitingCopy  = false;
-        placeTicks    = 0;
-        lastPlacePos  = null;
+        awaitingCopy    = false;
+        editedSigns.clear();
+        auraTimer       = 0;
+        placeTimer      = 0;
+        lastPlacePos    = null;
+        packetSequence  = 0;
+        backEditPos     = null;
+        prevBackEditPos = null;
     }
 
     @Override
     public void onDeactivate() {
-        lastPlacePos = null;
+        editedSigns.clear();
+        lastPlacePos    = null;
+        backEditPos     = null;
+        prevBackEditPos = null;
     }
 
-    // ── Auto-place: tick logic ────────────────────────────────────────────────
+    // ── Pre-Tick: Sign Aura + Auto Place ──────────────────────────────────────
 
     @EventHandler
-    private void onTick(TickEvent.Pre event) {
-        if (!autoPlace.get()) return;
+    private void onPreTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
-        placeTicks++;
-        if (placeTicks < placeDelay.get()) return;
+        // ── Sign Aura: find and edit existing signs (works through blocks) ───
+        if (signAura.get()) {
+            auraTimer--;
+            if (auraTimer <= 0) {
+                for (BlockEntity be : Utils.blockEntities()) {
+                    if (!(be instanceof SignBlockEntity sign)) continue;
 
-        int signSlot = findSignSlot();
-        if (signSlot == -1) return;
+                    BlockPos pos = sign.getPos();
+                    if (mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos)) > signAuraRange.get()) continue;
+                    if (editedSigns.contains(pos)) continue;
 
-        // Find a valid surface to place the sign on
-        BlockPos placeTarget = findPlaceTarget();
-        if (placeTarget == null) return;
+                    // Skip if sign already has our text
+                    if (signAlreadyHasText(sign)) {
+                        editedSigns.add(pos);
+                        continue;
+                    }
 
-        // Check spacing from last placed sign
-        if (lastPlacePos != null) {
-            double dist = Math.sqrt(lastPlacePos.getSquaredDistance(placeTarget));
-            if (dist < spacing.get()) return;
+                    // Send raw interact packet — bypasses client-side line-of-sight checks
+                    // This works through blocks and from any direction
+                    BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.UP, pos, false);
+                    mc.player.networkHandler.sendPacket(
+                        new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hit, packetSequence++)
+                    );
+
+                    editedSigns.add(pos);
+                    auraTimer = signAuraDelay.get();
+                    break;
+                }
+            }
         }
 
-        placeTicks = 0;
+        // ── Auto Place: place new signs on surfaces ──────────────────────────
+        if (autoPlace.get()) {
+            placeTimer--;
+            if (placeTimer <= 0) {
+                int signSlot = findSignSlot();
+                if (signSlot != -1) {
+                    BlockPos target = findPlaceTarget();
+                    if (target != null) {
+                        placeTimer = placeDelay.get();
 
-        // Place the sign
-        Vec3d hitVec = Vec3d.ofCenter(placeTarget).add(0, 0.5, 0);
-        Direction side = Direction.UP;
+                        Vec3d hitVec = Vec3d.ofCenter(target).add(0, 0.5, 0);
+                        BlockHitResult hitResult = new BlockHitResult(hitVec, Direction.UP, target, false);
 
-        // Rotate to face the target block
-        float yaw = (float) Rotations.getYaw(hitVec);
-        float pitch = (float) Rotations.getPitch(hitVec);
+                        InvUtils.swap(signSlot, false);
+                        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+                        InvUtils.swapBack();
 
-        BlockHitResult hitResult = new BlockHitResult(hitVec, side, placeTarget, false);
-
-        InvUtils.swap(signSlot, false);
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
-        InvUtils.swapBack();
-
-        lastPlacePos = placeTarget.up(); // sign goes on top of the target block
+                        lastPlacePos = target.up();
+                    }
+                }
+            }
+        }
     }
 
-    // ── Sign screen intercept ─────────────────────────────────────────────────
+    // ── Post-Tick: phase 2 — interact with sign again for back side ──────────
+
+    @EventHandler
+    private void onPostTick(TickEvent.Post event) {
+        if (backEditPos == null || !enableBack.get()) return;
+        if (mc.player == null || mc.world == null) return;
+        // Don't re-process the same sign (prevents loop with onOpenScreen)
+        if (backEditPos.equals(prevBackEditPos)) return;
+
+        // Interact with the sign again — opens a NEW editing session on the server
+        BlockHitResult hit = new BlockHitResult(
+            Vec3d.ofCenter(backEditPos), Direction.DOWN, backEditPos, false
+        );
+        mc.player.networkHandler.sendPacket(
+            new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hit, packetSequence++)
+        );
+
+        // Immediately send back text before the server responds with OpenScreen
+        mc.player.networkHandler.sendPacket(new UpdateSignC2SPacket(
+            backEditPos, false,
+            processLine(backLine1.get()), processLine(backLine2.get()),
+            processLine(backLine3.get()), processLine(backLine4.get())
+        ));
+
+        prevBackEditPos = backEditPos;
+        backEditPos = null;
+    }
+
+    // ── Sign screen intercept: write front text ──────────────────────────────
 
     @EventHandler
     private void onOpenScreen(OpenScreenEvent event) {
@@ -208,13 +294,21 @@ public class AutoSign extends Module {
         SignBlockEntity sign = ((AbstractSignEditScreenAccessor) screen).meteor$getSign();
         if (sign == null) return;
 
-        sendSignPacket(sign, true, line1.get(), line2.get(), line3.get(), line4.get());
+        BlockPos pos = sign.getPos();
 
-        if (enableBack.get()) {
-            sendSignPacket(sign, false, backLine1.get(), backLine2.get(), backLine3.get(), backLine4.get());
-        }
+        // Send front text
+        mc.player.networkHandler.sendPacket(new UpdateSignC2SPacket(
+            pos, true,
+            processLine(line1.get()), processLine(line2.get()),
+            processLine(line3.get()), processLine(line4.get())
+        ));
 
         event.cancel();
+
+        // Schedule back side edit for post-tick (phase 2)
+        if (enableBack.get() && !pos.equals(prevBackEditPos)) {
+            backEditPos = pos;
+        }
     }
 
     // ── Copy mode: intercept outgoing sign packet ─────────────────────────────
@@ -244,90 +338,48 @@ public class AutoSign extends Module {
         }
     }
 
-    // ── Chat command listener ─────────────────────────────────────────────────
+    // ── Sign text check ─────────────────────────────────────────────────────
 
-    @EventHandler
-    private void onChatMessage(ReceiveMessageEvent event) {
-        if (mc.player == null) return;
+    private boolean signAlreadyHasText(SignBlockEntity sign) {
+        var frontText = sign.getFrontText();
 
-        String msg    = event.getMessage().getString();
-        String prefix = commandPrefix.get().trim();
-        if (prefix.isEmpty()) return;
+        boolean frontMatch =
+            frontText.getMessage(0, false).getString().equals(processLine(line1.get()))
+            && frontText.getMessage(1, false).getString().equals(processLine(line2.get()))
+            && frontText.getMessage(2, false).getString().equals(processLine(line3.get()))
+            && frontText.getMessage(3, false).getString().equals(processLine(line4.get()));
 
-        int cmdIdx = msg.indexOf(prefix);
-        if (cmdIdx == -1) return;
+        if (!frontMatch) return false;
 
-        // Sender check
-        String auth = commandPlayer.get().trim();
-        if (!auth.isEmpty()) {
-            String beforeCmd = msg.substring(0, cmdIdx);
-            if (!beforeCmd.toLowerCase().contains(auth.toLowerCase())) return;
+        if (enableBack.get()) {
+            var backText = sign.getBackText();
+            return backText.getMessage(0, false).getString().equals(processLine(backLine1.get()))
+                && backText.getMessage(1, false).getString().equals(processLine(backLine2.get()))
+                && backText.getMessage(2, false).getString().equals(processLine(backLine3.get()))
+                && backText.getMessage(3, false).getString().equals(processLine(backLine4.get()));
         }
 
-        String afterCmd = msg.substring(cmdIdx + prefix.length()).trim();
-        if (afterCmd.isEmpty()) return;
-
-        String arg = afterCmd.split("\\s+", 2)[0];
-
-        switch (arg.toLowerCase()) {
-            case "clear" -> {
-                line1.set(""); line2.set(""); line3.set(""); line4.set("");
-                backLine1.set(""); backLine2.set(""); backLine3.set(""); backLine4.set("");
-                info("All sign text cleared.");
-            }
-            case "copy" -> {
-                copyMode.set(!copyMode.get());
-                info("Copy mode: " + (copyMode.get() ? "§aON" : "§cOFF"));
-            }
-            case "on" -> {
-                if (!isActive()) toggle();
-                info("Module enabled via chat.");
-            }
-            case "off" -> {
-                if (isActive()) toggle();
-                info("Module disabled via chat.");
-            }
-            default -> {
-                String fullArg = msg.substring(cmdIdx + prefix.length()).trim();
-                String[] lines = fullArg.split("\\|", -1);
-                line1.set(lines.length > 0 ? lines[0] : "");
-                line2.set(lines.length > 1 ? lines[1] : "");
-                line3.set(lines.length > 2 ? lines[2] : "");
-                line4.set(lines.length > 3 ? lines[3] : "");
-                info("Sign text set: §e" + fullArg);
-            }
-        }
+        return true;
     }
 
     // ── Auto-place helpers ────────────────────────────────────────────────────
 
-    /**
-     * Finds a sign in the hotbar that matches the sign-types filter.
-     * Returns hotbar slot index, or -1 if not found.
-     */
     private int findSignSlot() {
         if (mc.player == null) return -1;
-        List<Block> allowed = signBlocks.get();
+        List<Item> allowed = signItems.get();
 
         for (int i = 0; i < 9; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
             if (!(stack.getItem() instanceof BlockItem blockItem)) continue;
-            Block block = blockItem.getBlock();
-            if (!(block instanceof AbstractSignBlock)) continue;
+            if (!(blockItem.getBlock() instanceof AbstractSignBlock)) continue;
 
-            // If filter list is empty, accept any sign
-            if (allowed != null && !allowed.isEmpty() && !allowed.contains(block)) continue;
-
+            if (allowed != null && !allowed.isEmpty() && !allowed.contains(stack.getItem())) continue;
             return i;
         }
         return -1;
     }
 
-    /**
-     * Scans nearby blocks for a valid surface to place a sign on top of.
-     * Finds the closest solid block with air above it within place-range.
-     */
     private BlockPos findPlaceTarget() {
         if (mc.player == null || mc.world == null) return null;
 
@@ -346,15 +398,12 @@ public class AutoSign extends Module {
 
                     if (center.distanceTo(playerPos) > placeRange.get()) continue;
 
-                    // The block must be solid (support surface)
                     BlockState state = mc.world.getBlockState(pos);
                     if (!state.isSolidSurface(mc.world, pos, mc.player, Direction.UP)) continue;
 
-                    // The block above must be air (where the sign goes)
                     BlockPos above = pos.up();
                     if (!mc.world.getBlockState(above).isAir()) continue;
 
-                    // Check spacing from last placed sign
                     if (lastPlacePos != null) {
                         double spaceDist = Math.sqrt(above.getSquaredDistance(lastPlacePos));
                         if (spaceDist < spacing.get()) continue;
@@ -372,22 +421,12 @@ public class AutoSign extends Module {
         return best;
     }
 
-    // ── Packet helpers ────────────────────────────────────────────────────────
-
-    private void sendSignPacket(SignBlockEntity sign, boolean front,
-                                String l1, String l2, String l3, String l4) {
-        if (mc.player == null) return;
-
-        mc.player.networkHandler.sendPacket(new UpdateSignC2SPacket(
-            sign.getPos(), front,
-            processLine(l1), processLine(l2), processLine(l3), processLine(l4)
-        ));
-    }
+    // ── Text processing ───────────────────────────────────────────────────────
 
     private String processLine(String line) {
         if (line == null) return "";
         if (colorCodes.get()) {
-            line = line.replace("&", "\u00a7"); // & → §
+            line = line.replace("&", "\u00a7");
         }
         return line;
     }
