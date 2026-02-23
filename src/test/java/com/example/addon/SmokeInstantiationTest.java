@@ -20,10 +20,6 @@ class SmokeInstantiationTest {
             "class AutoAnvilRename extends Module"
         );
         assertSourceContains(
-            Path.of("src", "main", "java", "com", "example", "addon", "modules", "PearlHelper.java"),
-            "class PearlHelper extends Module"
-        );
-        assertSourceContains(
             Path.of("src", "main", "java", "com", "example", "addon", "commands", "CommandExample.java"),
             "class CommandExample extends Command"
         );

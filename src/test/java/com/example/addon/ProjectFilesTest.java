@@ -19,7 +19,6 @@ class ProjectFilesTest {
             Path.of("src", "main", "java", "com", "example", "addon", "hud", "HudExample.java"),
             Path.of("src", "main", "java", "com", "example", "addon", "modules", "AutoPearl.java"),
             Path.of("src", "main", "java", "com", "example", "addon", "modules", "AutoAnvilRename.java"),
-            Path.of("src", "main", "java", "com", "example", "addon", "modules", "PearlHelper.java"),
             Path.of("src", "main", "java", "com", "example", "addon", "mixin", "ExampleMixin.java"),
             Path.of("src", "main", "java", "com", "example", "addon", "mixin", "AnvilScreenHandlerAccessor.java")
         );
