@@ -20,6 +20,14 @@ class SmokeInstantiationTest {
             "class AutoAnvilRename extends Module"
         );
         assertSourceContains(
+            Path.of("src", "main", "java", "com", "example", "addon", "modules", "JoinWatcher.java"),
+            "class JoinWatcher extends Module"
+        );
+        assertSourceContains(
+            Path.of("src", "main", "java", "com", "example", "addon", "gui", "screens", "settings", "OnlinePlayerSelectScreen.java"),
+            "class OnlinePlayerSelectScreen extends WindowScreen"
+        );
+        assertSourceContains(
             Path.of("src", "main", "java", "com", "example", "addon", "commands", "CommandExample.java"),
             "class CommandExample extends Command"
         );

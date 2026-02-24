@@ -35,6 +35,14 @@ dependencies {
     // Meteor
     modImplementation("meteordevelopment:meteor-client:${properties["minecraft_version"] as String}-SNAPSHOT")
 
+    // Local OGG playback (jar-in-jar)
+    implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
+    include("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
+    implementation("com.googlecode.soundlibs:tritonus-share:0.3.7.4")
+    include("com.googlecode.soundlibs:tritonus-share:0.3.7.4")
+    implementation("com.googlecode.soundlibs:jorbis:0.0.17.4")
+    include("com.googlecode.soundlibs:jorbis:0.0.17.4")
+
     // Tests
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
