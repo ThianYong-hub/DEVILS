@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "id": "paradise",
+  "id": "devils-addon",
   "version": "${version}",
-  "name": "Paradise ✨",
-  "description": "Divine pearl targeting system - Reach your Paradise. Precision-based ender pearl delivery with anti-detection features.",
+  "name": "Devils",
+  "description": "Devils Addon for Meteor Client.",
   "authors": [
     "23XT",
     "SOCKETLOST"
   ],
   "contact": {
-    "sources": "https://github.com/MeteorDevelopment/meteor-addon-template"
+    "sources": "https://github.com/ThianYong-hub/DEVILS"
   },
-  "icon": "assets/template/icon.png",
+  "icon": "assets/devils-addon/icon.png",
   "environment": "client",
   "entrypoints": {
     "meteor": [

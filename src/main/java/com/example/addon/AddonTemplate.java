@@ -15,16 +15,17 @@ import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.item.Items;
 import org.slf4j.Logger;
 
 public class AddonTemplate extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
-    public static final Category CATEGORY = new Category("Paradise");
-    public static final HudGroup HUD_GROUP = new HudGroup("Paradise");
+    public static final Category CATEGORY = new Category("Devils", Items.ELYTRA.getDefaultStack());
+    public static final HudGroup HUD_GROUP = new HudGroup("Devils");
 
     @Override
     public void onInitialize() {
-        LOG.info("Initializing Meteor Addon Template");
+        LOG.info("Initializing Devils Addon");
 
         // Modules
         Modules.get().add(new AutoPearl());
@@ -52,6 +53,6 @@ public class AddonTemplate extends MeteorAddon {
 
     @Override
     public GithubRepo getRepo() {
-        return new GithubRepo("MeteorDevelopment", "meteor-addon-template");
+        return new GithubRepo("ThianYong-hub", "DEVILS");
     }
 }

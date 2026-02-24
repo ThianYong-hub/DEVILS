@@ -13,7 +13,7 @@ class ResourcesConfigTest {
     void fabricModJsonContainsExpectedMetadata() throws IOException {
         String json = readFile(Path.of("src", "main", "resources", "fabric.mod.json"));
 
-        assertTrue(json.contains("\"id\": \"paradise\""));
+        assertTrue(json.contains("\"id\": \"devils-addon\""));
         assertTrue(json.contains("\"com.example.addon.AddonTemplate\""));
         assertTrue(json.contains("\"addon-template.mixins.json\""));
         assertTrue(json.contains("\"java\": \">=21\""));

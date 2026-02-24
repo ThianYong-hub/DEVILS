@@ -1,6 +1,6 @@
-# Meteor Addon Template
+# Devils-Addon
 
-A template to allow easy usage of the Meteor Addon API.
+A Meteor Client addon named Devils.
 
 ### How to use
 
@@ -13,7 +13,7 @@ A template to allow easy usage of the Meteor Addon API.
 
 - Alternatively, clone this repository using these commands for a clean history:
   ```bash
-  git clone --depth 1 https://github.com/MeteorDevelopment/meteor-addon-template your-addon-name
+  git clone --depth 1 https://github.com/ThianYong-hub/DEVILS your-addon-name
   cd your-addon-name
   rm -rf .git
   git init

@@ -17,7 +17,7 @@ class AddonTemplateTest {
 
         assertTrue(source.contains("class AddonTemplate extends MeteorAddon"));
         assertTrue(source.contains("return \"com.example.addon\";"));
-        assertTrue(source.contains("new GithubRepo(\"MeteorDevelopment\", \"meteor-addon-template\")"));
+        assertTrue(source.contains("new GithubRepo(\"ThianYong-hub\", \"DEVILS\")"));
     }
 
     @Test
