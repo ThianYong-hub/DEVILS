@@ -31,18 +31,12 @@ public class DiscordRPC extends Module {
 
     @Override
     public void onActivate() {
-        DiscordPresence meteorPresence = Modules.get().get(DiscordPresence.class);
-        if (meteorPresence != null && meteorPresence.isActive()) {
-            meteorPresence.toggle();
-        }
-
         rpc.setLargeImage("devils", "v." + VERSION);
         rpc.setStart(System.currentTimeMillis() / 1000L);
-
-        DiscordIPC.start(APP_ID, this::updatePresence);
-
         tickCounter = 0;
         lastWasInMainMenu = true;
+
+        tryConnect();
     }
 
     @Override
@@ -52,17 +46,23 @@ public class DiscordRPC extends Module {
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
-        updatePresence();
+        if (!DiscordIPC.isConnected()) tryConnect();
+        else updatePresence();
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         lastWasInMainMenu = false;
-        updatePresence();
+        if (!DiscordIPC.isConnected()) tryConnect();
+        else updatePresence();
     }
 
     @EventHandler
     private void onOpenScreen(OpenScreenEvent event) {
+        if (!DiscordIPC.isConnected()) {
+            tryConnect();
+            return;
+        }
         if (mc.player == null) {
             lastWasInMainMenu = false;
             updatePresence();
@@ -74,8 +74,22 @@ public class DiscordRPC extends Module {
         tickCounter++;
         if (tickCounter >= 100) {
             tickCounter = 0;
-            updatePresence();
+            if (!DiscordIPC.isConnected()) tryConnect();
+            else updatePresence();
         }
+    }
+
+    private void tryConnect() {
+        // Disable Meteor's built-in DiscordPresence if active (only one IPC connection allowed)
+        DiscordPresence meteorPresence = Modules.get().get(DiscordPresence.class);
+        if (meteorPresence != null && meteorPresence.isActive()) {
+            meteorPresence.toggle();
+        }
+
+        DiscordIPC.start(APP_ID, () -> {
+            lastWasInMainMenu = false;
+            updatePresence();
+        });
     }
 
     private void updatePresence() {
