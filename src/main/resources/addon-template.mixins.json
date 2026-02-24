@@ -6,7 +6,7 @@
     "ExampleMixin",
     "AnvilScreenHandlerAccessor",
     "ItemListSettingScreenMixin",
-    "ModulesScreenMixin"
+    "ModulesScreenIconsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

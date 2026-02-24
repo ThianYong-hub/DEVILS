@@ -1,11 +1,11 @@
 package com.example.addon;
 
-import com.example.addon.commands.CommandExample;
 import com.example.addon.commands.AutoAnvilRenameCommand;
+import com.example.addon.commands.CommandExample;
 import com.example.addon.hud.HudExample;
-import com.example.addon.modules.AutoPearl;
-import com.example.addon.modules.AutoAnvilRename;
 import com.example.addon.modules.AntiWasp;
+import com.example.addon.modules.AutoAnvilRename;
+import com.example.addon.modules.AutoPearl;
 import com.example.addon.modules.AutoWasp;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
@@ -15,28 +15,26 @@ import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
+import net.minecraft.item.Items;
 import org.slf4j.Logger;
 
 public class AddonTemplate extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
-    public static final Category CATEGORY = new Category("Devils");
+    public static final Category CATEGORY = new Category("Devils", Items.NETHER_STAR.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("Devils");
 
     @Override
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
 
-        // Modules
         Modules.get().add(new AutoPearl());
         Modules.get().add(new AutoAnvilRename());
         Modules.get().add(new AntiWasp());
         Modules.get().add(new AutoWasp());
 
-        // Commands
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
 
-        // HUD
         Hud.get().register(HudExample.INFO);
     }
 
