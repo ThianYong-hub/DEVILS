@@ -38,10 +38,19 @@ public class AutoWasp extends Module {
     private static final Direction[] CARDINAL_DIRECTIONS = new Direction[] {
         Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
     };
+    private static final int PATH_UPDATE_TICKS = 14;
+    private static final int PATH_MAX_NODES = 3500;
+    private static final int PATH_RESOLUTION = 1;
+    private static final double WAYPOINT_REACH = 2.0;
+    private static final int STUCK_REPATH_TICKS = 12;
+    private static final double FLOOR_CLEARANCE = 2.2;
+    private static final double CEILING_CLEARANCE = 1.5;
+    private static final int SAFETY_SCAN = 14;
+    private static final double OBSTACLE_LOOK_AHEAD = 7.5;
+    private static final double AVOIDANCE_STRENGTH = 0.85;
+    private static final double COLLISION_STEP = 0.55;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgPathfinding = settings.createGroup("Pathfinding");
-    private final SettingGroup sgSafety = settings.createGroup("Flight Safety");
 
     private final Setting<Double> horizontalSpeed = sgGeneral.add(new DoubleSetting.Builder()
         .name("horizontal-speed")
@@ -96,118 +105,6 @@ public class AutoWasp extends Module {
         .name("offset")
         .description("How many blocks offset to wasp at from the target.")
         .defaultValue(0, 0, 0)
-        .build()
-    );
-
-    private final Setting<Boolean> pathfindingEnabled = sgPathfinding.add(new BoolSetting.Builder()
-        .name("pathfinding")
-        .description("Uses A* pathfinding to route around obstacles.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Integer> pathUpdateTicks = sgPathfinding.add(new IntSetting.Builder()
-        .name("path-update-interval")
-        .description("How often to recompute path (ticks).")
-        .defaultValue(14)
-        .min(3)
-        .sliderRange(3, 40)
-        .visible(pathfindingEnabled::get)
-        .build()
-    );
-
-    private final Setting<Integer> maxNodes = sgPathfinding.add(new IntSetting.Builder()
-        .name("max-nodes")
-        .description("Maximum A* nodes to explore.")
-        .defaultValue(3500)
-        .min(500)
-        .sliderRange(1000, 12000)
-        .visible(pathfindingEnabled::get)
-        .build()
-    );
-
-    private final Setting<Integer> pathResolution = sgPathfinding.add(new IntSetting.Builder()
-        .name("path-resolution")
-        .description("Path grid resolution. 1 is safer near bedrock.")
-        .defaultValue(1)
-        .min(1)
-        .max(3)
-        .sliderRange(1, 2)
-        .visible(pathfindingEnabled::get)
-        .build()
-    );
-
-    private final Setting<Double> waypointReach = sgPathfinding.add(new DoubleSetting.Builder()
-        .name("waypoint-reach")
-        .description("Distance at which waypoint is considered reached.")
-        .defaultValue(2.0)
-        .min(0.8)
-        .sliderRange(1.0, 4.0)
-        .visible(pathfindingEnabled::get)
-        .build()
-    );
-
-    private final Setting<Integer> stuckRepathTicks = sgPathfinding.add(new IntSetting.Builder()
-        .name("stuck-repath-ticks")
-        .description("Repath after this many low-movement ticks.")
-        .defaultValue(12)
-        .min(4)
-        .sliderRange(6, 30)
-        .visible(pathfindingEnabled::get)
-        .build()
-    );
-
-    private final Setting<Double> floorClearance = sgSafety.add(new DoubleSetting.Builder()
-        .name("floor-clearance")
-        .description("Preferred minimum distance to floor.")
-        .defaultValue(2.2)
-        .min(1.0)
-        .sliderRange(1.2, 4.0)
-        .build()
-    );
-
-    private final Setting<Double> ceilingClearance = sgSafety.add(new DoubleSetting.Builder()
-        .name("ceiling-clearance")
-        .description("Preferred minimum distance to ceiling.")
-        .defaultValue(1.5)
-        .min(0.75)
-        .sliderRange(1.0, 3.0)
-        .build()
-    );
-
-    private final Setting<Integer> safetyScan = sgSafety.add(new IntSetting.Builder()
-        .name("safety-scan")
-        .description("Vertical scan distance for floor/ceiling checks.")
-        .defaultValue(14)
-        .min(6)
-        .sliderRange(8, 28)
-        .build()
-    );
-
-    private final Setting<Double> obstacleLookAhead = sgSafety.add(new DoubleSetting.Builder()
-        .name("obstacle-lookahead")
-        .description("How far ahead to probe for blocked flight.")
-        .defaultValue(7.5)
-        .min(2.5)
-        .sliderRange(4.0, 14.0)
-        .build()
-    );
-
-    private final Setting<Double> avoidanceStrength = sgSafety.add(new DoubleSetting.Builder()
-        .name("avoidance-strength")
-        .description("Strength of local obstacle steering.")
-        .defaultValue(0.85)
-        .min(0.0)
-        .sliderRange(0.2, 1.8)
-        .build()
-    );
-
-    private final Setting<Double> collisionStep = sgSafety.add(new DoubleSetting.Builder()
-        .name("collision-step")
-        .description("Collision sample step for ray checks.")
-        .defaultValue(0.55)
-        .min(0.25)
-        .sliderRange(0.3, 1.2)
         .build()
     );
 
@@ -376,24 +273,22 @@ public class AutoWasp extends Module {
 
             updateStuckState();
 
-            if (pathfindingEnabled.get()) {
-                pathTimer++;
-                Vec3d targetPos = getTargetPos();
+            pathTimer++;
+            Vec3d targetPos = getTargetPos();
 
-                boolean needsRepath = pathTimer >= pathUpdateTicks.get()
-                    || currentPath.isEmpty()
-                    || (lastPathTarget != null && lastPathTarget.squaredDistanceTo(targetPos) > 16)
-                    || stuckTicks >= stuckRepathTicks.get()
-                    || (currentWaypointIndex < currentPath.size() && !isDirectPathClear(mc.player.getPos(), currentPath.get(currentWaypointIndex)));
+            boolean needsRepath = pathTimer >= PATH_UPDATE_TICKS
+                || currentPath.isEmpty()
+                || (lastPathTarget != null && lastPathTarget.squaredDistanceTo(targetPos) > 16)
+                || stuckTicks >= STUCK_REPATH_TICKS
+                || (currentWaypointIndex < currentPath.size() && !isDirectPathClear(mc.player.getPos(), currentPath.get(currentWaypointIndex)));
 
-                if (needsRepath) {
-                    pathTimer = 0;
-                    lastPathTarget = targetPos;
-                    computePath(mc.player.getPos(), targetPos);
-                }
-
-                advanceWaypoints();
+            if (needsRepath) {
+                pathTimer = 0;
+                lastPathTarget = targetPos;
+                computePath(mc.player.getPos(), targetPos);
             }
+
+            advanceWaypoints();
         }
     }
 
@@ -415,7 +310,7 @@ public class AutoWasp extends Module {
     }
 
     private void advanceWaypoints() {
-        double reachSq = waypointReach.get() * waypointReach.get();
+        double reachSq = WAYPOINT_REACH * WAYPOINT_REACH;
         while (currentWaypointIndex < currentPath.size()) {
             if (mc.player.getPos().squaredDistanceTo(currentPath.get(currentWaypointIndex)) <= reachSq) {
                 currentWaypointIndex++;
@@ -487,7 +382,7 @@ public class AutoWasp extends Module {
         if (!mc.player.isGliding()) return;
 
         Vec3d steerTarget = getTargetPos();
-        if (pathfindingEnabled.get() && currentWaypointIndex < currentPath.size()) {
+        if (currentWaypointIndex < currentPath.size()) {
             steerTarget = currentPath.get(currentWaypointIndex);
         }
         steerTarget = adjustToSafeCorridor(steerTarget, mc.player.getPos());
@@ -599,18 +494,18 @@ public class AutoWasp extends Module {
     }
 
     private double applyVerticalSafety(double yVel, Vec3d currentPos) {
-        double floorDist = distanceToSolidBelow(currentPos, safetyScan.get());
-        double ceilingDist = distanceToSolidAbove(currentPos, safetyScan.get());
+        double floorDist = distanceToSolidBelow(currentPos, SAFETY_SCAN);
+        double ceilingDist = distanceToSolidAbove(currentPos, SAFETY_SCAN);
 
-        double downBudget = Math.max(0.0, floorDist - floorClearance.get() - 0.35);
+        double downBudget = Math.max(0.0, floorDist - FLOOR_CLEARANCE - 0.35);
         double safeMaxDown = Math.min(verticalSpeed.get(), downBudget * 0.8);
         yVel = Math.max(yVel, -safeMaxDown);
 
-        if (floorDist < floorClearance.get() + 0.35) {
+        if (floorDist < FLOOR_CLEARANCE + 0.35) {
             yVel = Math.max(yVel, 0.12);
         }
 
-        if (ceilingDist < ceilingClearance.get() + 0.25) {
+        if (ceilingDist < CEILING_CLEARANCE + 0.25) {
             yVel = Math.min(yVel, -0.08);
         }
 
@@ -626,7 +521,7 @@ public class AutoWasp extends Module {
         Vec3d left = new Vec3d(-dir.z, 0, dir.x);
         Vec3d right = left.multiply(-1);
 
-        double checkDistance = Math.max(1.5, Math.min(obstacleLookAhead.get() + 1.0, horizontal * 4.2));
+        double checkDistance = Math.max(1.5, Math.min(OBSTACLE_LOOK_AHEAD + 1.0, horizontal * 4.2));
         double clearAhead = probeClearDistance(pos, dir, checkDistance);
         if (clearAhead > checkDistance * 0.88) return velocity;
 
@@ -668,21 +563,21 @@ public class AutoWasp extends Module {
         double vx = velocity.x;
         double vz = velocity.z;
         double vy = velocity.y;
-        double floorDist = distanceToSolidBelow(pos, safetyScan.get());
-        double ceilingDist = distanceToSolidAbove(pos, safetyScan.get());
+        double floorDist = distanceToSolidBelow(pos, SAFETY_SCAN);
+        double ceilingDist = distanceToSolidAbove(pos, SAFETY_SCAN);
 
         if (clearAhead < 0.8) {
             // Imminent collision: almost stop horizontal and climb slightly.
             vx *= 0.55;
             vz *= 0.55;
             vy = Math.max(vy, 0.24);
-            stuckTicks = Math.max(stuckTicks, stuckRepathTicks.get());
+            stuckTicks = Math.max(stuckTicks, STUCK_REPATH_TICKS);
         } else if (clearAhead < 1.35) {
             vy = Math.max(vy, 0.14);
         }
 
-        if (floorDist < floorClearance.get() + 0.45) vy = Math.max(vy, 0.10);
-        if (ceilingDist < ceilingClearance.get() + 0.2) vy = Math.min(vy, 0.05);
+        if (floorDist < FLOOR_CLEARANCE + 0.45) vy = Math.max(vy, 0.10);
+        if (ceilingDist < CEILING_CLEARANCE + 0.2) vy = Math.min(vy, 0.05);
 
         return new Vec3d(vx, vy, vz);
     }
@@ -691,16 +586,16 @@ public class AutoWasp extends Module {
         Vec3d pos = mc.player.getPos();
         Vec3d avoid = Vec3d.ZERO;
 
-        double floorDist = distanceToSolidBelow(pos, safetyScan.get());
-        double ceilingDist = distanceToSolidAbove(pos, safetyScan.get());
+        double floorDist = distanceToSolidBelow(pos, SAFETY_SCAN);
+        double ceilingDist = distanceToSolidAbove(pos, SAFETY_SCAN);
 
-        if (floorDist < floorClearance.get()) {
-            double push = (floorClearance.get() - floorDist) * 0.75;
+        if (floorDist < FLOOR_CLEARANCE) {
+            double push = (FLOOR_CLEARANCE - floorDist) * 0.75;
             avoid = avoid.add(0, Math.min(verticalSpeed.get(), push), 0);
         }
 
-        if (ceilingDist < ceilingClearance.get()) {
-            double push = (ceilingClearance.get() - ceilingDist) * 0.75;
+        if (ceilingDist < CEILING_CLEARANCE) {
+            double push = (CEILING_CLEARANCE - ceilingDist) * 0.75;
             avoid = avoid.add(0, -Math.min(verticalSpeed.get(), push), 0);
         }
 
@@ -713,7 +608,7 @@ public class AutoWasp extends Module {
 
         if (headingLen > 1.0E-4) {
             Vec3d forward = new Vec3d(heading.x / headingLen, 0, heading.z / headingLen);
-            double lookAhead = obstacleLookAhead.get();
+            double lookAhead = OBSTACLE_LOOK_AHEAD;
             double frontClear = probeClearDistance(pos, forward, lookAhead);
             boolean blockedFront = frontClear < lookAhead - 0.15;
 
@@ -742,14 +637,14 @@ public class AutoWasp extends Module {
                     double space = probeClearDistance(pos, candidate, lookAhead);
                     double align = candidate.dotProduct(targetDir);
                     Vec3d sample = pos.add(candidate.multiply(Math.max(0.9, space * 0.65)));
-                    double sampleFloor = distanceToSolidBelow(sample, Math.max(6, safetyScan.get() / 2));
-                    double sampleCeiling = distanceToSolidAbove(sample, Math.max(6, safetyScan.get() / 2));
+                    double sampleFloor = distanceToSolidBelow(sample, Math.max(6, SAFETY_SCAN / 2));
+                    double sampleCeiling = distanceToSolidAbove(sample, Math.max(6, SAFETY_SCAN / 2));
                     int sideOpenings = countLateralOpenings(sample, 0.9);
                     double score = space * 1.55 + align * 1.05 + sideOpenings * 0.3;
-                    if (sampleFloor < floorClearance.get()) score -= (floorClearance.get() - sampleFloor) * 1.4;
-                    if (sampleCeiling < ceilingClearance.get()) score -= (ceilingClearance.get() - sampleCeiling) * 1.4;
-                    if (candidate.y > 0 && floorDist < floorClearance.get() + 0.7) score += 1.0;
-                    if (candidate.y > 0 && ceilingDist < ceilingClearance.get() + 0.7) score -= 0.8;
+                    if (sampleFloor < FLOOR_CLEARANCE) score -= (FLOOR_CLEARANCE - sampleFloor) * 1.4;
+                    if (sampleCeiling < CEILING_CLEARANCE) score -= (CEILING_CLEARANCE - sampleCeiling) * 1.4;
+                    if (candidate.y > 0 && floorDist < FLOOR_CLEARANCE + 0.7) score += 1.0;
+                    if (candidate.y > 0 && ceilingDist < CEILING_CLEARANCE + 0.7) score -= 0.8;
                     if (score > bestScore) {
                         bestScore = score;
                         bestDir = candidate;
@@ -758,7 +653,7 @@ public class AutoWasp extends Module {
                 }
 
                 double urgency = Math.max(0.0, 1.0 - bestSpace / lookAhead);
-                double sideSpeed = horizontalCap * (0.45 + urgency) * avoidanceStrength.get();
+                double sideSpeed = horizontalCap * (0.45 + urgency) * AVOIDANCE_STRENGTH;
                 avoid = avoid.add(bestDir.multiply(sideSpeed));
             }
         }
@@ -767,7 +662,7 @@ public class AutoWasp extends Module {
     }
 
     private double probeClearDistance(Vec3d start, Vec3d dir, double maxDistance) {
-        double step = Math.max(0.25, collisionStep.get());
+        double step = Math.max(0.25, COLLISION_STEP);
 
         for (double d = step; d <= maxDistance; d += step) {
             if (!hasPlayerClearance(start.add(dir.multiply(d)))) {
@@ -779,11 +674,11 @@ public class AutoWasp extends Module {
     }
 
     private Vec3d adjustToSafeCorridor(Vec3d desired, Vec3d fallbackRef) {
-        double floorY = nearestSolidBelow(desired, safetyScan.get());
-        double ceilingY = nearestSolidAbove(desired, safetyScan.get());
+        double floorY = nearestSolidBelow(desired, SAFETY_SCAN);
+        double ceilingY = nearestSolidAbove(desired, SAFETY_SCAN);
 
-        double minY = floorY + floorClearance.get();
-        double maxY = ceilingY - playerHeight() - ceilingClearance.get();
+        double minY = floorY + FLOOR_CLEARANCE;
+        double maxY = ceilingY - playerHeight() - CEILING_CLEARANCE;
         double y = desired.y;
 
         if (minY <= maxY) {
@@ -814,7 +709,7 @@ public class AutoWasp extends Module {
         if (dist < 0.2) return true;
 
         Vec3d dir = diff.normalize();
-        double step = Math.max(0.25, collisionStep.get());
+        double step = Math.max(0.25, COLLISION_STEP);
 
         for (double d = 0; d <= dist; d += step) {
             if (!hasPlayerClearance(start.add(dir.multiply(d)))) return false;
@@ -928,7 +823,7 @@ public class AutoWasp extends Module {
     }
 
     private void computePath(Vec3d start, Vec3d goal) {
-        int res = pathResolution.get();
+        int res = PATH_RESOLUTION;
         BlockPos startBlock = toGrid(BlockPos.ofFloored(start), res);
         BlockPos goalBlock = toGrid(BlockPos.ofFloored(goal), res);
 
@@ -959,7 +854,7 @@ public class AutoWasp extends Module {
 
         AStarNode bestNode = startNode;
         int nodesExplored = 0;
-        int maxN = maxNodes.get();
+        int maxN = PATH_MAX_NODES;
 
         while (!openQueue.isEmpty() && nodesExplored < maxN) {
             AStarNode current = openQueue.poll();
@@ -1019,14 +914,14 @@ public class AutoWasp extends Module {
 
     private double nodePenalty(BlockPos node) {
         Vec3d center = Vec3d.ofCenter(node);
-        double floorDist = distanceToSolidBelow(center, safetyScan.get());
-        double ceilingDist = distanceToSolidAbove(center, safetyScan.get());
+        double floorDist = distanceToSolidBelow(center, SAFETY_SCAN);
+        double ceilingDist = distanceToSolidAbove(center, SAFETY_SCAN);
         int nearOpen = countLateralOpenings(center, 0.9);
         int farOpen = countLateralOpenings(center, 1.6);
 
         double penalty = 0;
-        if (floorDist < floorClearance.get()) penalty += (floorClearance.get() - floorDist) * 2.8;
-        if (ceilingDist < ceilingClearance.get()) penalty += (ceilingClearance.get() - ceilingDist) * 2.8;
+        if (floorDist < FLOOR_CLEARANCE) penalty += (FLOOR_CLEARANCE - floorDist) * 2.8;
+        if (ceilingDist < CEILING_CLEARANCE) penalty += (CEILING_CLEARANCE - ceilingDist) * 2.8;
         if (floorDist > 10) penalty += 0.35;
         if (nearOpen <= 1) penalty += 2.2;
         if (farOpen <= 1) penalty += 1.4;
@@ -1071,7 +966,7 @@ public class AutoWasp extends Module {
         java.util.Collections.reverse(path);
 
         if (!path.isEmpty() && mc.player != null) {
-            double reachSq = waypointReach.get() * waypointReach.get();
+            double reachSq = WAYPOINT_REACH * WAYPOINT_REACH;
             if (mc.player.getPos().squaredDistanceTo(path.get(0)) <= reachSq) {
                 path.remove(0);
             }
@@ -1146,8 +1041,8 @@ public class AutoWasp extends Module {
         Vec3d p = Vec3d.ofCenter(center);
         if (!hasPlayerClearance(p)) return false;
 
-        double floorDist = distanceToSolidBelow(p, Math.max(6, safetyScan.get() / 2));
-        double ceilingDist = distanceToSolidAbove(p, Math.max(6, safetyScan.get() / 2));
+        double floorDist = distanceToSolidBelow(p, Math.max(6, SAFETY_SCAN / 2));
+        double ceilingDist = distanceToSolidAbove(p, Math.max(6, SAFETY_SCAN / 2));
         if (floorDist <= 0.1 || ceilingDist <= 0.1) return false;
 
         // Avoid diving into 1x1 holes and tiny pockets unless absolutely necessary.
