@@ -3,22 +3,30 @@ package com.example.addon.modules;
 import com.example.addon.AddonTemplate;
 import meteordevelopment.discordipc.DiscordIPC;
 import meteordevelopment.discordipc.RichPresence;
+import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.game.OpenScreenEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.DiscordPresence;
+import net.fabricmc.loader.api.FabricLoader;
 import meteordevelopment.orbit.EventHandler;
 
 public class DiscordRPC extends Module {
     private static final long APP_ID = 1475814462278860810L;
-    private static final String LINE_1 = "Devils Addon";
-    private static final String LINE_2 = "github.com/ThianYong-hub/DEVILS";
+    private static final String VERSION = FabricLoader.getInstance()
+        .getModContainer("devils-addon")
+        .map(c -> c.getMetadata().getVersion().getFriendlyString())
+        .orElse("unknown");
 
     private final RichPresence rpc = new RichPresence();
     private int tickCounter;
+    private boolean lastWasInMainMenu;
 
     public DiscordRPC() {
         super(AddonTemplate.CATEGORY, "discord-rpc", "Shows Devils Addon branding in Discord status.");
+        runInMainMenu = true;
     }
 
     @Override
@@ -28,15 +36,13 @@ public class DiscordRPC extends Module {
             meteorPresence.toggle();
         }
 
-        DiscordIPC.start(APP_ID, null);
-
-        rpc.setLargeImage("devils", "Devils Addon");
+        rpc.setLargeImage("devils", "v." + VERSION);
         rpc.setStart(System.currentTimeMillis() / 1000L);
-        rpc.setDetails(LINE_1);
-        rpc.setState(LINE_2);
-        DiscordIPC.setActivity(rpc);
+
+        DiscordIPC.start(APP_ID, this::updatePresence);
 
         tickCounter = 0;
+        lastWasInMainMenu = true;
     }
 
     @Override
@@ -45,11 +51,51 @@ public class DiscordRPC extends Module {
     }
 
     @EventHandler
+    private void onGameJoined(GameJoinedEvent event) {
+        updatePresence();
+    }
+
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        lastWasInMainMenu = false;
+        updatePresence();
+    }
+
+    @EventHandler
+    private void onOpenScreen(OpenScreenEvent event) {
+        if (mc.player == null) {
+            lastWasInMainMenu = false;
+            updatePresence();
+        }
+    }
+
+    @EventHandler
     private void onTick(TickEvent.Post event) {
         tickCounter++;
-        if (tickCounter >= 200) {
+        if (tickCounter >= 100) {
             tickCounter = 0;
-            DiscordIPC.setActivity(rpc);
+            updatePresence();
         }
+    }
+
+    private void updatePresence() {
+        if (mc.player == null) {
+            if (lastWasInMainMenu) return;
+            lastWasInMainMenu = true;
+            rpc.setDetails("In Main Menu");
+            rpc.setState(null);
+        } else {
+            lastWasInMainMenu = false;
+            String server = mc.isInSingleplayer()
+                ? "Singleplayer"
+                : mc.getCurrentServerEntry() != null ? mc.getCurrentServerEntry().address : "Unknown";
+            rpc.setDetails("Playing on " + server);
+
+            int playerCount = mc.getNetworkHandler() != null
+                ? mc.getNetworkHandler().getPlayerList().size()
+                : 0;
+            rpc.setState(playerCount + " Players online");
+        }
+        DiscordIPC.setActivity(rpc);
     }
 }
