@@ -48,7 +48,7 @@ public abstract class ModulesScreenIconsMixin {
         if (widget instanceof WWindow ww && "Devils".equals(ww.id)) {
             Texture icon = devils$getIcon();
             if (icon != null) {
-                ww.beforeHeaderInit = header -> header.add(GuiThemes.get().texture(24, 24, 0, icon)).pad(2);
+                ww.beforeHeaderInit = header -> header.add(GuiThemes.get().texture(32, 32, 0, icon)).pad(2);
             }
         }
 

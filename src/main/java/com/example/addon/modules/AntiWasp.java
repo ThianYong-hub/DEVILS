@@ -313,7 +313,7 @@ public class AntiWasp extends Module {
         }
 
         if (!mc.player.isGliding()) {
-            tryAutoTakeoff();
+            tryRecoverFlight();
             return;
         }
 
@@ -477,7 +477,7 @@ public class AntiWasp extends Module {
     }
 
     private void applyAutoWalkState() {
-        if (autoWalk.get()) {
+        if (autoWalk.get() && mc.player.isGliding()) {
             if (!forcedForward) prevForwardState = mc.options.forwardKey.isPressed();
             mc.options.forwardKey.setPressed(true);
             forcedForward = true;
@@ -520,22 +520,29 @@ public class AntiWasp extends Module {
         mc.player.setPitch(currentPitch + Math.copySign(pitchStep, deltaPitch));
     }
 
-    private void tryAutoTakeoff() {
-        if (!autoTakeoff.get() || mc.player == null) return;
+    /**
+     * Always tries to recover elytra flight while the module is active.
+     * Unlike autoTakeoff (initial takeoff from ground), this runs unconditionally
+     * so the player never falls when settings are changed mid-flight.
+     */
+    private void tryRecoverFlight() {
+        if (mc.player == null) return;
         if (!isWearingElytra()) return;
 
         if (mc.player.isOnGround()) {
+            if (!autoTakeoff.get()) return;
             mc.player.jump();
             return;
         }
 
         if (takeoffCooldown > 0) return;
 
-        if (mc.player.getVelocity().y < -0.05) {
+        // Always re-open elytra mid-air — prevents falling when settings change
+        if (mc.player.getVelocity().y < 0) {
             mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(
                 mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING
             ));
-            takeoffCooldown = 10;
+            takeoffCooldown = 5;
         }
     }
 
