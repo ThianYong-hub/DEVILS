@@ -5,7 +5,8 @@
   "client": [
     "ExampleMixin",
     "AnvilScreenHandlerAccessor",
-    "ItemListSettingScreenMixin"
+    "ItemListSettingScreenMixin",
+    "ModulesScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
