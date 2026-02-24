@@ -459,7 +459,7 @@ public class AutoWasp extends Module {
     }
 
     private boolean isInDragState() {
-        if (mc.player.isTouchingWater()) return true;
+        if (mc.player.isTouchingWater() || mc.player.isInLava()) return true;
         return isInsideSoftDragBlock(mc.player.getBoundingBox());
     }
 
