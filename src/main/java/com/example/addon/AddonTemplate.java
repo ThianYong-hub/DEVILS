@@ -8,6 +8,7 @@ import com.example.addon.modules.AutoAnvilRename;
 import com.example.addon.modules.AutoPearl;
 import com.example.addon.modules.AutoWasp;
 import com.example.addon.modules.DiscordRPC;
+import com.example.addon.modules.HClip;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -33,6 +34,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new AntiWasp());
         Modules.get().add(new AutoWasp());
         Modules.get().add(new DiscordRPC());
+        Modules.get().add(new HClip());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
