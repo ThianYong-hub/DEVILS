@@ -1,7 +1,9 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
+import meteordevelopment.meteorclient.mixininterface.IVec3d;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
@@ -11,141 +13,177 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
+import meteordevelopment.orbit.EventPriority;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 public class AntiWasp extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgPath = settings.createGroup("Path");
+    private final SettingGroup sgMovement = settings.createGroup("Movement");
+    private final SettingGroup sgCamera = settings.createGroup("Camera");
     private final SettingGroup sgAssist = settings.createGroup("Assist");
 
     private final Setting<FlightFigure> figure = sgGeneral.add(new EnumSetting.Builder<FlightFigure>()
         .name("figure")
-        .description("Primary figure to fly.")
+        .description("Primary figure.")
         .defaultValue(FlightFigure.Circle)
         .build()
     );
 
     private final Setting<Boolean> autoCycleFigures = sgGeneral.add(new BoolSetting.Builder()
         .name("auto-cycle-figures")
-        .description("Switches between different flight figures while enabled.")
+        .description("Switches figure while module is active.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Integer> switchInterval = sgGeneral.add(new IntSetting.Builder()
         .name("switch-interval")
-        .description("Ticks between figure switches when auto-cycle is enabled.")
-        .defaultValue(280)
+        .description("Ticks between figure switches.")
+        .defaultValue(320)
         .min(40)
-        .sliderMax(1200)
+        .sliderMax(1600)
         .visible(autoCycleFigures::get)
         .build()
     );
 
     private final Setting<Boolean> clockwise = sgGeneral.add(new BoolSetting.Builder()
         .name("clockwise")
-        .description("Direction along the current path.")
+        .description("Direction along path.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Double> radius = sgPath.add(new DoubleSetting.Builder()
         .name("radius")
-        .description("Main horizontal size of the figure in blocks.")
-        .defaultValue(150.0)
-        .min(30.0)
-        .sliderRange(50.0, 300.0)
+        .description("Figure size in blocks.")
+        .defaultValue(220.0)
+        .min(40.0)
+        .sliderRange(80.0, 600.0)
         .build()
     );
 
     private final Setting<Double> phaseStep = sgPath.add(new DoubleSetting.Builder()
         .name("phase-step")
-        .description("Figure phase progression per tick (radians). Lower = wider, smoother turns.")
-        .defaultValue(0.010)
-        .min(0.001)
-        .max(0.08)
-        .sliderRange(0.002, 0.03)
+        .description("Figure progress per tick (0.03 is a good start).")
+        .defaultValue(0.030)
+        .min(0.002)
+        .max(0.15)
+        .sliderRange(0.005, 0.08)
         .build()
     );
 
     private final Setting<Double> lookAhead = sgPath.add(new DoubleSetting.Builder()
         .name("look-ahead")
-        .description("How far ahead on the curve the module looks when steering.")
-        .defaultValue(0.24)
+        .description("How far ahead on path to aim movement/camera.")
+        .defaultValue(0.060)
+        .min(0.0)
+        .max(0.5)
+        .sliderRange(0.01, 0.2)
+        .build()
+    );
+
+    private final Setting<Double> horizontalSpeed = sgMovement.add(new DoubleSetting.Builder()
+        .name("horizontal-speed")
+        .description("Horizontal flight speed towards path.")
+        .defaultValue(2.0)
+        .min(0.1)
+        .sliderMax(6.0)
+        .build()
+    );
+
+    private final Setting<Double> verticalSpeed = sgMovement.add(new DoubleSetting.Builder()
+        .name("vertical-speed")
+        .description("Vertical correction speed.")
+        .defaultValue(1.2)
         .min(0.05)
-        .max(1.2)
-        .sliderRange(0.1, 0.8)
+        .sliderMax(5.0)
+        .build()
+    );
+
+    private final Setting<Double> altitudeOffset = sgMovement.add(new DoubleSetting.Builder()
+        .name("altitude-offset")
+        .description("Vertical offset from activation height.")
+        .defaultValue(0.0)
+        .min(-80.0)
+        .max(80.0)
+        .sliderRange(-20.0, 20.0)
+        .build()
+    );
+
+    private final Setting<Boolean> rotateCamera = sgCamera.add(new BoolSetting.Builder()
+        .name("rotate-camera")
+        .description("Smoothly aligns camera with path direction.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> maxYawStep = sgCamera.add(new DoubleSetting.Builder()
+        .name("max-yaw-step")
+        .description("Maximum yaw change per tick.")
+        .defaultValue(6.0)
+        .min(0.5)
+        .max(60.0)
+        .sliderRange(1.0, 20.0)
+        .visible(rotateCamera::get)
+        .build()
+    );
+
+    private final Setting<Double> maxPitchStep = sgCamera.add(new DoubleSetting.Builder()
+        .name("max-pitch-step")
+        .description("Maximum pitch change per tick.")
+        .defaultValue(4.0)
+        .min(0.5)
+        .max(45.0)
+        .sliderRange(1.0, 15.0)
+        .visible(rotateCamera::get)
+        .build()
+    );
+
+    private final Setting<Double> yawDeadZone = sgCamera.add(new DoubleSetting.Builder()
+        .name("yaw-dead-zone")
+        .description("Ignore very small yaw corrections.")
+        .defaultValue(0.20)
+        .min(0.0)
+        .max(5.0)
+        .sliderRange(0.0, 1.0)
+        .visible(rotateCamera::get)
         .build()
     );
 
     private final Setting<Boolean> autoWalk = sgAssist.add(new BoolSetting.Builder()
         .name("auto-walk")
-        .description("Holds forward key while enabled.")
+        .description("Keeps forward key pressed.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Boolean> autoTakeoff = sgAssist.add(new BoolSetting.Builder()
         .name("auto-takeoff")
-        .description("Attempts to auto start elytra flight when possible.")
+        .description("Auto-start elytra flight.")
         .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> lockPitch = sgAssist.add(new BoolSetting.Builder()
-        .name("lock-pitch")
-        .description("Locks pitch while steering figures.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Double> pitch = sgAssist.add(new DoubleSetting.Builder()
-        .name("pitch")
-        .description("Pitch value used if lock-pitch is enabled.")
-        .defaultValue(0.0)
-        .min(-45.0)
-        .max(45.0)
-        .sliderRange(-30.0, 30.0)
-        .visible(lockPitch::get)
         .build()
     );
 
     private final Setting<Boolean> useFireworks = sgAssist.add(new BoolSetting.Builder()
         .name("use-fireworks")
-        .description("Uses rockets periodically to keep gliding stable.")
+        .description("Uses rockets periodically.")
         .defaultValue(false)
         .build()
     );
 
     private final Setting<Integer> fireworkDelay = sgAssist.add(new IntSetting.Builder()
         .name("firework-delay")
-        .description("Ticks between firework uses.")
+        .description("Ticks between rocket uses.")
         .defaultValue(35)
         .min(5)
         .sliderMax(200)
         .visible(useFireworks::get)
-        .build()
-    );
-
-    private final Setting<Boolean> stallRocket = sgAssist.add(new BoolSetting.Builder()
-        .name("stall-rocket")
-        .description("Uses a rocket early if horizontal speed drops too low.")
-        .defaultValue(true)
-        .visible(useFireworks::get)
-        .build()
-    );
-
-    private final Setting<Double> stallSpeed = sgAssist.add(new DoubleSetting.Builder()
-        .name("stall-speed")
-        .description("Horizontal speed threshold for stall-rocket.")
-        .defaultValue(0.08)
-        .min(0.0)
-        .sliderMax(1.0)
-        .visible(() -> useFireworks.get() && stallRocket.get())
         .build()
     );
 
@@ -155,7 +193,6 @@ public class AntiWasp extends Module {
 
     private int figureTicks;
     private int fireworkTicks;
-    private int stallTicks;
     private int takeoffCooldown;
     private int noRocketWarnCooldown;
 
@@ -163,7 +200,7 @@ public class AntiWasp extends Module {
     private boolean prevForwardState;
 
     public AntiWasp() {
-        super(AddonTemplate.CATEGORY, "anti-wasp", "Autowalk elytra autopilot with large figure flight paths.");
+        super(AddonTemplate.CATEGORY, "anti-wasp", "Smooth figure flight: circle, square, triangle.");
     }
 
     @Override
@@ -174,14 +211,13 @@ public class AntiWasp extends Module {
         phase = 0.0;
         figureTicks = 0;
         fireworkTicks = 0;
-        stallTicks = 0;
         takeoffCooldown = 0;
         noRocketWarnCooldown = 0;
 
         forcedForward = false;
         prevForwardState = mc.options.forwardKey.isPressed();
 
-        anchorToCurrentPosition();
+        origin = mc.player.getPos();
     }
 
     @Override
@@ -192,18 +228,11 @@ public class AntiWasp extends Module {
         }
     }
 
-    @EventHandler
-    private void onTick(TickEvent.Pre event) {
+    @EventHandler(priority = EventPriority.HIGH)
+    private void onTickPre(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
-        if (autoWalk.get()) {
-            if (!forcedForward) prevForwardState = mc.options.forwardKey.isPressed();
-            mc.options.forwardKey.setPressed(true);
-            forcedForward = true;
-        } else if (forcedForward) {
-            mc.options.forwardKey.setPressed(prevForwardState);
-            forcedForward = false;
-        }
+        applyAutoWalkState();
 
         if (takeoffCooldown > 0) takeoffCooldown--;
         if (noRocketWarnCooldown > 0) noRocketWarnCooldown--;
@@ -219,66 +248,88 @@ public class AntiWasp extends Module {
                 figureTicks = 0;
                 activeFigure = nextFigure(activeFigure);
                 phase = 0.0;
-                anchorToCurrentPosition();
+                origin = mc.player.getPos();
                 info("Figure: " + activeFigure.name().toLowerCase());
             }
         } else {
             activeFigure = figure.get();
         }
 
-        steerAlongFigure();
+        double direction = clockwise.get() ? 1.0 : -1.0;
+        phase = wrap01(phase + phaseStep.get() * direction);
+
+        if (rotateCamera.get()) updateCamera();
         handleFireworks();
     }
 
-    private void steerAlongFigure() {
-        if (mc.player == null) return;
+    @EventHandler(priority = EventPriority.LOW)
+    private void onTickPost(TickEvent.Post event) {
+        if (mc.player == null || mc.world == null) return;
+        applyAutoWalkState();
+    }
 
-        double direction = clockwise.get() ? 1.0 : -1.0;
-        phase += phaseStep.get() * direction;
-        double targetPhase = phase + lookAhead.get() * direction;
+    @EventHandler
+    private void onMove(PlayerMoveEvent event) {
+        if (mc.player == null || mc.world == null) return;
+        if (!mc.player.isGliding()) return;
+        if (!isWearingElytra()) return;
 
-        Vec3d offset = getOffset(activeFigure, targetPhase);
-        Vec3d target = new Vec3d(origin.x + offset.x, mc.player.getY(), origin.z + offset.z);
+        Vec3d target = getPathPoint(phase + lookAhead.get());
+        double xDist = target.x - mc.player.getX();
+        double zDist = target.z - mc.player.getZ();
+        double yDist = target.y - mc.player.getY();
 
-        double dx = target.x - mc.player.getX();
-        double dz = target.z - mc.player.getZ();
+        double xVel = axisSpeed(xDist, horizontalSpeed.get());
+        double zVel = axisSpeed(zDist, horizontalSpeed.get());
 
-        if (dx * dx + dz * dz < 1e-6) return;
+        double absX = Math.abs(xDist);
+        double absZ = Math.abs(zDist);
+        if (absX > 1.0E-5 && absZ > 1.0E-5) {
+            double diag = 1.0 / Math.sqrt(absX * absX + absZ * absZ);
+            xVel *= absX * diag;
+            zVel *= absZ * diag;
+        }
 
-        float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-        mc.player.setYaw(yaw);
-        mc.player.setHeadYaw(yaw);
-        mc.player.setBodyYaw(yaw);
+        double yVel = axisSpeed(yDist, verticalSpeed.get());
+        ((IVec3d) event.movement).meteor$set(xVel, yVel, zVel);
+    }
 
-        if (lockPitch.get()) {
-            mc.player.setPitch(pitch.get().floatValue());
+    private void applyAutoWalkState() {
+        if (autoWalk.get()) {
+            if (!forcedForward) prevForwardState = mc.options.forwardKey.isPressed();
+            mc.options.forwardKey.setPressed(true);
+            forcedForward = true;
+        } else if (forcedForward) {
+            mc.options.forwardKey.setPressed(prevForwardState);
+            forcedForward = false;
         }
     }
 
-    private void handleFireworks() {
-        if (!useFireworks.get()) return;
+    private void updateCamera() {
+        Vec3d lookTarget = getPathPoint(phase + lookAhead.get());
+        double dx = lookTarget.x - mc.player.getX();
+        double dz = lookTarget.z - mc.player.getZ();
+        double dy = lookTarget.y - mc.player.getEyeY();
 
-        fireworkTicks++;
-        if (fireworkTicks >= fireworkDelay.get()) {
-            fireworkTicks = 0;
-            useFirework();
+        if (dx * dx + dz * dz < 1e-6) return;
+
+        float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
+        float currentYaw = mc.player.getYaw();
+        float deltaYaw = MathHelper.wrapDegrees(targetYaw - currentYaw);
+        if (Math.abs(deltaYaw) > yawDeadZone.get()) {
+            float yawStep = (float) Math.min(Math.abs(deltaYaw), maxYawStep.get());
+            float nextYaw = currentYaw + Math.copySign(yawStep, deltaYaw);
+            mc.player.setYaw(nextYaw);
+            mc.player.setHeadYaw(nextYaw);
+            mc.player.setBodyYaw(nextYaw);
         }
 
-        if (stallRocket.get()) {
-            Vec3d velocity = mc.player.getVelocity();
-            double speed = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
-
-            if (speed < stallSpeed.get()) {
-                stallTicks++;
-                if (stallTicks >= 20) {
-                    stallTicks = 0;
-                    fireworkTicks = 0;
-                    useFirework();
-                }
-            } else {
-                stallTicks = 0;
-            }
-        }
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        float targetPitch = (float) -Math.toDegrees(Math.atan2(dy, horizontal));
+        float currentPitch = mc.player.getPitch();
+        float deltaPitch = targetPitch - currentPitch;
+        float pitchStep = (float) Math.min(Math.abs(deltaPitch), maxPitchStep.get());
+        mc.player.setPitch(currentPitch + Math.copySign(pitchStep, deltaPitch));
     }
 
     private void tryAutoTakeoff() {
@@ -297,6 +348,15 @@ public class AntiWasp extends Module {
                 mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING
             ));
             takeoffCooldown = 10;
+        }
+    }
+
+    private void handleFireworks() {
+        if (!useFireworks.get()) return;
+        fireworkTicks++;
+        if (fireworkTicks >= fireworkDelay.get()) {
+            fireworkTicks = 0;
+            useFirework();
         }
     }
 
@@ -328,34 +388,52 @@ public class AntiWasp extends Module {
         return -1;
     }
 
-    private void anchorToCurrentPosition() {
-        Vec3d pos = mc.player.getPos();
-        Vec3d atZero = getOffset(activeFigure, 0.0);
-        origin = new Vec3d(pos.x - atZero.x, pos.y, pos.z - atZero.z);
+    private Vec3d getPathPoint(double phase01Raw) {
+        double p = wrap01(phase01Raw);
+        Vec3d offset = getOffset(activeFigure, p);
+        return new Vec3d(origin.x + offset.x, origin.y + altitudeOffset.get(), origin.z + offset.z);
     }
 
-    private Vec3d getOffset(FlightFigure figure, double t) {
+    private Vec3d getOffset(FlightFigure type, double p) {
         double r = radius.get();
-
-        return switch (figure) {
-            case Circle -> new Vec3d(r * Math.cos(t), 0.0, r * Math.sin(t));
-            case Infinity -> {
-                double x = r * Math.sin(t);
-                double z = r * Math.sin(t) * Math.cos(t) * 2.0;
-                yield new Vec3d(x, 0.0, z);
+        return switch (type) {
+            case Circle -> {
+                double a = p * Math.PI * 2.0;
+                yield new Vec3d(r * Math.cos(a), 0.0, r * Math.sin(a));
             }
-            case Clover -> {
-                double rr = r * Math.cos(3.0 * t);
-                double x = rr * Math.cos(t);
-                double z = rr * Math.sin(t);
-                yield new Vec3d(x, 0.0, z);
+            case Square -> {
+                Vec3d[] v = new Vec3d[] {
+                    new Vec3d(r, 0.0, r),
+                    new Vec3d(-r, 0.0, r),
+                    new Vec3d(-r, 0.0, -r),
+                    new Vec3d(r, 0.0, -r)
+                };
+                yield pointOnPolygon(v, p);
             }
-            case Wave -> {
-                double x = r * Math.cos(t);
-                double z = r * 0.38 * Math.sin(2.0 * t);
-                yield new Vec3d(x, 0.0, z);
+            case Triangle -> {
+                double h = r * 0.8660254037844386;
+                Vec3d[] v = new Vec3d[] {
+                    new Vec3d(0.0, 0.0, r),
+                    new Vec3d(-h, 0.0, -r * 0.5),
+                    new Vec3d(h, 0.0, -r * 0.5)
+                };
+                yield pointOnPolygon(v, p);
             }
         };
+    }
+
+    private Vec3d pointOnPolygon(Vec3d[] vertices, double p) {
+        int n = vertices.length;
+        double segPos = p * n;
+        int i = (int) Math.floor(segPos) % n;
+        double t = segPos - Math.floor(segPos);
+        Vec3d a = vertices[i];
+        Vec3d b = vertices[(i + 1) % n];
+        return new Vec3d(
+            a.x + (b.x - a.x) * t,
+            0.0,
+            a.z + (b.z - a.z) * t
+        );
     }
 
     private FlightFigure nextFigure(FlightFigure current) {
@@ -363,10 +441,20 @@ public class AntiWasp extends Module {
         return values[(current.ordinal() + 1) % values.length];
     }
 
+    private double axisSpeed(double dist, double maxSpeed) {
+        double abs = Math.abs(dist);
+        if (abs < 1.0E-5) return 0.0;
+        return abs < maxSpeed ? dist : maxSpeed * Math.signum(dist);
+    }
+
+    private double wrap01(double value) {
+        double wrapped = value % 1.0;
+        return wrapped < 0.0 ? wrapped + 1.0 : wrapped;
+    }
+
     public enum FlightFigure {
         Circle,
-        Infinity,
-        Clover,
-        Wave
+        Square,
+        Triangle
     }
 }
