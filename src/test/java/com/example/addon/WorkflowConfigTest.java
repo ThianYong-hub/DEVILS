@@ -40,9 +40,11 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("group: release-tags"));
         assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("attempts=10"));
-        assertTrue(workflow.contains("persist-credentials: false"));
-        assertTrue(workflow.contains("secrets.RELEASE_TOKEN"));
-        assertTrue(workflow.contains("x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"));
+        assertTrue(workflow.contains("actions: write"));
+        assertTrue(workflow.contains("github.token"));
+        assertTrue(workflow.contains("x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"));
+        assertTrue(workflow.contains("Trigger Release Workflow"));
+        assertTrue(workflow.contains("workflows/release-on-tag.yml/dispatches"));
     }
 
     @Test
@@ -51,7 +53,9 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("name: Release From Tag"));
         assertTrue(workflow.contains("tags:"));
         assertTrue(workflow.contains("- \"v*\""));
-        assertTrue(workflow.contains("APP_VERSION=${GITHUB_REF_NAME#v}"));
+        assertTrue(workflow.contains("workflow_dispatch"));
+        assertTrue(workflow.contains("RELEASE_TAG"));
+        assertTrue(workflow.contains("APP_VERSION=${RELEASE_TAG#v}"));
         assertTrue(workflow.contains("softprops/action-gh-release@v2"));
         assertTrue(workflow.contains("generate_release_notes: true"));
         assertTrue(workflow.contains("files: build/libs/*.jar"));
@@ -65,8 +69,9 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("format vX.Y.Z"));
         assertTrue(workflow.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+$"));
         assertTrue(workflow.contains("group: release-tags"));
-        assertTrue(workflow.contains("persist-credentials: false"));
-        assertTrue(workflow.contains("secrets.RELEASE_TOKEN"));
+        assertTrue(workflow.contains("actions: write"));
+        assertTrue(workflow.contains("github.token"));
+        assertTrue(workflow.contains("Trigger Release Workflow"));
     }
 
     private String readWorkflow(String fileName) throws IOException {
