@@ -61,6 +61,10 @@ Stable version source:
 - Stable builds use Git tag as source of truth (`APP_VERSION` from tag).
 - `mod_version` in `gradle.properties` is fallback for local builds only.
 
+Release secret requirement:
+- Set repository secret `RELEASE_TOKEN` (PAT with repository write access) for tag-creating workflows.
+- This token is used to push `v*` tags so that `release-on-tag` is triggered reliably.
+
 ## Authors
 
 - **23XT**
