@@ -51,6 +51,10 @@ class JoinWatcherAutoDisableTest {
             source.contains("case Both -> trigger == RuleTrigger.Join || trigger == RuleTrigger.Leave;"),
             "Expected Both to remain Join+Leave only."
         );
+        assertTrue(
+            source.contains("rule.soundValueFor(toRuleTrigger(trigger))"),
+            "Expected event-specific sound selection for join/leave/death."
+        );
     }
 
     @Test

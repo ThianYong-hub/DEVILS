@@ -190,7 +190,8 @@ public class JoinWatcher extends Module {
             if (!matchesEvent(rule.eventMode(), trigger)) continue;
 
             if (rule.soundEnabled()) {
-                JoinSoundPlayer.play(rule.soundSource(), rule.soundValue(), defaultSound.get(), rule.oggVolumePercent());
+                String soundValue = rule.soundValueFor(toRuleTrigger(trigger));
+                JoinSoundPlayer.play(rule.soundSource(), soundValue, defaultSound.get(), rule.oggVolumePercent());
             }
 
             if (rule.sendEnabled()) {
@@ -287,6 +288,14 @@ public class JoinWatcher extends Module {
             case Leave -> trigger == RuleTrigger.Leave;
             case Both -> trigger == RuleTrigger.Join || trigger == RuleTrigger.Leave;
             case Death -> trigger == RuleTrigger.Death;
+        };
+    }
+
+    private TrackerPlayerRule.Trigger toRuleTrigger(RuleTrigger trigger) {
+        return switch (trigger) {
+            case Join -> TrackerPlayerRule.Trigger.Join;
+            case Leave -> TrackerPlayerRule.Trigger.Leave;
+            case Death -> TrackerPlayerRule.Trigger.Death;
         };
     }
 

@@ -38,17 +38,22 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
 
     private static final double COL_SELECTOR = 84;
     private static final double COL_PLAYER = 230;
-    private static final double COL_EVENT = 96;
+    private static final double COL_EVENT = 84;
     private static final double COL_SOUND = 58;
     private static final double COL_SEND = 58;
     private static final double COL_COMMAND = 230;
     private static final double COL_DELAY = 92;
-    private static final double COL_SOURCE = 136;
-    private static final double COL_SOUND_VALUE = 312;
+    private static final double COL_SOURCE = 118;
+    private static final double COL_SOUND_VALUE = 392;
     private static final double COL_VOLUME = 64;
     private static final double COL_TEST = 54;
     private static final double COL_DELETE = 42;
-    private static final int GAME_SOUND_TEXT_MAX = 38;
+    private static final int GAME_SOUND_SLOT_TEXT_MAX = 8;
+    private static final double EVENT_DROPDOWN_WIDTH = 78;
+    private static final double SOURCE_DROPDOWN_WIDTH = 112;
+    private static final double SOUND_SLOT_WIDTH = 126;
+    private static final double SOUND_SLOT_INPUT_WIDTH = 108;
+    private static final double SOUND_SLOT_SELECT_WIDTH = 46;
 
     public TrackerPlayersSetting(
         String name,
@@ -132,7 +137,7 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         addHeader(rulesTable, theme, "Command", "Text or command sent to chat as-is.", COL_COMMAND);
         addHeader(rulesTable, theme, "Delay ms", "Delay before chat send in milliseconds (0-3600000).", COL_DELAY);
         addHeader(rulesTable, theme, "Source", "Sound source mode.", COL_SOURCE);
-        addHeader(rulesTable, theme, "Sound Value", "Local file / game sound id / manual id.", COL_SOUND_VALUE);
+        addHeader(rulesTable, theme, "Sounds (J/L/D)", "Separate sound values for Join / Leave / Death.", COL_SOUND_VALUE);
         addHeader(rulesTable, theme, "Vol%", "Volume for local .ogg only (0-200).", COL_VOLUME);
         addHeader(rulesTable, theme, "Test", "Test this row sound.", COL_TEST);
         addHeader(rulesTable, theme, "Delete", "Delete this rule.", COL_DELETE);
@@ -194,7 +199,7 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         playerTextBox.actionOnUnfocused = () -> setting.set(new ArrayList<>(rules));
 
         WHorizontalList eventCell = addColumnCell(theme, rulesTable, COL_EVENT);
-        WDropdown<TrackEventMode> eventDropdown = eventCell.add(theme.dropdown(TrackEventMode.values(), rule.eventMode())).expandX().widget();
+        WDropdown<TrackEventMode> eventDropdown = eventCell.add(theme.dropdown(TrackEventMode.values(), rule.eventMode())).minWidth(EVENT_DROPDOWN_WIDTH).widget();
         eventDropdown.tooltip = "Rule trigger event. Both = Join+Leave.";
         eventDropdown.action = () -> updateRule(setting, rules, ruleIndex, rules.get(ruleIndex).withEventMode(eventDropdown.get()));
 
@@ -218,7 +223,7 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         addChatDelayEditor(theme, delayCell, setting, rules, ruleIndex);
 
         WHorizontalList sourceCell = addColumnCell(theme, rulesTable, COL_SOURCE);
-        WDropdown<SoundSourceMode> sourceDropdown = sourceCell.add(theme.dropdown(SoundSourceMode.values(), rule.soundSource())).expandX().widget();
+        WDropdown<SoundSourceMode> sourceDropdown = sourceCell.add(theme.dropdown(SoundSourceMode.values(), rule.soundSource())).minWidth(SOURCE_DROPDOWN_WIDTH).widget();
         sourceDropdown.tooltip = "Select sound source.";
         sourceDropdown.action = () -> {
             updateRule(setting, rules, ruleIndex, rules.get(ruleIndex).withSoundSource(sourceDropdown.get()));
@@ -226,7 +231,7 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         };
 
         WHorizontalList soundValueCell = addColumnCell(theme, rulesTable, COL_SOUND_VALUE);
-        addSoundValueEditor(theme, rootTable, soundValueCell, setting, rules, ruleIndex, localSounds);
+        addEventSoundEditors(theme, rootTable, soundValueCell, setting, rules, ruleIndex, localSounds);
 
         WHorizontalList volumeCell = addColumnCell(theme, rulesTable, COL_VOLUME);
         addLocalVolumeEditor(theme, volumeCell, setting, rules, ruleIndex);
@@ -236,9 +241,10 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         testSound.tooltip = "Play this rule sound now with diagnostics.";
         testSound.action = () -> {
             TrackerPlayerRule current = rules.get(ruleIndex);
+            TrackerPlayerRule.Trigger trigger = getTestTrigger(current.eventMode());
             JoinSoundPlayer.PlaybackDiagnosticResult result = JoinSoundPlayer.testPlay(
                 current.soundSource(),
-                current.soundValue(),
+                current.soundValueFor(trigger),
                 getModuleDefaultSoundSpec(),
                 current.oggVolumePercent()
             );
@@ -260,7 +266,7 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         rulesTable.row();
     }
 
-    private static void addSoundValueEditor(
+    private static void addEventSoundEditors(
         GuiTheme theme,
         WTable rootTable,
         WHorizontalList soundControl,
@@ -271,43 +277,70 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
     ) {
         TrackerPlayerRule rule = rules.get(ruleIndex);
 
-        switch (rule.soundSource()) {
+        if (rule.soundSource() == SoundSourceMode.LocalFolder) {
+            TrackerPlayerRule normalizedRule = normalizeRuleLocalSoundValues(rule, localSounds);
+            if (!normalizedRule.equals(rule)) {
+                updateRule(setting, rules, ruleIndex, normalizedRule);
+                rule = normalizedRule;
+            }
+        }
+
+        addEventSoundEditor(theme, rootTable, soundControl, setting, rules, ruleIndex, localSounds, EventSoundSlot.Join, rule.soundSource());
+        addEventSoundEditor(theme, rootTable, soundControl, setting, rules, ruleIndex, localSounds, EventSoundSlot.Leave, rule.soundSource());
+        addEventSoundEditor(theme, rootTable, soundControl, setting, rules, ruleIndex, localSounds, EventSoundSlot.Death, rule.soundSource());
+    }
+
+    private static void addEventSoundEditor(
+        GuiTheme theme,
+        WTable rootTable,
+        WHorizontalList soundControl,
+        TrackerPlayersSetting setting,
+        ArrayList<TrackerPlayerRule> rules,
+        int ruleIndex,
+        List<String> localSounds,
+        EventSoundSlot slot,
+        SoundSourceMode sourceMode
+    ) {
+        WHorizontalList slotControl = soundControl.add(theme.horizontalList()).minWidth(SOUND_SLOT_WIDTH).centerY().widget();
+        slotControl.add(theme.label(slot.shortLabel)).widget().tooltip = slot.tooltip;
+
+        switch (sourceMode) {
             case LocalFolder -> {
                 String[] values = localSounds.isEmpty()
                     ? new String[] { NO_LOCAL_SOUNDS }
                     : localSounds.toArray(String[]::new);
 
-                String normalized = normalizeLocalSoundValue(rule.soundValue(), localSounds);
-                if (!normalized.equals(rule.soundValue())) {
-                    updateRule(setting, rules, ruleIndex, rule.withSoundValue(normalized));
-                }
+                TrackerPlayerRule currentRule = rules.get(ruleIndex);
+                String selectedValue = soundValueForSlot(currentRule, slot);
+                String selected = localSounds.isEmpty() ? NO_LOCAL_SOUNDS : selectedValue;
 
-                String selected = localSounds.isEmpty() ? NO_LOCAL_SOUNDS : normalized;
-
-                WDropdown<String> localDropdown = soundControl.add(theme.dropdown(values, selected)).expandX().widget();
-                localDropdown.tooltip = "Local .ogg from " + SOUNDS_FOLDER_LABEL + ".";
+                WDropdown<String> localDropdown = slotControl.add(theme.dropdown(values, selected)).minWidth(SOUND_SLOT_INPUT_WIDTH).widget();
+                localDropdown.tooltip = slot.tooltip + " Local .ogg from " + SOUNDS_FOLDER_LABEL + ".";
                 localDropdown.action = () -> {
                     String value = localDropdown.get();
                     if (NO_LOCAL_SOUNDS.equals(value)) return;
-                    updateRule(setting, rules, ruleIndex, rules.get(ruleIndex).withSoundValue(value));
+                    updateRule(setting, rules, ruleIndex, withSoundValueForSlot(rules.get(ruleIndex), slot, value));
                 };
             }
             case GameRegistry -> {
-                String full = rule.soundValue().isBlank() ? "(none)" : rule.soundValue();
-                String compact = compactSoundValue(full, GAME_SOUND_TEXT_MAX);
-                soundControl.add(theme.label(compact)).expandX().widget().tooltip = full;
+                TrackerPlayerRule currentRule = rules.get(ruleIndex);
+                String full = soundValueForSlot(currentRule, slot);
+                String display = full.isBlank() ? "(none)" : compactSoundValue(full, GAME_SOUND_SLOT_TEXT_MAX);
 
-                WButton selectGameSound = soundControl.add(theme.button("Select")).widget();
-                selectGameSound.tooltip = "Select a sound id from game registry.";
+                slotControl.add(theme.label(display)).minWidth(SOUND_SLOT_INPUT_WIDTH - SOUND_SLOT_SELECT_WIDTH - 4).centerY().widget().tooltip = full.isBlank() ? "(none)" : full;
+
+                WButton selectGameSound = slotControl.add(theme.button("...")).minWidth(SOUND_SLOT_SELECT_WIDTH).widget();
+                selectGameSound.tooltip = slot.tooltip + " Select a sound id from game registry.";
                 selectGameSound.action = () -> mc.setScreen(new GameSoundSelectScreen(theme, selectedSound -> {
-                    updateRule(setting, rules, ruleIndex, rules.get(ruleIndex).withSoundValue(selectedSound));
+                    updateRule(setting, rules, ruleIndex, withSoundValueForSlot(rules.get(ruleIndex), slot, selectedSound));
                     fillTable(theme, rootTable, setting);
                 }));
             }
             case ManualId -> {
-                WTextBox manualTextBox = soundControl.add(theme.textBox(rule.soundValue())).expandX().widget();
-                manualTextBox.tooltip = "Manual sound id, ex: minecraft:block.note_block.bell";
-                manualTextBox.action = () -> rules.set(ruleIndex, rules.get(ruleIndex).withSoundValue(manualTextBox.get()));
+                TrackerPlayerRule currentRule = rules.get(ruleIndex);
+                WTextBox manualTextBox = slotControl.add(theme.textBox(soundValueForSlot(currentRule, slot))).minWidth(SOUND_SLOT_INPUT_WIDTH).widget();
+                manualTextBox.tooltip = slot.tooltip + " Manual sound id, ex: minecraft:block.note_block.bell";
+                manualTextBox.action = () -> rules.set(ruleIndex, withSoundValueForSlot(rules.get(ruleIndex), slot, manualTextBox.get()));
                 manualTextBox.actionOnUnfocused = () -> setting.set(new ArrayList<>(rules));
             }
         }
@@ -386,6 +419,45 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         return normalized;
     }
 
+    public static TrackerPlayerRule normalizeRuleLocalSoundValues(TrackerPlayerRule rule, List<String> localSounds) {
+        if (rule == null) return null;
+        if (localSounds == null || localSounds.isEmpty()) {
+            return rule
+                .withJoinSoundValue("")
+                .withLeaveSoundValue("")
+                .withDeathSoundValue("");
+        }
+
+        return rule
+            .withJoinSoundValue(normalizeLocalSoundValue(rule.joinSoundValue(), localSounds))
+            .withLeaveSoundValue(normalizeLocalSoundValue(rule.leaveSoundValue(), localSounds))
+            .withDeathSoundValue(normalizeLocalSoundValue(rule.deathSoundValue(), localSounds));
+    }
+
+    private static TrackerPlayerRule.Trigger getTestTrigger(TrackEventMode eventMode) {
+        return switch (eventMode) {
+            case Leave -> TrackerPlayerRule.Trigger.Leave;
+            case Death -> TrackerPlayerRule.Trigger.Death;
+            case Join, Both -> TrackerPlayerRule.Trigger.Join;
+        };
+    }
+
+    private static String soundValueForSlot(TrackerPlayerRule rule, EventSoundSlot slot) {
+        return switch (slot) {
+            case Join -> rule.joinSoundValue();
+            case Leave -> rule.leaveSoundValue();
+            case Death -> rule.deathSoundValue();
+        };
+    }
+
+    private static TrackerPlayerRule withSoundValueForSlot(TrackerPlayerRule rule, EventSoundSlot slot, String value) {
+        return switch (slot) {
+            case Join -> rule.withJoinSoundValue(value);
+            case Leave -> rule.withLeaveSoundValue(value);
+            case Death -> rule.withDeathSoundValue(value);
+        };
+    }
+
     private static void addHeader(WTable table, GuiTheme theme, String title, String tooltip, double width) {
         table.add(theme.label(title)).minWidth(width).expandX().center().widget().tooltip = tooltip;
     }
@@ -402,6 +474,20 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         if (value == null) return "";
         if (maxChars < 4 || value.length() <= maxChars) return value;
         return value.substring(0, maxChars - 3) + "...";
+    }
+
+    private enum EventSoundSlot {
+        Join("J", "Join sound."),
+        Leave("L", "Leave sound."),
+        Death("D", "Death sound.");
+
+        private final String shortLabel;
+        private final String tooltip;
+
+        EventSoundSlot(String shortLabel, String tooltip) {
+            this.shortLabel = shortLabel;
+            this.tooltip = tooltip;
+        }
     }
 
     private static Integer parseVolumePercent(String value) {
@@ -462,6 +548,8 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
             "",
             SoundSourceMode.LocalFolder,
             localSound,
+            localSound,
+            localSound,
             TrackerPlayerRule.DEFAULT_OGG_VOLUME_PERCENT,
             TrackerPlayerRule.DEFAULT_CHAT_DELAY_MS
         );
@@ -487,7 +575,9 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
             ruleTag.putBoolean("send-enabled", rule.sendEnabled());
             ruleTag.putString("command-text", rule.commandText());
             ruleTag.putString("sound-source", rule.soundSource().name());
-            ruleTag.putString("sound-value", rule.soundValue());
+            ruleTag.putString("join-sound-value", rule.joinSoundValue());
+            ruleTag.putString("leave-sound-value", rule.leaveSoundValue());
+            ruleTag.putString("death-sound-value", rule.deathSoundValue());
             ruleTag.putInt("ogg-volume-percent", rule.oggVolumePercent());
             ruleTag.putInt("chat-delay-ms", rule.chatDelayMs());
             valueTag.add(ruleTag);
@@ -502,6 +592,16 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
 
             TrackEventMode eventMode = parseEnum(ruleTag.getString("event-mode", ""), TrackEventMode.Join, TrackEventMode.values());
             SoundSourceMode soundSource = parseEnum(ruleTag.getString("sound-source", ""), SoundSourceMode.LocalFolder, SoundSourceMode.values());
+            String joinSoundValue = ruleTag.getString("join-sound-value", "");
+            String leaveSoundValue = ruleTag.getString("leave-sound-value", "");
+            String deathSoundValue = ruleTag.getString("death-sound-value", "");
+
+            if (joinSoundValue.isBlank() && leaveSoundValue.isBlank() && deathSoundValue.isBlank()) {
+                String legacySoundValue = ruleTag.getString("sound-value", "");
+                joinSoundValue = legacySoundValue;
+                leaveSoundValue = legacySoundValue;
+                deathSoundValue = legacySoundValue;
+            }
 
             rules.add(new TrackerPlayerRule(
                 ruleTag.getString("player", ""),
@@ -510,7 +610,9 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
                 ruleTag.getBoolean("send-enabled", false),
                 ruleTag.getString("command-text", ""),
                 soundSource,
-                ruleTag.getString("sound-value", ""),
+                joinSoundValue,
+                leaveSoundValue,
+                deathSoundValue,
                 ruleTag.getInt("ogg-volume-percent", TrackerPlayerRule.DEFAULT_OGG_VOLUME_PERCENT),
                 ruleTag.getInt("chat-delay-ms", TrackerPlayerRule.DEFAULT_CHAT_DELAY_MS)
             ));

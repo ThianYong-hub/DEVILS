@@ -28,7 +28,9 @@ class TrackerPlayersSettingTest {
                 false,
                 "",
                 SoundSourceMode.LocalFolder,
-                "bandit.ogg",
+                "join-bandit.ogg",
+                "leave-bandit.ogg",
+                "death-bandit.ogg",
                 80,
                 0
             ),
@@ -40,6 +42,8 @@ class TrackerPlayersSettingTest {
                 "/msg hello",
                 SoundSourceMode.ManualId,
                 "minecraft:block.note_block.bell",
+                "minecraft:block.note_block.harp",
+                "minecraft:block.note_block.snare",
                 100,
                 350
             )
@@ -76,13 +80,40 @@ class TrackerPlayersSettingTest {
         tag.putBoolean("send-enabled", false);
         tag.putString("command-text", "");
         tag.putString("sound-source", "LocalFolder");
-        tag.putString("sound-value", "bandit.ogg");
+        tag.putString("sound-value", "legacy-bandit.ogg");
         list.add(tag);
 
         List<TrackerPlayerRule> loaded = TrackerPlayersSetting.rulesFromNbt(list);
         assertEquals(1, loaded.size());
+        assertEquals("legacy-bandit.ogg", loaded.getFirst().joinSoundValue());
+        assertEquals("legacy-bandit.ogg", loaded.getFirst().leaveSoundValue());
+        assertEquals("legacy-bandit.ogg", loaded.getFirst().deathSoundValue());
         assertEquals(TrackerPlayerRule.DEFAULT_OGG_VOLUME_PERCENT, loaded.getFirst().oggVolumePercent());
         assertEquals(TrackerPlayerRule.DEFAULT_CHAT_DELAY_MS, loaded.getFirst().chatDelayMs());
+    }
+
+    @Test
+    void normalizeRuleLocalSoundValuesNormalizesJoinLeaveDeathSeparately() {
+        TrackerPlayerRule rule = new TrackerPlayerRule(
+            "Bandit",
+            TrackEventMode.Join,
+            true,
+            false,
+            "",
+            SoundSourceMode.LocalFolder,
+            "missing.ogg",
+            "",
+            "nested/b.ogg",
+            100,
+            0
+        );
+
+        List<String> localSounds = List.of("a.ogg", "nested/b.ogg");
+        TrackerPlayerRule normalized = TrackerPlayersSetting.normalizeRuleLocalSoundValues(rule, localSounds);
+
+        assertEquals("a.ogg", normalized.joinSoundValue());
+        assertEquals("a.ogg", normalized.leaveSoundValue());
+        assertEquals("nested/b.ogg", normalized.deathSoundValue());
     }
 
     @Test
@@ -93,6 +124,15 @@ class TrackerPlayersSettingTest {
 
         assertTrue(source.contains("OnlinePlayerSelectScreen"));
         assertTrue(source.contains("testPlay("));
+        assertTrue(source.contains("addEventSoundEditors("));
+        assertTrue(source.contains("Join(\"J\""));
+        assertTrue(source.contains("Leave(\"L\""));
+        assertTrue(source.contains("Death(\"D\""));
+        assertTrue(source.contains("minWidth(EVENT_DROPDOWN_WIDTH)"));
+        assertTrue(source.contains("minWidth(SOURCE_DROPDOWN_WIDTH)"));
+        assertTrue(source.contains("\"join-sound-value\""));
+        assertTrue(source.contains("\"leave-sound-value\""));
+        assertTrue(source.contains("\"death-sound-value\""));
         assertTrue(source.contains("addColumnCell("));
         assertTrue(source.contains("addLocalVolumeEditor("));
         assertFalse(source.contains("theme.checkbox(rule.soundEnabled())).minWidth("));

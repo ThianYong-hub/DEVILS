@@ -18,13 +18,15 @@ Automatically renames items in an open anvil GUI. Pulls items from inventory, se
 
 ### TrackerPlayer
 Tracks players with fully per-player rules. Each rule has player name, event mode (`Join`, `Leave`, `Both`, `Death`), sound toggle, send toggle, command text, per-player chat send delay (ms), and sound source mode (`Local folder`, `Game sound`, `Manual ID`).
+Each rule stores separate sound values for `Join`, `Leave`, and `Death` under the same source mode.
 `Both` means only `Join + Leave` (it does not include `Death`).
 
 Sound workflow:
 - Put `.ogg` files inside `<gameDir>/devils-addon/sounds` (subfolders supported)
-- Use `Refresh Sounds` and select from dropdown in the rule
+- Use `Refresh Sounds` and select per-event sounds (`J/L/D`) in the rule
 - Or pick an existing game sound from selector
 - Or use manual sound id for custom packs/mod integrations
+- If event-specific sound value is empty/invalid, the module falls back to `default-sound`, then to built-in fallback sound
 
 ## Commands
 
