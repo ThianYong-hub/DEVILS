@@ -40,6 +40,9 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("group: release-tags"));
         assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("attempts=10"));
+        assertTrue(workflow.contains("persist-credentials: false"));
+        assertTrue(workflow.contains("secrets.RELEASE_TOKEN"));
+        assertTrue(workflow.contains("x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"));
     }
 
     @Test
@@ -62,6 +65,8 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("format vX.Y.Z"));
         assertTrue(workflow.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+$"));
         assertTrue(workflow.contains("group: release-tags"));
+        assertTrue(workflow.contains("persist-credentials: false"));
+        assertTrue(workflow.contains("secrets.RELEASE_TOKEN"));
     }
 
     private String readWorkflow(String fileName) throws IOException {
