@@ -26,18 +26,23 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("name: Publish Development Build"));
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
+        assertTrue(workflow.contains("branches-ignore:"));
+        assertTrue(workflow.contains("- main"));
         assertTrue(workflow.contains("tags-ignore:"));
         assertFalse(workflow.contains("tag_name: snapshot"));
         assertFalse(workflow.contains("softprops/action-gh-release"));
     }
 
     @Test
-    void releaseAutoPatchWorkflowHasConcurrencyAndRetry() throws IOException {
+    void releaseAutoPatchWorkflowRunsOnlyForMergedPrCommits() throws IOException {
         String workflow = readWorkflow("release-auto-patch.yml");
         assertTrue(workflow.contains("name: Auto Patch Tag"));
         assertTrue(workflow.contains("branches:"));
         assertTrue(workflow.contains("- main"));
         assertTrue(workflow.contains("group: release-tags"));
+        assertTrue(workflow.contains("Detect merged PR for this commit"));
+        assertTrue(workflow.contains("GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls"));
+        assertTrue(workflow.contains("steps.detect_merged_pr.outputs.skip != 'true'"));
         assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("attempts=10"));
         assertTrue(workflow.contains("actions: write"));
@@ -51,9 +56,11 @@ class WorkflowConfigTest {
     void releaseOnTagWorkflowPublishesStableRelease() throws IOException {
         String workflow = readWorkflow("release-on-tag.yml");
         assertTrue(workflow.contains("name: Release From Tag"));
-        assertTrue(workflow.contains("tags:"));
-        assertTrue(workflow.contains("- \"v*\""));
         assertTrue(workflow.contains("workflow_dispatch"));
+        assertTrue(workflow.contains("inputs:"));
+        assertTrue(workflow.contains("tag:"));
+        assertFalse(workflow.contains("push:"));
+        assertTrue(workflow.contains("ref: ${{ inputs.tag }}"));
         assertTrue(workflow.contains("RELEASE_TAG"));
         assertTrue(workflow.contains("APP_VERSION=${RELEASE_TAG#v}"));
         assertTrue(workflow.contains("softprops/action-gh-release@v2"));
