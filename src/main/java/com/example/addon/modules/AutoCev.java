@@ -24,22 +24,24 @@ import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.util.ActionResult;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 public class AutoCev extends Module {
-    private static final Direction[] CARDINAL = {
-        Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
-    };
-
+    private static final Direction[] CARDINAL = { Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST };
     private static final int ROTATE_PRIORITY = 50;
-    private static final int CRYSTAL_RETRY_TICKS = 2;
-    private static final double CRYSTAL_SEARCH_RADIUS_SQ = 4.0;
+    private static final int CRYSTAL_RETRY_TICKS = 0;
+    private static final int VANILLA_POST_BREAK_WAIT_TICKS = 0;
+    private static final int INSTA_POST_BREAK_WAIT_TICKS = 0;
+    private static final int INSTA_START_RETRY_TICKS = 6;
+    private static final double CRYSTAL_SEARCH_RADIUS_SQ = 9.0;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -55,7 +57,7 @@ public class AutoCev extends Module {
 
     private final Setting<Boolean> antiSuicide = sgGeneral.add(new BoolSetting.Builder()
         .name("anti-suicide")
-        .description("Prevents placing/attacking crystal if it can kill you.")
+        .description("Prevents crystal actions that can kill you.")
         .defaultValue(true)
         .build()
     );
@@ -74,22 +76,33 @@ public class AutoCev extends Module {
         .build()
     );
 
+    private final Setting<MineMode> mineMode = sgGeneral.add(new EnumSetting.Builder<MineMode>()
+        .name("mine-mode")
+        .description("Vanilla: AutoCev mines obsidian itself. Insta: AutoCev never re-clicks obsidian and waits for external instamine.")
+        .defaultValue(MineMode.Vanilla)
+        .build()
+    );
+
     private final Setting<SwapMode> swapMode = sgGeneral.add(new EnumSetting.Builder<SwapMode>()
         .name("swap-mode")
-        .description("Crystal/obsidian switching method.")
+        .description("Item switch mode.")
         .defaultValue(SwapMode.Silent)
         .build()
     );
 
     private PlayerEntity target;
-    private String targetName;
-    private BlockPos activePos;
-    private boolean activeIsFallback;
-    private boolean cycleStarted;
-    private int crystalRetry;
+    private String targetId;
+    private BlockPos activeBase;
+    private boolean activeFallback;
+    private boolean crystalPlacedInCycle;
+    private int crystalRetryTicks;
+    private int postBreakTicks;
+    private boolean instaStartSentForTarget;
+    private BlockPos pendingInstaStartPos;
+    private int pendingInstaStartTicks;
 
     public AutoCev() {
-        super(AddonTemplate.CATEGORY, "auto-cev", "Places obsidian, places crystal, mines block, then detonates.");
+        super(AddonTemplate.CATEGORY, "auto-cev", "Places one cev base, puts crystal, mines obsidian and detonates crystal every cycle.");
     }
 
     @Override
@@ -106,86 +119,154 @@ public class AutoCev extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
 
-        target = (PlayerEntity) TargetUtils.get(entity -> {
+        tickPendingInstaStart();
+
+        target = selectTarget();
+        if (target == null) {
+            resetAll();
+            return;
+        }
+
+        String id = target.getUuidAsString();
+        if (targetId == null || !targetId.equals(id)) {
+            targetId = id;
+            instaStartSentForTarget = false;
+            resetCycle();
+        }
+
+        if (activeBase != null) {
+            tickCycle();
+            if (activeBase != null) return;
+        }
+
+        BaseChoice choice = chooseBase(target);
+        if (choice == null) return;
+
+        BlockState state = mc.world.getBlockState(choice.pos());
+        if (state.isOf(Blocks.OBSIDIAN)) {
+            startCycle(choice);
+            tickCycle();
+            return;
+        }
+
+        if (state.isAir() || state.isReplaceable()) {
+            placeObsidian(choice);
+        }
+    }
+
+    private PlayerEntity selectTarget() {
+        return (PlayerEntity) TargetUtils.get(entity -> {
             if (!(entity instanceof PlayerEntity player)) return false;
             if (player == mc.player) return false;
             if (player.isDead() || player.getHealth() <= 0) return false;
             if (Friends.get().isFriend(player)) return false;
             return mc.player.distanceTo(player) <= targetRange.get();
         }, SortPriority.LowestDistance);
+    }
 
-        if (target == null) {
-            resetAll();
-            return;
-        }
-
-        if (targetName == null || !target.getGameProfile().getName().equalsIgnoreCase(targetName)) {
-            targetName = target.getGameProfile().getName();
-            activePos = null;
-            activeIsFallback = false;
-            resetCycle();
-        }
-
-        BlockPos nextPos = resolveCevPos(target);
-        if (nextPos == null) {
+    private void tickCycle() {
+        if (activeBase == null || target == null) {
             resetCycle();
             return;
         }
 
-        if (!nextPos.equals(activePos)) {
-            activePos = nextPos;
-            activeIsFallback = !isTopBase(nextPos, target);
-            resetCycle();
-        }
-
-        BlockState state = mc.world.getBlockState(activePos);
-        EndCrystalEntity crystal = findCrystalAt(activePos.up());
+        BlockState state = mc.world.getBlockState(activeBase);
+        EndCrystalEntity crystal = findCrystalAt(activeBase);
 
         if (state.isOf(Blocks.OBSIDIAN)) {
-            cycleStarted = true;
-            mineObsidian(activePos);
-            placeCrystal(activePos, crystal);
-            return;
-        }
+            postBreakTicks = 0;
+            if (crystal != null) {
+                crystalPlacedInCycle = true;
+                crystalRetryTicks = 0;
+                if (mineMode.get() == MineMode.Vanilla) {
+                    mineObsidian(activeBase);
+                } else {
+                    scheduleInstaMineStart(activeBase);
+                }
+                return;
+            }
 
-        if (state.isAir() || state.isReplaceable()) {
-            if (!cycleStarted) {
-                placeObsidian(activePos);
+            if (crystalRetryTicks > 0) {
+                crystalRetryTicks--;
+                return;
+            }
+
+            if (!canPlaceCrystalAt(activeBase)) {
+                resetCycle();
+                return;
+            }
+
+            Vec3d crystalPos = crystalCenter(activeBase);
+            if (antiSuicide.get() && !canExplodeSafely(crystalPos)) return;
+
+            if (placeCrystal(activeBase)) {
+                crystalPlacedInCycle = true;
+                crystalRetryTicks = CRYSTAL_RETRY_TICKS;
+                if (mineMode.get() == MineMode.Vanilla) {
+                    mineObsidian(activeBase);
+                } else {
+                    scheduleInstaMineStart(activeBase);
+                }
             } else {
-                detonateAfterBreak(crystal);
+                crystalRetryTicks = 0;
             }
             return;
         }
 
-        activePos = null;
-        activeIsFallback = false;
+        if (state.isAir() || state.isReplaceable()) {
+            if (crystal != null) {
+                if (!antiSuicide.get() || canExplodeSafely(crystal.getPos())) {
+                    crystalPlacedInCycle = true;
+                    postBreakTicks = 0;
+                    attackCrystal(crystal);
+                }
+                return;
+            }
+
+            if (!crystalPlacedInCycle) {
+                resetCycle();
+                return;
+            }
+
+            int waitTicks = mineMode.get() == MineMode.Insta ? INSTA_POST_BREAK_WAIT_TICKS : VANILLA_POST_BREAK_WAIT_TICKS;
+            if (postBreakTicks < waitTicks) {
+                postBreakTicks++;
+                return;
+            }
+
+            resetCycle();
+            return;
+        }
+
         resetCycle();
     }
 
-    private BlockPos resolveCevPos(PlayerEntity player) {
+    private BaseChoice chooseBase(PlayerEntity player) {
         int x = player.getBlockX();
         int z = player.getBlockZ();
-        int headY = (int) Math.floor(player.getBoundingBox().maxY);
+        int headY = MathHelper.floor(player.getBoundingBox().maxY);
 
         BlockPos top = new BlockPos(x, headY + 1, z);
-        boolean topUsable = isValidBase(top, player, true);
-        boolean topCrystalBlocked = isTopCrystalBlocked(top, player);
+        if (isUsableBase(top, player, true)) return new BaseChoice(top, false);
 
-        if (activePos != null) {
-            if (!activeIsFallback && topUsable && activePos.equals(top)) return activePos;
-            if (activeIsFallback && topCrystalBlocked && isValidFallback(activePos, player)) return activePos;
-        }
+        BlockPos fallback = chooseFallbackBase(player);
+        if (fallback != null) return new BaseChoice(fallback, true);
 
-        if (topUsable) return top;
-        if (!topCrystalBlocked) return null;
+        return null;
+    }
 
-        BlockPos center = new BlockPos(x, headY, z);
+    private BlockPos chooseFallbackBase(PlayerEntity player) {
+        int x = player.getBlockX();
+        int z = player.getBlockZ();
+        int faceY = MathHelper.floor(player.getEyeY());
+
+        BlockPos center = new BlockPos(x, faceY, z);
         BlockPos best = null;
         double bestDistance = Double.MAX_VALUE;
 
-        for (Direction direction : CARDINAL) {
-            BlockPos candidate = center.offset(direction);
-            if (!isValidFallback(candidate, player)) continue;
+        for (Direction dir : CARDINAL) {
+            BlockPos candidate = center.offset(dir);
+            if (!isUsableBase(candidate, player, true)) continue;
 
             double distance = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
             if (distance < bestDistance) {
@@ -197,34 +278,12 @@ public class AutoCev extends Module {
         return best;
     }
 
-    private boolean isTopBase(BlockPos pos, PlayerEntity player) {
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int headY = (int) Math.floor(player.getBoundingBox().maxY);
-        return pos.getX() == x && pos.getY() == headY + 1 && pos.getZ() == z;
-    }
-
-    private boolean isTopCrystalBlocked(BlockPos top, PlayerEntity player) {
-        if (!isBaseBlockValid(top, player)) return false;
-        return !isCrystalColumnFree(top);
-    }
-
-    private boolean isValidFallback(BlockPos pos, PlayerEntity player) {
-        if (isTopBase(pos, player)) return false;
-        return isValidBase(pos, player, true);
-    }
-
-    private boolean isValidBase(BlockPos pos, PlayerEntity player, boolean requireCrystalSpace) {
-        if (!isBaseBlockValid(pos, player)) return false;
-        return !requireCrystalSpace || isCrystalColumnFree(pos);
-    }
-
-    private boolean isBaseBlockValid(BlockPos pos, PlayerEntity player) {
+    private boolean isUsableBase(BlockPos pos, PlayerEntity player, boolean requireCrystalSpace) {
         if (mc.world.isOutOfHeightLimit(pos.getY()) || mc.world.isOutOfHeightLimit(pos.getY() + 2)) return false;
 
         BlockState state = mc.world.getBlockState(pos);
         if (state.isOf(Blocks.BEDROCK)) return false;
-        if (!(state.isOf(Blocks.OBSIDIAN) || state.isReplaceable())) return false;
+        if (!(state.isOf(Blocks.OBSIDIAN) || state.isAir() || state.isReplaceable())) return false;
 
         Box blockBox = new Box(pos);
         if (player.getBoundingBox().intersects(blockBox)) return false;
@@ -235,14 +294,22 @@ public class AutoCev extends Module {
             return false;
         }
 
-        return true;
+        return !requireCrystalSpace || hasCrystalSpace(pos);
     }
 
-    private boolean isCrystalColumnFree(BlockPos base) {
+    private boolean hasCrystalSpace(BlockPos base) {
         if (!mc.world.getBlockState(base.up()).isAir()) return false;
         if (!mc.world.getBlockState(base.up(2)).isAir()) return false;
 
-        Box crystalBox = new Box(base.getX(), base.getY() + 1, base.getZ(), base.getX() + 1, base.getY() + 3, base.getZ() + 1);
+        Box crystalBox = new Box(
+            base.getX(),
+            base.getY() + 1,
+            base.getZ(),
+            base.getX() + 1.0,
+            base.getY() + 3.0,
+            base.getZ() + 1.0
+        );
+
         for (Entity entity : mc.world.getOtherEntities(null, crystalBox)) {
             if (entity instanceof EndCrystalEntity) continue;
             if (entity.isRemoved()) continue;
@@ -252,7 +319,7 @@ public class AutoCev extends Module {
         return true;
     }
 
-    private void placeObsidian(BlockPos pos) {
+    private void placeObsidian(BaseChoice choice) {
         FindItemResult obsidian = InvUtils.findInHotbar(Items.OBSIDIAN);
         if (!obsidian.found()) {
             error("No obsidian in hotbar.");
@@ -261,7 +328,7 @@ public class AutoCev extends Module {
         }
 
         boolean placed = BlockUtils.place(
-            pos,
+            choice.pos(),
             obsidian,
             rotate.get(),
             rotate.get() ? ROTATE_PRIORITY : 0,
@@ -270,11 +337,20 @@ public class AutoCev extends Module {
             swapMode.get() == SwapMode.Silent
         );
 
-        if (!placed) return;
+        if (placed) {
+            startCycle(choice);
+            if (mineMode.get() == MineMode.Insta) {
+                scheduleInstaMineStart(choice.pos());
+            }
+        }
+    }
 
-        cycleStarted = true;
-        crystalRetry = 0;
-        mineObsidian(pos);
+    private void startCycle(BaseChoice choice) {
+        activeBase = choice.pos().toImmutable();
+        activeFallback = choice.fallback();
+        crystalPlacedInCycle = findCrystalAt(activeBase) != null;
+        crystalRetryTicks = 0;
+        postBreakTicks = 0;
     }
 
     private void mineObsidian(BlockPos pos) {
@@ -294,78 +370,106 @@ public class AutoCev extends Module {
         }
     }
 
-    private void placeCrystal(BlockPos base, EndCrystalEntity crystal) {
-        if (crystal != null) {
-            crystalRetry = 0;
+    private void scheduleInstaMineStart(BlockPos pos) {
+        if (instaStartSentForTarget) return;
+
+        if (tryInstaMineStart(pos)) {
+            instaStartSentForTarget = true;
+            pendingInstaStartPos = null;
+            pendingInstaStartTicks = 0;
             return;
         }
 
-        if (crystalRetry > 0) {
-            crystalRetry--;
+        pendingInstaStartPos = pos.toImmutable();
+        pendingInstaStartTicks = INSTA_START_RETRY_TICKS;
+    }
+
+    private void tickPendingInstaStart() {
+        if (mineMode.get() != MineMode.Insta) {
+            pendingInstaStartPos = null;
+            pendingInstaStartTicks = 0;
             return;
         }
 
-        if (!canPlaceCrystalAt(base)) {
-            crystalRetry = CRYSTAL_RETRY_TICKS;
+        if (instaStartSentForTarget) {
+            pendingInstaStartPos = null;
+            pendingInstaStartTicks = 0;
             return;
         }
 
-        Vec3d crystalPos = new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
-        if (antiSuicide.get() && !canExplodeSafely(crystalPos)) return;
+        if (pendingInstaStartPos == null || pendingInstaStartTicks <= 0) return;
+        if (tryInstaMineStart(pendingInstaStartPos)) {
+            instaStartSentForTarget = true;
+            pendingInstaStartPos = null;
+            pendingInstaStartTicks = 0;
+            return;
+        }
 
-        if (!placeCrystalOnBase(base)) {
-            crystalRetry = CRYSTAL_RETRY_TICKS;
+        pendingInstaStartTicks--;
+        if (pendingInstaStartTicks <= 0) {
+            pendingInstaStartPos = null;
         }
     }
 
-    private void detonateAfterBreak(EndCrystalEntity crystal) {
-        if (crystal == null) {
-            resetCycle();
-            return;
-        }
+    private boolean tryInstaMineStart(BlockPos pos) {
+        if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return false;
 
-        if (antiSuicide.get() && !canExplodeSafely(crystal.getPos())) return;
+        Runnable hitOnce = () -> {
+            if (mc.interactionManager == null) return;
+            mc.interactionManager.attackBlock(pos, Direction.UP);
+            swing(Hand.MAIN_HAND);
+        };
 
-        attackCrystal(crystal);
-    }
-
-    private boolean placeCrystalOnBase(BlockPos base) {
-        Hand hand;
-        boolean swapBack = false;
-
-        if (mc.player.getOffHandStack().isOf(Items.END_CRYSTAL)) {
-            hand = Hand.OFF_HAND;
-        } else if (mc.player.getMainHandStack().isOf(Items.END_CRYSTAL)) {
-            hand = Hand.MAIN_HAND;
+        if (rotate.get()) {
+            Vec3d center = Vec3d.ofCenter(pos);
+            Rotations.rotate(Rotations.getYaw(center), Rotations.getPitch(center), ROTATE_PRIORITY, hitOnce);
         } else {
-            FindItemResult crystal = InvUtils.findInHotbar(Items.END_CRYSTAL);
-            if (!crystal.found()) {
-                error("No end crystals in hotbar.");
-                toggle();
-                return false;
-            }
-
-            boolean silent = swapMode.get() == SwapMode.Silent;
-            if (!InvUtils.swap(crystal.slot(), silent)) return false;
-            hand = Hand.MAIN_HAND;
-            swapBack = silent;
+            hitOnce.run();
         }
 
-        if (!mc.player.getStackInHand(hand).isOf(Items.END_CRYSTAL)) {
-            if (swapBack) InvUtils.swapBack();
+        return true;
+    }
+
+    private boolean placeCrystal(BlockPos base) {
+        FindItemResult crystal = InvUtils.findInHotbar(Items.END_CRYSTAL);
+        if (!crystal.found()) {
+            error("No end crystals in hotbar.");
+            toggle();
             return false;
         }
 
-        Hand useHand = hand;
-        boolean[] result = { false };
-        Runnable place = () -> {
-            if (mc.interactionManager == null) return;
+        int previousSlot = mc.player.getInventory().getSelectedSlot();
+        boolean silent = swapMode.get() == SwapMode.Silent;
+        boolean[] success = { false };
 
-            Vec3d hitVec = new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
-            BlockHitResult hit = new BlockHitResult(hitVec, Direction.UP, base, false);
-            ActionResult action = mc.interactionManager.interactBlock(mc.player, useHand, hit);
-            result[0] = action.isAccepted();
-            if (result[0]) swing(useHand);
+        Runnable place = () -> {
+            Hand hand = crystal.getHand();
+            boolean switched = false;
+
+            if (hand == null) {
+                if (!InvUtils.swap(crystal.slot(), false)) return;
+                hand = Hand.MAIN_HAND;
+                switched = true;
+            }
+
+            if (!mc.player.getStackInHand(hand).isOf(Items.END_CRYSTAL)) {
+                if (switched && silent) InvUtils.swap(previousSlot, false);
+                return;
+            }
+
+            Vec3d hitPos = new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
+            BlockHitResult hit = new BlockHitResult(hitPos, Direction.UP, base, false);
+
+            if (mc.getNetworkHandler() != null) {
+                mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, hit, 0));
+                success[0] = true;
+                swing(hand);
+            } else if (mc.interactionManager != null) {
+                success[0] = mc.interactionManager.interactBlock(mc.player, hand, hit).isAccepted();
+                if (success[0]) swing(hand);
+            }
+
+            if (switched && silent) InvUtils.swap(previousSlot, false);
         };
 
         if (rotate.get()) {
@@ -375,15 +479,16 @@ public class AutoCev extends Module {
             place.run();
         }
 
-        if (swapBack) InvUtils.swapBack();
-
-        return result[0];
+        return success[0];
     }
 
     private void attackCrystal(EndCrystalEntity crystal) {
         Runnable attack = () -> {
-            if (mc.interactionManager == null) return;
-            mc.interactionManager.attackEntity(mc.player, crystal);
+            if (mc.getNetworkHandler() != null) {
+                mc.getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(crystal, mc.player.isSneaking()));
+            } else if (mc.interactionManager != null) {
+                mc.interactionManager.attackEntity(mc.player, crystal);
+            }
             swing(Hand.MAIN_HAND);
         };
 
@@ -394,24 +499,42 @@ public class AutoCev extends Module {
         }
     }
 
-    private EndCrystalEntity findCrystalAt(BlockPos crystalPos) {
-        for (Entity entity : mc.world.getEntities()) {
+    private EndCrystalEntity findCrystalAt(BlockPos base) {
+        Vec3d center = new Vec3d(base.getX() + 0.5, base.getY() + 1.5, base.getZ() + 0.5);
+        Box crystalBox = new Box(
+            base.getX(),
+            base.getY() + 1.0,
+            base.getZ(),
+            base.getX() + 1.0,
+            base.getY() + 3.0,
+            base.getZ() + 1.0
+        );
+
+        EndCrystalEntity best = null;
+        double bestDist = CRYSTAL_SEARCH_RADIUS_SQ;
+
+        for (Entity entity : mc.world.getOtherEntities(null, crystalBox)) {
             if (!(entity instanceof EndCrystalEntity crystal)) continue;
-            if (!crystal.getBlockPos().equals(crystalPos)) continue;
-            return crystal;
+            if (crystal.isRemoved()) continue;
+
+            double dist = crystal.squaredDistanceTo(center);
+            if (dist <= bestDist) {
+                bestDist = dist;
+                best = crystal;
+            }
         }
 
-        Vec3d center = Vec3d.ofCenter(crystalPos);
-        EndCrystalEntity best = null;
-        double bestDistance = CRYSTAL_SEARCH_RADIUS_SQ;
+        if (best != null) return best;
 
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof EndCrystalEntity crystal)) continue;
-            double distance = crystal.squaredDistanceTo(center);
-            if (distance > bestDistance) continue;
+            if (crystal.isRemoved()) continue;
 
-            bestDistance = distance;
-            best = crystal;
+            double dist = crystal.squaredDistanceTo(center);
+            if (dist <= bestDist) {
+                bestDist = dist;
+                best = crystal;
+            }
         }
 
         return best;
@@ -420,17 +543,11 @@ public class AutoCev extends Module {
     private boolean canPlaceCrystalAt(BlockPos base) {
         BlockState baseState = mc.world.getBlockState(base);
         if (!(baseState.isOf(Blocks.OBSIDIAN) || baseState.isOf(Blocks.BEDROCK))) return false;
-        if (!mc.world.getBlockState(base.up()).isAir()) return false;
-        if (!mc.world.getBlockState(base.up(2)).isAir()) return false;
+        return hasCrystalSpace(base);
+    }
 
-        Box crystalBox = new Box(base.getX(), base.getY() + 1, base.getZ(), base.getX() + 1, base.getY() + 3, base.getZ() + 1);
-        for (Entity entity : mc.world.getOtherEntities(null, crystalBox)) {
-            if (entity instanceof EndCrystalEntity) continue;
-            if (entity.isRemoved()) continue;
-            return false;
-        }
-
-        return true;
+    private Vec3d crystalCenter(BlockPos base) {
+        return new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
     }
 
     private boolean canExplodeSafely(Vec3d crystalPos) {
@@ -441,34 +558,45 @@ public class AutoCev extends Module {
     private void swing(Hand hand) {
         if (swingHand.get()) {
             mc.player.swingHand(hand);
-            return;
-        }
-
-        if (mc.getNetworkHandler() != null) {
+        } else if (mc.getNetworkHandler() != null) {
             mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(hand));
         }
     }
 
     private void resetCycle() {
-        cycleStarted = false;
-        crystalRetry = 0;
+        activeBase = null;
+        activeFallback = false;
+        crystalPlacedInCycle = false;
+        crystalRetryTicks = 0;
+        postBreakTicks = 0;
+        pendingInstaStartPos = null;
+        pendingInstaStartTicks = 0;
     }
 
     private void resetAll() {
         target = null;
-        targetName = null;
-        activePos = null;
-        activeIsFallback = false;
+        targetId = null;
+        instaStartSentForTarget = false;
         resetCycle();
     }
 
     @Override
     public String getInfoString() {
-        return target != null ? target.getName().getString() : null;
+        if (target == null) return null;
+        if (activeBase == null) return target.getName().getString();
+        return target.getName().getString() + (activeFallback ? " F" : " T");
+    }
+
+    private record BaseChoice(BlockPos pos, boolean fallback) {
     }
 
     public enum SwapMode {
         Normal,
         Silent
+    }
+
+    public enum MineMode {
+        Vanilla,
+        Insta
     }
 }
