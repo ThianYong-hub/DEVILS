@@ -16,6 +16,16 @@ Locks onto a target and chases them with ender pearls. Simulates pearl trajector
 ### AutoAnvilRename
 Automatically renames items in an open anvil GUI. Pulls items from inventory, sends rename packets, and collects output. Supports item/shulker box filters, auto XP bottle usage, and stuck detection.
 
+### TrackerPlayer
+Tracks players with fully per-player rules. Each rule has player name, event mode (`Join`, `Leave`, `Both`, `Death`), sound toggle, send toggle, command text, per-player chat send delay (ms), and sound source mode (`Local folder`, `Game sound`, `Manual ID`).
+`Both` means only `Join + Leave` (it does not include `Death`).
+
+Sound workflow:
+- Put `.ogg` files inside `<gameDir>/devils-addon/sounds` (subfolders supported)
+- Use `Refresh Sounds` and select from dropdown in the rule
+- Or pick an existing game sound from selector
+- Or use manual sound id for custom packs/mod integrations
+
 ## Commands
 
 | Command | Usage | Description |

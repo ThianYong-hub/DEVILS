@@ -18,6 +18,7 @@ class AddonTemplateTest {
         assertTrue(source.contains("class AddonTemplate extends MeteorAddon"));
         assertTrue(source.contains("return \"com.example.addon\";"));
         assertTrue(source.contains("new GithubRepo(\"ThianYong-hub\", \"DEVILS\")"));
+        assertTrue(source.contains("SettingsWidgetFactory.registerCustomFactory(TrackerPlayersSetting.class"));
     }
 
     @Test
@@ -28,6 +29,7 @@ class AddonTemplateTest {
 
         assertTrue(source.contains("Modules.get().add(new AutoPearl());"));
         assertTrue(source.contains("Modules.get().add(new AutoAnvilRename());"));
+        assertTrue(source.contains("Modules.get().add(new JoinWatcher());"));
         assertTrue(source.contains("Commands.add(new CommandExample());"));
         assertTrue(source.contains("Commands.add(new AutoAnvilRenameCommand());"));
     }
