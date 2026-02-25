@@ -100,6 +100,8 @@ public class AutoCev extends Module {
     private boolean instaStartSentForTarget;
     private BlockPos pendingInstaStartPos;
     private int pendingInstaStartTicks;
+    private BlockPos preferredBase;
+    private boolean preferredFallback;
 
     public AutoCev() {
         super(AddonTemplate.CATEGORY, "auto-cev", "Places one cev base, puts crystal, mines obsidian and detonates crystal every cycle.");
@@ -131,6 +133,8 @@ public class AutoCev extends Module {
         if (targetId == null || !targetId.equals(id)) {
             targetId = id;
             instaStartSentForTarget = false;
+            preferredBase = null;
+            preferredFallback = false;
             resetCycle();
         }
 
@@ -192,6 +196,7 @@ public class AutoCev extends Module {
             }
 
             if (!canPlaceCrystalAt(activeBase)) {
+                if (mineCrystalBlocker(activeBase)) return;
                 resetCycle();
                 return;
             }
@@ -242,17 +247,51 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice chooseBase(PlayerEntity player) {
+        BaseChoice preferred = choosePreferredBase(player);
+        if (preferred != null) return preferred;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int headY = MathHelper.floor(player.getBoundingBox().maxY);
 
         BlockPos top = new BlockPos(x, headY + 1, z);
-        if (isUsableBase(top, player, true)) return new BaseChoice(top, false);
+        if (isUsableBase(top, player, true) || isBlockedObsidianBase(top, player)) return new BaseChoice(top, false);
 
         BlockPos fallback = chooseFallbackBase(player);
         if (fallback != null) return new BaseChoice(fallback, true);
 
         return null;
+    }
+
+    private BaseChoice choosePreferredBase(PlayerEntity player) {
+        if (preferredBase == null) return null;
+        if (!isPreferredStillRelevant(preferredBase, player)) {
+            preferredBase = null;
+            preferredFallback = false;
+            return null;
+        }
+        if (!(isUsableBase(preferredBase, player, true) || isBlockedObsidianBase(preferredBase, player))) {
+            preferredBase = null;
+            preferredFallback = false;
+            return null;
+        }
+
+        return new BaseChoice(preferredBase, preferredFallback);
+    }
+
+    private boolean isPreferredStillRelevant(BlockPos pos, PlayerEntity player) {
+        int x = player.getBlockX();
+        int z = player.getBlockZ();
+        int headY = MathHelper.floor(player.getBoundingBox().maxY);
+        if (pos.equals(new BlockPos(x, headY + 1, z))) return true;
+
+        int faceY = MathHelper.floor(player.getEyeY());
+        BlockPos center = new BlockPos(x, faceY, z);
+        for (Direction dir : CARDINAL) {
+            if (pos.equals(center.offset(dir))) return true;
+        }
+
+        return false;
     }
 
     private BlockPos chooseFallbackBase(PlayerEntity player) {
@@ -262,20 +301,29 @@ public class AutoCev extends Module {
 
         BlockPos center = new BlockPos(x, faceY, z);
         BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
+        double bestScore = Double.MAX_VALUE;
+        boolean preferSticky = preferredBase != null
+            && preferredFallback
+            && isPreferredStillRelevant(preferredBase, player);
 
         for (Direction dir : CARDINAL) {
             BlockPos candidate = center.offset(dir);
-            if (!isUsableBase(candidate, player, true)) continue;
+            if (!(isUsableBase(candidate, player, true) || isBlockedObsidianBase(candidate, player))) continue;
 
-            double distance = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
-            if (distance < bestDistance) {
-                bestDistance = distance;
+            double score = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
+            if (preferSticky && candidate.equals(preferredBase)) score -= 1e-3;
+
+            if (score < bestScore) {
+                bestScore = score;
                 best = candidate;
             }
         }
 
         return best;
+    }
+
+    private boolean isBlockedObsidianBase(BlockPos pos, PlayerEntity player) {
+        return mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN) && isUsableBase(pos, player, false);
     }
 
     private boolean isUsableBase(BlockPos pos, PlayerEntity player, boolean requireCrystalSpace) {
@@ -348,6 +396,8 @@ public class AutoCev extends Module {
     private void startCycle(BaseChoice choice) {
         activeBase = choice.pos().toImmutable();
         activeFallback = choice.fallback();
+        preferredBase = activeBase;
+        preferredFallback = activeFallback;
         crystalPlacedInCycle = findCrystalAt(activeBase) != null;
         crystalRetryTicks = 0;
         postBreakTicks = 0;
@@ -355,7 +405,23 @@ public class AutoCev extends Module {
 
     private void mineObsidian(BlockPos pos) {
         if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return;
+        mineBlock(pos);
+    }
 
+    private boolean mineCrystalBlocker(BlockPos base) {
+        if (mineBlockingBlock(base.up())) return true;
+        return mineBlockingBlock(base.up(2));
+    }
+
+    private boolean mineBlockingBlock(BlockPos pos) {
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isAir() || state.isReplaceable()) return false;
+        if (state.isOf(Blocks.BEDROCK)) return false;
+        mineBlock(pos);
+        return true;
+    }
+
+    private void mineBlock(BlockPos pos) {
         Runnable mine = () -> {
             if (mc.interactionManager == null) return;
             mc.interactionManager.attackBlock(pos, Direction.UP);
@@ -577,6 +643,8 @@ public class AutoCev extends Module {
         target = null;
         targetId = null;
         instaStartSentForTarget = false;
+        preferredBase = null;
+        preferredFallback = false;
         resetCycle();
     }
 
