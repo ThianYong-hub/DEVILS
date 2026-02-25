@@ -29,7 +29,7 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
 
-      - name: Release
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pr-build-${{ github.event.pull_request.number }}-${{ github.sha }}
