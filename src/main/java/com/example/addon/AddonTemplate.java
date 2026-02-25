@@ -11,10 +11,14 @@ import com.example.addon.modules.DiscordRPC;
 import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
 import com.example.addon.modules.PhaseLimiter;
+import com.example.addon.modules.JoinWatcher;
+import com.example.addon.settings.TrackerPlayersSetting;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Commands;
+import meteordevelopment.meteorclient.gui.utils.SettingsWidgetFactory;
+import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
@@ -31,6 +35,11 @@ public class AddonTemplate extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
 
+        SettingsWidgetFactory.registerCustomFactory(TrackerPlayersSetting.class, theme -> (table, setting) -> {
+            WTable rulesTable = table.add(theme.table()).expandX().widget();
+            TrackerPlayersSetting.fillTable(theme, rulesTable, (TrackerPlayersSetting) setting);
+        });
+
         Modules.get().add(new AutoPearl());
         Modules.get().add(new AutoAnvilRename());
         Modules.get().add(new AntiWasp());
@@ -39,6 +48,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new HClip());
         Modules.get().add(new AutoCev());
         Modules.get().add(new PhaseLimiter());
+        Modules.get().add(new JoinWatcher());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());

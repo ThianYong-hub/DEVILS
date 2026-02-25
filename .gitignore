@@ -9,6 +9,9 @@ classes/
 
 *.launch
 
+
+logs/
+
 # idea
 
 .idea/
@@ -31,7 +34,6 @@ bin/
 # fabric
 
 run/
-
 
 # local refs and root icons
 icon.png
