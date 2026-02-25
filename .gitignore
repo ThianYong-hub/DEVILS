@@ -9,6 +9,9 @@ classes/
 
 *.launch
 
+
+logs/
+
 # idea
 
 .idea/
@@ -32,8 +35,8 @@ bin/
 
 run/
 
-
 # local refs and root icons
 icon.png
 category_icon.png
 .tmp_meteor_src/
+meteor-client/
