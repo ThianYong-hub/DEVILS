@@ -37,16 +37,12 @@ class WorkflowConfigTest {
     void releaseAutoPatchWorkflowRunsOnlyForMergedPrCommits() throws IOException {
         String workflow = readWorkflow("release-auto-patch.yml");
         assertTrue(workflow.contains("name: Auto Patch Tag"));
-        assertTrue(workflow.contains("branches:"));
-        assertTrue(workflow.contains("- main"));
+        assertTrue(workflow.contains("workflow_dispatch"));
+        assertFalse(workflow.contains("push:"));
         assertTrue(workflow.contains("group: release-tags"));
-        assertTrue(workflow.contains("Detect merged PR for this commit"));
-        assertTrue(workflow.contains("GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls"));
-        assertTrue(workflow.contains("steps.detect_merged_pr.outputs.skip != 'true'"));
         assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("attempts=10"));
         assertTrue(workflow.contains("actions: write"));
-        assertTrue(workflow.contains("pull-requests: read"));
         assertTrue(workflow.contains("github.token"));
         assertTrue(workflow.contains("x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"));
         assertTrue(workflow.contains("Trigger Release Workflow"));
@@ -74,8 +70,11 @@ class WorkflowConfigTest {
         String workflow = readWorkflow("release-manual-tag.yml");
         assertTrue(workflow.contains("name: Manual Release Tag"));
         assertTrue(workflow.contains("workflow_dispatch"));
-        assertTrue(workflow.contains("format vX.Y.Z"));
+        assertTrue(workflow.contains("Optional explicit release tag vX.Y.Z"));
+        assertTrue(workflow.contains("required: false"));
         assertTrue(workflow.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+$"));
+        assertTrue(workflow.contains("Auto PATCH mode selected"));
+        assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("group: release-tags"));
         assertTrue(workflow.contains("actions: write"));
         assertTrue(workflow.contains("github.token"));

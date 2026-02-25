@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag in format vX.Y.Z"
-        required: true
+        description: "Optional explicit release tag vX.Y.Z (leave empty to auto-increment PATCH)"
+        required: false
         type: string
 
 permissions:
@@ -41,35 +41,71 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Validate And Create Tag
+        id: create_tag
         shell: bash
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
-          if [[ ! "${INPUT_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid version '${INPUT_VERSION}'. Expected format vX.Y.Z."
-            exit 1
-          fi
-
           git fetch --tags --force
 
-          if git rev-parse -q --verify "refs/tags/${INPUT_VERSION}" >/dev/null; then
-            echo "::error::Tag '${INPUT_VERSION}' already exists."
+          get_latest_tag() {
+            git tag -l 'v*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n1 || true
+          }
+
+          calc_next_patch_tag() {
+            local current="$1"
+
+            if [[ -z "${current}" ]]; then
+              echo "v0.0.1"
+              return
+            fi
+
+            if [[ "${current}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              local major="${BASH_REMATCH[1]}"
+              local minor="${BASH_REMATCH[2]}"
+              local patch="${BASH_REMATCH[3]}"
+              echo "v${major}.${minor}.$((patch + 1))"
+              return
+            fi
+
+            echo "v0.0.1"
+          }
+
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            if [[ ! "${INPUT_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid version '${INPUT_VERSION}'. Expected format vX.Y.Z."
+              exit 1
+            fi
+
+            release_tag="${INPUT_VERSION}"
+          else
+            latest_tag="$(get_latest_tag)"
+            release_tag="$(calc_next_patch_tag "${latest_tag}")"
+            echo "Auto PATCH mode selected: latest='${latest_tag:-<none>}' -> next='${release_tag}'."
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
+            echo "::error::Tag '${release_tag}' already exists."
             exit 1
           fi
 
-          git tag -a "${INPUT_VERSION}" -m "Release ${INPUT_VERSION}"
-          git push origin "${INPUT_VERSION}"
+          git tag -a "${release_tag}" -m "Release ${release_tag}"
+          git push origin "${release_tag}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Summary
-        run: echo "Created manual release tag ${{ inputs.version }}"
+        run: echo "Created manual release tag ${{ steps.create_tag.outputs.release_tag }}"
 
       - name: Trigger Release Workflow
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TAG: ${{ steps.create_tag.outputs.release_tag }}
         run: |
           set -euo pipefail
 
