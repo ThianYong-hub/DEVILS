@@ -53,8 +53,8 @@ The built JAR will be in `build/libs/`.
 
 Hybrid release flow:
 - Feature/PR pipelines run tests and build artifacts only (no tag and no GitHub Release).
-- Push to `main` creates the next PATCH tag automatically (`vX.Y.Z`) with retry/concurrency safety.
-- Push of tag `v*` creates a stable GitHub Release and uploads `build/libs/*.jar`.
+- Merge PR to `main` creates the next PATCH tag automatically (`vX.Y.Z`) with retry/concurrency safety.
+- Stable GitHub Release is created only by explicit workflow dispatch to `release-on-tag` from release workflows.
 - MINOR and MAJOR versions are created manually via tag (`vX.Y.0`, `vX.0.0`) or manual workflow.
 
 Stable version source:
@@ -64,6 +64,8 @@ Stable version source:
 Workflow chaining note:
 - Auto/manual tag workflows trigger `release-on-tag` explicitly via `workflow_dispatch`.
 - No additional PAT secret is required; built-in `GITHUB_TOKEN` is used.
+- Direct push to `main` without merged PR is skipped by release guard and does not publish a release.
+- Plain external tag push does not auto-publish release unless `release-on-tag` is dispatched.
 
 ## Authors
 
