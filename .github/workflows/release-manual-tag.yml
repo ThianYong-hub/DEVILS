@@ -1,0 +1,56 @@
+name: Manual Release Tag
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag in format vX.Y.Z"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tags
+  cancel-in-progress: false
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Default Branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Configure Git User
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Validate And Create Tag
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${INPUT_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '${INPUT_VERSION}'. Expected format vX.Y.Z."
+            exit 1
+          fi
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/${INPUT_VERSION}" >/dev/null; then
+            echo "::error::Tag '${INPUT_VERSION}' already exists."
+            exit 1
+          fi
+
+          git tag -a "${INPUT_VERSION}" -m "Release ${INPUT_VERSION}"
+          git push origin "${INPUT_VERSION}"
+
+      - name: Summary
+        run: echo "Created manual release tag ${{ inputs.version }}"

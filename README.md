@@ -49,6 +49,18 @@ cd DEVILS
 
 The built JAR will be in `build/libs/`.
 
+## Release Process
+
+Hybrid release flow:
+- Feature/PR pipelines run tests and build artifacts only (no tag and no GitHub Release).
+- Push to `main` creates the next PATCH tag automatically (`vX.Y.Z`) with retry/concurrency safety.
+- Push of tag `v*` creates a stable GitHub Release and uploads `build/libs/*.jar`.
+- MINOR and MAJOR versions are created manually via tag (`vX.Y.0`, `vX.0.0`) or manual workflow.
+
+Stable version source:
+- Stable builds use Git tag as source of truth (`APP_VERSION` from tag).
+- `mod_version` in `gradle.properties` is fallback for local builds only.
+
 ## Authors
 
 - **23XT**

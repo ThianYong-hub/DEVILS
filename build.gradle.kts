@@ -3,6 +3,18 @@ plugins {
     java
 }
 
+val appVersionFromEnv = System.getenv("APP_VERSION")
+    ?.removePrefix("v")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+val appVersionFromProperty = (findProperty("app_version") as String?)
+    ?.removePrefix("v")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+val resolvedAppVersion = appVersionFromEnv
+    ?: appVersionFromProperty
+    ?: (properties["mod_version"] as String)
+
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
@@ -11,7 +23,7 @@ java {
 
 base {
     archivesName = properties["archives_base_name"] as String
-    version = properties["mod_version"] as String
+    version = resolvedAppVersion
     group = properties["maven_group"] as String
 }
 

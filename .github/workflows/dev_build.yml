@@ -1,9 +1,11 @@
 name: Publish Development Build
 on:
   push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
   workflow_dispatch:
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -37,16 +39,3 @@ jobs:
           name: dev-build-${{ github.sha }}
           path: build/libs/*.jar
           if-no-files-found: error
-
-      - name: Release
-        if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch && github.actor != 'dependabot[bot]'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: snapshot
-          name: Latest Build
-          draft: false
-          prerelease: false
-          make_latest: true
-          files: ./build/libs/*.jar
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
