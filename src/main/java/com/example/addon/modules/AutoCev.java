@@ -196,6 +196,8 @@ public class AutoCev extends Module {
             }
 
             if (!canPlaceCrystalAt(activeBase)) {
+                BaseChoice alternative = chooseUnblockedBase(target, activeBase);
+                if (alternative != null && trySwitchToBase(alternative)) return;
                 if (mineCrystalBlocker(activeBase)) return;
                 resetCycle();
                 return;
@@ -320,6 +322,57 @@ public class AutoCev extends Module {
         }
 
         return best;
+    }
+
+    private BaseChoice chooseUnblockedBase(PlayerEntity player, BlockPos exclude) {
+        if (preferredBase != null
+            && !preferredBase.equals(exclude)
+            && isPreferredStillRelevant(preferredBase, player)
+            && isUsableBase(preferredBase, player, true)) {
+            return new BaseChoice(preferredBase, preferredFallback);
+        }
+
+        int x = player.getBlockX();
+        int z = player.getBlockZ();
+        int headY = MathHelper.floor(player.getBoundingBox().maxY);
+        BlockPos top = new BlockPos(x, headY + 1, z);
+        if (!top.equals(exclude) && isUsableBase(top, player, true)) return new BaseChoice(top, false);
+
+        int faceY = MathHelper.floor(player.getEyeY());
+        BlockPos center = new BlockPos(x, faceY, z);
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+
+        for (Direction dir : CARDINAL) {
+            BlockPos candidate = center.offset(dir);
+            if (candidate.equals(exclude)) continue;
+            if (!isUsableBase(candidate, player, true)) continue;
+
+            double distance = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = candidate;
+            }
+        }
+
+        if (best != null) return new BaseChoice(best, true);
+        return null;
+    }
+
+    private boolean trySwitchToBase(BaseChoice choice) {
+        BlockState state = mc.world.getBlockState(choice.pos());
+        if (state.isOf(Blocks.OBSIDIAN)) {
+            startCycle(choice);
+            tickCycle();
+            return true;
+        }
+
+        if (state.isAir() || state.isReplaceable()) {
+            placeObsidian(choice);
+            return true;
+        }
+
+        return false;
     }
 
     private boolean isBlockedObsidianBase(BlockPos pos, PlayerEntity player) {

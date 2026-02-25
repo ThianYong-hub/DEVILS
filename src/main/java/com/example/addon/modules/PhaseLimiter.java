@@ -70,7 +70,7 @@ public class PhaseLimiter extends Module {
     private static final int MAX_ARM_TICKS = 180;
     private static final long DEBUG_REPEAT_TICKS = 100;
     private static final int INVALID_GRACE_TICKS = 4;
-    private static final double VERTICAL_DISABLE_DELTA = 0.08;
+    private static final int VERTICAL_EXIT_GRACE_TICKS = 6;
 
     private int armedTicks;
     private Vec3d pearlThrowPos;
@@ -83,13 +83,13 @@ public class PhaseLimiter extends Module {
     private boolean hardLocked;
     private double freezeX;
     private double freezeZ;
-    private double lockY;
     private double maxDepthThisLock;
     private double hardLockDepth;
     private long debugSeq;
     private String lastDebugKey;
     private long lastDebugTick;
     private int invalidTicks;
+    private int verticalExitTicks;
 
     public PhaseLimiter() {
         super(AddonTemplate.CATEGORY, "phase-limiter", "Locks horizontal movement only after you reach the penetration limit in a phased block.");
@@ -114,15 +114,17 @@ public class PhaseLimiter extends Module {
         if (lockedBlock != null) {
             if (!isSolidAt(lockedBlock)) {
                 clearLock("locked-block-broken");
-                toggle();
                 return;
             }
 
-            if (Math.abs(mc.player.getY() - lockY) > VERTICAL_DISABLE_DELTA) {
-                clearLock("vertical-exit");
-                toggle();
+            if (!isVerticallyInsideLockedBlock()) {
+                verticalExitTicks++;
+                if (verticalExitTicks >= VERTICAL_EXIT_GRACE_TICKS) {
+                    clearLock("vertical-exit");
+                }
                 return;
             }
+            verticalExitTicks = 0;
 
             if (!isLockStillValid()) {
                 invalidTicks++;
@@ -384,10 +386,10 @@ public class PhaseLimiter extends Module {
 
         freezeX = mc.player.getX();
         freezeZ = mc.player.getZ();
-        lockY = mc.player.getY();
         maxDepthThisLock = 0.0;
         hardLockDepth = -1.0;
         invalidTicks = 0;
+        verticalExitTicks = 0;
         clearArm();
         logDebug(String.format("latch block=%s axis=%s lockX=%s lockZ=%s cfg=%.3f effective=%.3f",
             lockedBlock, primaryAxis, lockX, lockZ, maxPenetration.get(), getEffectivePenetrationLimit()));
@@ -631,10 +633,7 @@ public class PhaseLimiter extends Module {
     }
 
     private double getEffectivePenetrationLimit() {
-        double half = getHalfHorizontalSize();
-        double effectiveBuffer = Math.max(insideBuffer.get(), 0.0);
-        double effective = Math.max(maxPenetration.get(), half + effectiveBuffer);
-        return MathHelper.clamp(effective, 0.01, 0.99);
+        return MathHelper.clamp(maxPenetration.get(), 0.01, 0.99);
     }
 
     private void engageHardLock(double x, double z, String source) {
@@ -644,6 +643,14 @@ public class PhaseLimiter extends Module {
         hardLockDepth = getDepthFor(x, z);
         logDebug(String.format("hard-lock source=%s depth=%.3f effective=%.3f freezeX=%.3f freezeZ=%.3f",
             source, hardLockDepth, getEffectivePenetrationLimit(), freezeX, freezeZ));
+    }
+
+    private boolean isVerticallyInsideLockedBlock() {
+        if (lockedBlock == null) return false;
+        Box playerBox = mc.player.getBoundingBox();
+        double blockMinY = lockedBlock.getY();
+        double blockMaxY = lockedBlock.getY() + 1.0;
+        return playerBox.maxY > blockMinY + EPSILON && playerBox.minY < blockMaxY - EPSILON;
     }
 
     private boolean isPearlInHand(Hand hand) {
@@ -679,10 +686,10 @@ public class PhaseLimiter extends Module {
         hardLocked = false;
         freezeX = 0.0;
         freezeZ = 0.0;
-        lockY = 0.0;
         maxDepthThisLock = 0.0;
         hardLockDepth = -1.0;
         invalidTicks = 0;
+        verticalExitTicks = 0;
     }
 
     private void clearArm() {
