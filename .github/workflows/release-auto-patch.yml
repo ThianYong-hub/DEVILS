@@ -1,13 +1,10 @@
 name: Auto Patch Tag
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
   actions: write
-  pull-requests: read
 
 concurrency:
   group: release-tags
@@ -23,56 +20,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect merged PR for this commit
-        id: detect_merged_pr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            try {
-              const response = await github.request(
-                "GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls",
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  headers: { accept: "application/vnd.github+json" }
-                }
-              );
-
-              const mergedToMain = response.data.filter(
-                pr => pr.base?.ref === "main" && pr.merged_at
-              );
-
-              const skip = mergedToMain.length === 0;
-              core.setOutput("skip", skip ? "true" : "false");
-
-              if (skip) {
-                core.setOutput("reason", "No merged PR to main is associated with this commit.");
-                core.info("Skip release tagging: commit is not linked to a merged PR into main.");
-              } else {
-                const pr = mergedToMain[0];
-                core.setOutput("reason", `Merged PR #${pr.number} detected.`);
-                core.info(`Merged PR #${pr.number} detected, continue release flow.`);
-              }
-            } catch (error) {
-              const message = `Unable to validate merged PR for commit: ${error.message}`;
-              core.warning(message);
-              core.setOutput("skip", "true");
-              core.setOutput("reason", message);
-            }
-
-      - name: Skip if commit is not from merged PR
-        if: steps.detect_merged_pr.outputs.skip == 'true'
-        run: echo "${{ steps.detect_merged_pr.outputs.reason }}"
-
       - name: Configure Git User
-        if: steps.detect_merged_pr.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Configure Push Auth
-        if: steps.detect_merged_pr.outputs.skip != 'true'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -82,7 +35,6 @@ jobs:
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Create Next Patch Tag With Retry
-        if: steps.detect_merged_pr.outputs.skip != 'true'
         id: create_tag
         shell: bash
         run: |
@@ -152,11 +104,10 @@ jobs:
           exit 1
 
       - name: Summary
-        if: steps.detect_merged_pr.outputs.skip != 'true'
         run: echo "Created or reused tag ${{ steps.create_tag.outputs.tag }}"
 
       - name: Trigger Release Workflow
-        if: steps.detect_merged_pr.outputs.skip != 'true' && steps.create_tag.outputs.tag != ''
+        if: steps.create_tag.outputs.tag != ''
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}

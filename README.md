@@ -51,20 +51,21 @@ The built JAR will be in `build/libs/`.
 
 ## Release Process
 
-Hybrid release flow:
+Manual-only release flow:
 - Feature/PR pipelines run tests and build artifacts only (no tag and no GitHub Release).
-- Merge PR to `main` creates the next PATCH tag automatically (`vX.Y.Z`) with retry/concurrency safety.
-- Stable GitHub Release is created only by explicit workflow dispatch to `release-on-tag` from release workflows.
-- MINOR and MAJOR versions are created manually via tag (`vX.Y.0`, `vX.0.0`) or manual workflow.
+- Merge to `main` does not create tags and does not publish releases automatically.
+- Stable release is created manually through `Actions -> Manual Release Tag -> Run workflow`.
+- Leave `version` empty to auto-increment PATCH (`Z`) from the latest `vX.Y.Z`.
+- Set `version` manually to `vX.Y.Z` when you want explicit MINOR/MAJOR.
 
 Stable version source:
 - Stable builds use Git tag as source of truth (`APP_VERSION` from tag).
 - `mod_version` in `gradle.properties` is fallback for local builds only.
 
 Workflow chaining note:
-- Auto/manual tag workflows trigger `release-on-tag` explicitly via `workflow_dispatch`.
+- Manual tag workflow triggers `release-on-tag` explicitly via `workflow_dispatch`.
 - No additional PAT secret is required; built-in `GITHUB_TOKEN` is used.
-- Direct push to `main` without merged PR is skipped by release guard and does not publish a release.
+- `release-auto-patch` remains in repository in disabled/manual mode for optional future use.
 - Plain external tag push does not auto-publish release unless `release-on-tag` is dispatched.
 
 ## Authors
