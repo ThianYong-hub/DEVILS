@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(JAVA_HOME=\"/c/Program Files/Java/jdk-21\" ./gradlew:*)"
-    ]
-  }
-}
