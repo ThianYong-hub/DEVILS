@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release-tags
@@ -20,7 +21,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
 
       - name: Configure Git User
         run: |
@@ -30,16 +30,11 @@ jobs:
       - name: Configure Push Auth
         shell: bash
         env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${RELEASE_TOKEN:-}" ]]; then
-            echo "::error::Missing required secret RELEASE_TOKEN."
-            exit 1
-          fi
-
-          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Create Next Patch Tag With Retry
         id: create_tag
@@ -112,3 +107,20 @@ jobs:
 
       - name: Summary
         run: echo "Created or reused tag ${{ steps.create_tag.outputs.tag }}"
+
+      - name: Trigger Release Workflow
+        if: steps.create_tag.outputs.tag != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.create_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          payload="$(printf '{"ref":"%s","inputs":{"tag":"%s"}}' "${GITHUB_REF_NAME}" "${RELEASE_TAG}")"
+
+          curl -sS -L -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release-on-tag.yml/dispatches" \
+            -d "${payload}"
