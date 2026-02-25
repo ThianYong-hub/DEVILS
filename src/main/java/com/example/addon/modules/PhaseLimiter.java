@@ -68,8 +68,9 @@ public class PhaseLimiter extends Module {
     private static final int MIN_ARM_TICKS = 24;
     private static final int MAX_ARM_TICKS = 180;
     private static final double MIN_INSIDE_BUFFER = 0.05;
-    private static final double CENTER_LOCK_RADIUS = 0.06;
+    private static final double CENTER_LOCK_RADIUS = 0.08;
     private static final double MIN_EFFECTIVE_LIMIT = 0.40;
+    private static final double PRELOCK_BACKSLIDE_EPS = 1e-4;
 
     private int armedTicks;
     private Vec3d pearlThrowPos;
@@ -84,6 +85,9 @@ public class PhaseLimiter extends Module {
     private double freezeZ;
     private double maxDepthThisLock;
     private double hardLockDepth;
+    private double bestCenterDistSq;
+    private double lastGoodX;
+    private double lastGoodZ;
     private boolean debugLimitLogged;
     private long debugSeq;
 
@@ -114,6 +118,7 @@ public class PhaseLimiter extends Module {
                 return;
             }
 
+            if (!hardLocked) enforcePrelockProgress();
             updateDepthStats();
             updateHardLockState();
             if (hardLocked) enforceFrozenPosition();
@@ -216,10 +221,10 @@ public class PhaseLimiter extends Module {
 
         if (!hardLocked) {
             boolean reachCenter = isAtCenter(packetX, packetZ);
-            boolean awayFromCenter = isMovingAwayFromCenter(baseX, baseZ, packetX, packetZ);
-            logDebugf("packet-prelock-check base=(%.4f,%.4f) pkt=(%.4f,%.4f) depthPkt=%.4f reachCenter=%s away=%s", baseX, baseZ, packetX, packetZ, getDepthFor(packetX, packetZ), reachCenter, awayFromCenter);
-            if (awayFromCenter && !reachCenter) {
-                event.packet = rewritePacketXZ(packet, baseX, baseZ);
+            boolean awayFromProgress = distanceSqToCenter(packetX, packetZ) > bestCenterDistSq + PRELOCK_BACKSLIDE_EPS;
+            logDebugf("packet-prelock-check base=(%.4f,%.4f) pkt=(%.4f,%.4f) depthPkt=%.4f reachCenter=%s awayProgress=%s", baseX, baseZ, packetX, packetZ, getDepthFor(packetX, packetZ), reachCenter, awayFromProgress);
+            if (awayFromProgress && !reachCenter) {
+                event.packet = rewritePacketXZ(packet, lastGoodX, lastGoodZ);
                 logDebug("packet-prelock-rewrite-away-from-center");
                 return;
             }
@@ -251,11 +256,26 @@ public class PhaseLimiter extends Module {
     @EventHandler(priority = EventPriority.HIGHEST + 1)
     private void onPacketReceive(PacketEvent.Receive event) {
         if (mc.player == null || mc.world == null) return;
-        if (!hardLocked || lockedBlock == null) return;
+        if (lockedBlock == null) return;
         if (!(event.packet instanceof PlayerPositionLookS2CPacket packet)) return;
 
         PlayerPosition oldPos = packet.change();
         Vec3d oldVec = oldPos.position();
+        if (!hardLocked) {
+            double dist2 = distanceSqToCenter(oldVec.x, oldVec.z);
+            if (dist2 > bestCenterDistSq + PRELOCK_BACKSLIDE_EPS) {
+                PlayerPosition newPos = new PlayerPosition(
+                    new Vec3d(lastGoodX, oldVec.y, lastGoodZ),
+                    oldPos.deltaMovement(),
+                    oldPos.yaw(),
+                    oldPos.pitch()
+                );
+                event.packet = PlayerPositionLookS2CPacket.of(packet.teleportId(), newPos, packet.relatives());
+                logDebugf("packet-s2c-prelock-rewrite dx=%.5f dz=%.5f", oldVec.x - lastGoodX, oldVec.z - lastGoodZ);
+            }
+            return;
+        }
+
         boolean horizontalDelta = Math.abs(oldVec.x - freezeX) > EPSILON || Math.abs(oldVec.z - freezeZ) > EPSILON;
         if (!horizontalDelta) return;
 
@@ -319,6 +339,9 @@ public class PhaseLimiter extends Module {
         freezeZ = centerZ;
         maxDepthThisLock = 0.0;
         hardLockDepth = -1.0;
+        bestCenterDistSq = distanceSqToCenter(mc.player.getX(), mc.player.getZ());
+        lastGoodX = mc.player.getX();
+        lastGoodZ = mc.player.getZ();
         debugLimitLogged = false;
         clearArm();
         double limit = getEffectivePenetrationLimit();
@@ -345,6 +368,25 @@ public class PhaseLimiter extends Module {
 
     private boolean hasReachedCenter() {
         return isAtCenter(mc.player.getX(), mc.player.getZ());
+    }
+
+    private void enforcePrelockProgress() {
+        double x = mc.player.getX();
+        double z = mc.player.getZ();
+        double dist2 = distanceSqToCenter(x, z);
+
+        if (dist2 <= bestCenterDistSq + EPSILON) {
+            if (dist2 < bestCenterDistSq) bestCenterDistSq = dist2;
+            lastGoodX = x;
+            lastGoodZ = z;
+            return;
+        }
+
+        if (dist2 > bestCenterDistSq + PRELOCK_BACKSLIDE_EPS) {
+            mc.player.setPosition(lastGoodX, mc.player.getY(), lastGoodZ);
+            ((IVec3d) mc.player.getVelocity()).meteor$set(0.0, mc.player.getVelocity().y, 0.0);
+            logDebugf("prelock-revert dist2=%.5f best=%.5f", dist2, bestCenterDistSq);
+        }
     }
 
     private boolean isMovingAwayFromCenter(double curX, double curZ, double nextX, double nextZ) {
@@ -688,6 +730,9 @@ public class PhaseLimiter extends Module {
         freezeZ = 0.0;
         maxDepthThisLock = 0.0;
         hardLockDepth = -1.0;
+        bestCenterDistSq = 0.0;
+        lastGoodX = 0.0;
+        lastGoodZ = 0.0;
         debugLimitLogged = false;
     }
 
