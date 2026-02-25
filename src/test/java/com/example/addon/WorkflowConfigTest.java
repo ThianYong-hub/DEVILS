@@ -46,6 +46,7 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("calc_next_patch_tag"));
         assertTrue(workflow.contains("attempts=10"));
         assertTrue(workflow.contains("actions: write"));
+        assertTrue(workflow.contains("pull-requests: read"));
         assertTrue(workflow.contains("github.token"));
         assertTrue(workflow.contains("x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"));
         assertTrue(workflow.contains("Trigger Release Workflow"));
