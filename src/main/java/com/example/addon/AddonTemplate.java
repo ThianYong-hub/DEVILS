@@ -11,6 +11,7 @@ import com.example.addon.modules.DiscordRPC;
 import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
 import com.example.addon.modules.JoinWatcher;
+import com.example.addon.modules.LavaBucket;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
@@ -47,6 +48,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new HClip());
         Modules.get().add(new AutoCev());
         Modules.get().add(new JoinWatcher());
+        Modules.get().add(new LavaBucket());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
