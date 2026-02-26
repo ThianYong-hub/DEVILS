@@ -10,7 +10,6 @@ import com.example.addon.modules.AutoWasp;
 import com.example.addon.modules.DiscordRPC;
 import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
-import com.example.addon.modules.PhaseLimiter;
 import com.example.addon.modules.JoinWatcher;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.mojang.logging.LogUtils;
@@ -47,7 +46,6 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new DiscordRPC());
         Modules.get().add(new HClip());
         Modules.get().add(new AutoCev());
-        Modules.get().add(new PhaseLimiter());
         Modules.get().add(new JoinWatcher());
 
         Commands.add(new CommandExample());
