@@ -5,6 +5,7 @@
   "client": [
     "ExampleMixin",
     "AnvilScreenHandlerAccessor",
+    "PlayerInteractEntityC2SPacketAccessor",
     "ItemListSettingScreenMixin",
     "ModulesScreenIconsMixin"
   ],

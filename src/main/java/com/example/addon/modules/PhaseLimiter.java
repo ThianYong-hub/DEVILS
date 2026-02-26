@@ -2,743 +2,513 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
-import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.block.BlockState;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.entity.player.PlayerPosition;
-import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.util.Hand;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.shape.VoxelShape;
 
 public class PhaseLimiter extends Module {
+
+    // ── Setting groups ──────────────────────────────────────────────────────
+
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgDebug   = settings.createGroup("Debug");
 
-    private final Setting<Double> maxPenetration = sgGeneral.add(new DoubleSetting.Builder()
-        .name("max-penetration")
-        .description("How deep your player center can move into the locked block before horizontal movement is frozen. Auto-raised if needed to keep hitbox inside.")
-        .defaultValue(0.20)
-        .min(0.01)
-        .max(0.99)
-        .sliderRange(0.05, 0.60)
-        .build()
-    );
+    // ── General settings ────────────────────────────────────────────────────
 
-    private final Setting<Double> insideBuffer = sgGeneral.add(new DoubleSetting.Builder()
-        .name("inside-buffer")
-        .description("Extra depth added to keep your hitbox inside the block after lock.")
-        .defaultValue(0.05)
-        .min(0.0)
-        .max(0.20)
-        .sliderRange(0.0, 0.08)
-        .build()
-    );
+    private final Setting<Double> maxDepth = sgGeneral.add(new DoubleSetting.Builder()
+        .name("max-depth")
+        .description("How far the player CENTER may cross the entry face. 0 = at face, 0.5 = block middle, 1.0 = opposite face.")
+        .defaultValue(0.40)
+        .min(0.01).max(0.90)
+        .sliderRange(0.05, 0.90)
+        .build());
 
-    private final Setting<Boolean> cancelMovePackets = sgGeneral.add(new BoolSetting.Builder()
-        .name("cancel-move-packets")
-        .description("Cancels horizontal PlayerMove packets when lock is active.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Boolean> debugLogs = sgGeneral.add(new BoolSetting.Builder()
-        .name("debug-logs")
-        .description("Logs penetration depth and lock/unlock reasons for tuning.")
+    private final Setting<Boolean> lockVertical = sgGeneral.add(new BoolSetting.Builder()
+        .name("lock-vertical")
+        .description("Also prevent vertical movement while locked.")
         .defaultValue(false)
-        .build()
-    );
+        .build());
 
-    private static final double EPSILON = 1e-6;
-    private static final double DEPTH_EPSILON = 1e-4;
-    private static final double MIN_ARM_DISTANCE_SQ = 0.04; // 0.20 blocks
-    private static final int MIN_ARM_TICKS = 24;
-    private static final int MAX_ARM_TICKS = 180;
-    private static final long DEBUG_REPEAT_TICKS = 100;
-    private static final int INVALID_GRACE_TICKS = 4;
-    private static final int VERTICAL_EXIT_GRACE_TICKS = 6;
+    private final Setting<Boolean> allowSneak = sgGeneral.add(new BoolSetting.Builder()
+        .name("allow-sneak-unlock")
+        .description("Shift to release lock.")
+        .defaultValue(true)
+        .build());
 
-    private int armedTicks;
-    private Vec3d pearlThrowPos;
-    private double minLockOverlap;
+    private final Setting<Boolean> allowJump = sgGeneral.add(new BoolSetting.Builder()
+        .name("allow-jump-unlock")
+        .description("Space to release lock.")
+        .defaultValue(true)
+        .build());
 
+    private final Setting<Integer> unlockGrace = sgGeneral.add(new IntSetting.Builder()
+        .name("unlock-grace-ticks")
+        .description("Consecutive ticks depth must be ~0 before auto-unlock.")
+        .defaultValue(5)
+        .min(1).max(20).sliderRange(1, 20)
+        .build());
+
+    private final Setting<Double> yTeleportThreshold = sgGeneral.add(new DoubleSetting.Builder()
+        .name("y-teleport-threshold")
+        .description("Per-tick Y change that counts as a server teleport and triggers unlock.")
+        .defaultValue(0.5)
+        .min(0.1).max(2.0)
+        .sliderRange(0.1, 2.0)
+        .build());
+
+    // ── Debug settings ──────────────────────────────────────────────────────
+
+    private final Setting<Boolean> observeOnly = sgDebug.add(new BoolSetting.Builder()
+        .name("observe-only")
+        .description("Never lock — only log depth. Use to find the real kick threshold.")
+        .defaultValue(false)
+        .build());
+
+    private final Setting<Boolean> debugChat = sgDebug.add(new BoolSetting.Builder()
+        .name("debug-chat")
+        .description("Print LOCK / UNLOCK events to chat.")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Boolean> debugVerbose = sgDebug.add(new BoolSetting.Builder()
+        .name("debug-verbose")
+        .description("Print every-tick depth to chat (spammy).")
+        .defaultValue(false)
+        .build());
+
+    private final Setting<Boolean> logToClipboard = sgDebug.add(new BoolSetting.Builder()
+        .name("log-to-clipboard")
+        .description("Copy the full debug log to clipboard when module is deactivated.")
+        .defaultValue(true)
+        .build());
+
+    // ── Entry face ──────────────────────────────────────────────────────────
+
+    private enum Face {
+        WEST, EAST, NORTH, SOUTH;
+
+        /**
+         * Distance from the player CENTER to this face, measured inward.
+         * Positive = center has crossed the face into the block.
+         * Negative = center is still outside.
+         */
+        double centerPenetration(double cx, double cz, int bx, int bz) {
+            return switch (this) {
+                case WEST  -> cx - bx;            // center past west face → east
+                case EAST  -> (bx + 1.0) - cx;    // center past east face → west
+                case NORTH -> cz - bz;            // center past north face → south
+                case SOUTH -> (bz + 1.0) - cz;    // center past south face → north
+            };
+        }
+
+        /**
+         * Detect entry face when center is inside block on both axes.
+         * Picks the face closest to center (= the face the player just crossed).
+         */
+        static Face detectNearest(double cx, double cz, int bx, int bz) {
+            double dW = cx - bx, dE = (bx + 1.0) - cx;
+            double dN = cz - bz, dS = (bz + 1.0) - cz;
+            double min = Math.min(Math.min(dW, dE), Math.min(dN, dS));
+            if      (min == dW) return WEST;
+            else if (min == dE) return EAST;
+            else if (min == dN) return NORTH;
+            else                return SOUTH;
+        }
+    }
+
+    // ── State ───────────────────────────────────────────────────────────────
+
+    private BlockPos trackedBlock;
+    private Face     trackedFace;
+
+    private boolean  locked;
+    private Vec3d    lockedPos;
     private BlockPos lockedBlock;
-    private AxisLock lockX;
-    private AxisLock lockZ;
-    private PrimaryAxis primaryAxis;
-    private boolean hardLocked;
-    private double freezeX;
-    private double freezeZ;
-    private double maxDepthThisLock;
-    private double hardLockDepth;
-    private long debugSeq;
-    private String lastDebugKey;
-    private long lastDebugTick;
-    private int invalidTicks;
-    private int verticalExitTicks;
+    private Face     lockedFace;
+
+    private double lastDepth;
+    private double peakDepth;
+    private double lastTickY;
+    private int    lockTicks;
+    private int    zeroDepthTicks;
+    private int    totalTicks;
+
+    private final StringBuilder debugLog = new StringBuilder();
+
+    // ── Constructor ─────────────────────────────────────────────────────────
 
     public PhaseLimiter() {
-        super(AddonTemplate.CATEGORY, "phase-limiter", "Locks horizontal movement only after you reach the penetration limit in a phased block.");
+        super(AddonTemplate.CATEGORY, "phase-limiter",
+            "Freezes horizontal movement when you phase into a block to prevent server kick.");
     }
 
     @Override
     public void onActivate() {
-        clearState();
-        logDebug("activate");
+        locked = false;
+        lockedPos = null;
+        lockedBlock = null;
+        lockedFace = null;
+        trackedBlock = null;
+        trackedFace = null;
+        lastDepth = 0;
+        peakDepth = 0;
+        lastTickY = mc.player != null ? mc.player.getY() : 0;
+        lockTicks = 0;
+        zeroDepthTicks = 0;
+        totalTicks = 0;
+        debugLog.setLength(0);
+        log("=== PhaseLimiter ON | maxDepth=%.3f observe=%s (center-from-entry-face) ===",
+            maxDepth.get(), observeOnly.get());
     }
 
     @Override
     public void onDeactivate() {
-        logDebug("deactivate");
-        clearState();
+        if (locked) unlock("module disabled");
+
+        log("=== PhaseLimiter OFF | peakDepth=%.4f totalTicks=%d ===", peakDepth, totalTicks);
+
+        if (logToClipboard.get() && debugLog.length() > 0 && mc.keyboard != null) {
+            mc.keyboard.setClipboard(debugLog.toString());
+            info("Debug log copied to clipboard (%d chars)", debugLog.length());
+        }
+
+        clearTracking();
     }
+
+    // ── Tick ────────────────────────────────────────────────────────────────
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
+        totalTicks++;
 
-        if (lockedBlock != null) {
-            if (!isSolidAt(lockedBlock)) {
-                clearLock("locked-block-broken");
+        double currentY = mc.player.getY();
+
+        // ── Y teleport detection (ALL states) ───────────────────────────
+        double yDelta = Math.abs(currentY - lastTickY);
+        if (yDelta > yTeleportThreshold.get()) {
+            log("t=%d Y_TELEPORT yDelta=%.4f (%.4f -> %.4f) locked=%s",
+                totalTicks, yDelta, lastTickY, currentY, locked);
+            if (locked) unlock("server Y teleport");
+            clearTracking();
+            lastDepth = 0;
+            lastTickY = currentY;
+            return;
+        }
+        lastTickY = currentY;
+
+        // ── Manual unlock ───────────────────────────────────────────────
+        if (locked) {
+            if (allowSneak.get() && mc.options.sneakKey.isPressed()) {
+                unlock("sneak pressed");
+                clearTracking();
                 return;
             }
-
-            if (!isVerticallyInsideLockedBlock()) {
-                verticalExitTicks++;
-                if (verticalExitTicks >= VERTICAL_EXIT_GRACE_TICKS) {
-                    clearLock("vertical-exit");
-                }
+            if (allowJump.get() && mc.options.jumpKey.isPressed()) {
+                unlock("jump pressed");
+                clearTracking();
                 return;
             }
-            verticalExitTicks = 0;
+        }
 
-            if (!isLockStillValid()) {
-                invalidTicks++;
-                if (invalidTicks >= INVALID_GRACE_TICKS) clearLock("invalid-state");
+        // ── Re-snap X/Z BEFORE depth calc when locked ───────────────────
+        if (locked && lockedPos != null) {
+            mc.player.setPosition(lockedPos.x, mc.player.getY(), lockedPos.z);
+        }
+
+        // ── Depth calculation ───────────────────────────────────────────
+        double depth;
+
+        if (locked && lockedBlock != null && lockedFace != null) {
+            // Y level check
+            int footY = (int) Math.floor(mc.player.getBoundingBox().minY + 0.02);
+            if (footY != lockedBlock.getY()) {
+                log("t=%d Y_LEVEL_MISMATCH footY=%d blockY=%d", totalTicks, footY, lockedBlock.getY());
+                unlock("Y level changed");
+                clearTracking();
                 return;
             }
-            invalidTicks = 0;
-
-            updateDepthStats();
-            if (!hardLocked && reachedLimitAt(mc.player.getX(), mc.player.getZ())) {
-                Vec3d clamped = clampToLimit(mc.player.getX(), mc.player.getZ());
-                engageHardLock(clamped.x, clamped.z, "tick-limit");
-            }
-            if (hardLocked) enforceFrozenPosition();
-            return;
-        }
-
-        if (armedTicks <= 0) return;
-        armedTicks--;
-
-        if (pearlThrowPos != null && mc.player.squaredDistanceTo(pearlThrowPos) < MIN_ARM_DISTANCE_SQ) {
-            if (armedTicks <= 0) clearArm();
-            return;
-        }
-
-        BlockPos inside = findInsideSolidBlock(mc.player.getBoundingBox(), minLockOverlap);
-        if (inside != null) {
-            latchToBlock(inside);
-            return;
-        }
-
-        if (armedTicks <= 0) clearArm();
-    }
-
-    @EventHandler
-    private void onPlayerMove(PlayerMoveEvent event) {
-        if (mc.player == null || mc.world == null) return;
-        if (lockedBlock == null) return;
-        if (!isLockStillValid()) return;
-
-        double curX = mc.player.getX();
-        double curZ = mc.player.getZ();
-        double nextX = curX + event.movement.x;
-        double nextZ = curZ + event.movement.z;
-
-        if (hardLocked) {
-            ((IVec3d) event.movement).meteor$set(0.0, event.movement.y, 0.0);
-            logDebugRateLimited("move-hard-stop", "move-stop hard-lock");
-            return;
-        }
-
-        double curDepth = getDepthFor(curX, curZ);
-        Vec3d secondaryClamped = clampSecondaryAxis(nextX, nextZ);
-        nextX = secondaryClamped.x;
-        nextZ = secondaryClamped.z;
-        double nextDepth = getDepthFor(nextX, nextZ);
-
-        if (nextDepth < curDepth - DEPTH_EPSILON) {
-            double allowedX = nextX;
-            double allowedZ = nextZ;
-            if (primaryAxis == PrimaryAxis.X) allowedX = curX;
-            else allowedZ = curZ;
-            ((IVec3d) event.movement).meteor$set(allowedX - curX, event.movement.y, allowedZ - curZ);
-            logDebugRateLimited("move-outward-stop", String.format("move-stop outward cur=%.3f next=%.3f", curDepth, nextDepth));
-            return;
-        }
-
-        if (!reachedLimitAt(nextX, nextZ)) {
-            if (Math.abs(nextX - (curX + event.movement.x)) > EPSILON || Math.abs(nextZ - (curZ + event.movement.z)) > EPSILON) {
-                ((IVec3d) event.movement).meteor$set(nextX - curX, event.movement.y, nextZ - curZ);
-            }
-            return;
-        }
-
-        Vec3d clamped = clampToLimit(nextX, nextZ);
-        engageHardLock(clamped.x, clamped.z, "move-limit");
-        ((IVec3d) event.movement).meteor$set(clamped.x - curX, event.movement.y, clamped.z - curZ);
-    }
-
-    @EventHandler(priority = EventPriority.HIGHEST + 1)
-    private void onPacketSend(PacketEvent.Send event) {
-        if (mc.player == null || mc.world == null) return;
-
-        if (event.packet instanceof PlayerInteractItemC2SPacket packet
-            && isPearlInHand(packet.getHand())) {
-            armForPearl();
-            return;
-        }
-
-        if (!(event.packet instanceof PlayerMoveC2SPacket packet)) return;
-        if (!cancelMovePackets.get()) return;
-        if (lockedBlock == null) return;
-        if (!isLockStillValid()) return;
-        if (!packet.changesPosition()) return;
-
-        double baseX = mc.player.getX();
-        double baseZ = mc.player.getZ();
-        double packetX = packet.getX(baseX);
-        double packetZ = packet.getZ(baseZ);
-
-        if (!hardLocked) {
-            Vec3d secondaryClamped = clampSecondaryAxis(packetX, packetZ);
-            packetX = secondaryClamped.x;
-            packetZ = secondaryClamped.z;
-            double curDepth = getDepthFor(baseX, baseZ);
-            double packetDepth = getDepthFor(packetX, packetZ);
-
-            if (packetDepth < curDepth - DEPTH_EPSILON) {
-                double allowedX = packetX;
-                double allowedZ = packetZ;
-                if (primaryAxis == PrimaryAxis.X) allowedX = baseX;
-                else allowedZ = baseZ;
-                event.packet = rewritePacketXZ(packet, allowedX, allowedZ);
-                logDebugRateLimited("packet-outward-stop", String.format("packet-stop outward cur=%.3f next=%.3f", curDepth, packetDepth));
+            // Block still solid?
+            BlockState state = mc.world.getBlockState(lockedBlock);
+            if (!state.isFullCube(mc.world, lockedBlock)) {
+                unlock("block broken/removed");
+                clearTracking();
                 return;
             }
-
-            if (!reachedLimitAt(packetX, packetZ)) {
-                double originalX = packet.getX(baseX);
-                double originalZ = packet.getZ(baseZ);
-                if (Math.abs(originalX - packetX) > EPSILON || Math.abs(originalZ - packetZ) > EPSILON) {
-                    event.packet = rewritePacketXZ(packet, packetX, packetZ);
-                }
-                return;
-            }
-
-            Vec3d clamped = clampToLimit(packetX, packetZ);
-            engageHardLock(clamped.x, clamped.z, "packet-limit");
-            event.packet = rewritePacketXZ(packet, clamped.x, clamped.z);
-            return;
-        }
-
-        PlayerMoveC2SPacket forced = forceHorizontalPacket(packet);
-        if (forced != packet) {
-            event.packet = forced;
-            return;
+            depth = calcDepth(mc.player.getBoundingBox(), lockedBlock, lockedFace);
         } else {
-            boolean horizontalDelta = Math.abs(packetX - freezeX) > EPSILON || Math.abs(packetZ - freezeZ) > EPSILON;
-            if (horizontalDelta) {
-                event.cancel();
-                logDebugRateLimited("packet-hard-cancel", String.format("packet-cancel hard-lock dx=%.5f dz=%.5f", packetX - freezeX, packetZ - freezeZ));
-            }
+            depth = scanPhaseDepth();
         }
-    }
 
-    @EventHandler(priority = EventPriority.HIGHEST + 1)
-    private void onPacketReceive(PacketEvent.Receive event) {
-        if (mc.player == null || mc.world == null) return;
-        if (lockedBlock == null) return;
-        if (!(event.packet instanceof PlayerPositionLookS2CPacket packet)) return;
+        lastDepth = depth;
+        if (depth > peakDepth) peakDepth = depth;
 
-        PlayerPosition oldPos = packet.change();
-        Vec3d oldVec = oldPos.position();
+        // ── Locked state ────────────────────────────────────────────────
+        if (locked) {
+            lockTicks++;
 
-        if (!hardLocked) {
-            double curDepth = getCurrentDepth();
-            Vec3d secondaryClamped = clampSecondaryAxis(oldVec.x, oldVec.z);
-            double serverX = secondaryClamped.x;
-            double serverZ = secondaryClamped.z;
-            double serverDepth = getDepthFor(serverX, serverZ);
-
-            if (serverDepth < curDepth - DEPTH_EPSILON) {
-                double allowedX = serverX;
-                double allowedZ = serverZ;
-                if (primaryAxis == PrimaryAxis.X) allowedX = mc.player.getX();
-                else allowedZ = mc.player.getZ();
-                PlayerPosition kept = new PlayerPosition(
-                    new Vec3d(allowedX, oldVec.y, allowedZ),
-                    oldPos.deltaMovement(),
-                    oldPos.yaw(),
-                    oldPos.pitch()
-                );
-                event.packet = PlayerPositionLookS2CPacket.of(packet.teleportId(), kept, packet.relatives());
-                logDebugRateLimited("s2c-outward-stop", String.format("s2c-stop outward cur=%.3f srv=%.3f", curDepth, serverDepth));
-                return;
-            }
-
-            if (!reachedLimitAt(serverX, serverZ)) {
-                if (Math.abs(oldVec.x - serverX) > EPSILON || Math.abs(oldVec.z - serverZ) > EPSILON) {
-                    PlayerPosition clampedSecondary = new PlayerPosition(
-                        new Vec3d(serverX, oldVec.y, serverZ),
-                        oldPos.deltaMovement(),
-                        oldPos.yaw(),
-                        oldPos.pitch()
-                    );
-                    event.packet = PlayerPositionLookS2CPacket.of(packet.teleportId(), clampedSecondary, packet.relatives());
+            if (depth < 0.001) {
+                zeroDepthTicks++;
+                if (zeroDepthTicks >= unlockGrace.get()) {
+                    log("t=%d UNLOCK reason=left_block zeroFor=%d", totalTicks, zeroDepthTicks);
+                    unlock("left block (depth ~0)");
+                    clearTracking();
+                    return;
                 }
-                return;
+            } else {
+                zeroDepthTicks = 0;
             }
 
-            Vec3d clamped = clampToLimit(serverX, serverZ);
-            engageHardLock(clamped.x, clamped.z, "s2c-limit");
-            PlayerPosition limited = new PlayerPosition(
-                new Vec3d(clamped.x, oldVec.y, clamped.z),
-                oldPos.deltaMovement(),
-                oldPos.yaw(),
-                oldPos.pitch()
-            );
-            event.packet = PlayerPositionLookS2CPacket.of(packet.teleportId(), limited, packet.relatives());
-            return;
+            if (debugVerbose.get()) {
+                debugMsg(String.format("§7[LOCKED t=%d] depth=%.4f face=%s zero=%d pos=(%.4f, %.4f, %.4f)",
+                    lockTicks, depth, lockedFace, zeroDepthTicks,
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ()));
+                log("t=%d LOCKED depth=%.4f face=%s pos=(%.4f,%.4f,%.4f)",
+                    totalTicks, depth, lockedFace,
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ());
+            }
+
+        // ── Unlocked state ──────────────────────────────────────────────
+        } else {
+            // Clear tracking when depth falls to 0
+            if (depth < 0.001 && trackedBlock != null) {
+                trackedBlock = null;
+                trackedFace = null;
+            }
+
+            if (depth > 0.001) {
+                if (debugVerbose.get()) {
+                    debugMsg(String.format("§7[PHASE] depth=%.4f / %.3f face=%s block=%s",
+                        depth, maxDepth.get(), trackedFace,
+                        trackedBlock != null ? trackedBlock.toShortString() : "?"));
+                }
+                log("t=%d PHASE depth=%.4f face=%s block=%s pos=(%.4f,%.4f,%.4f)",
+                    totalTicks, depth, trackedFace,
+                    trackedBlock != null ? trackedBlock.toShortString() : "?",
+                    mc.player.getX(), mc.player.getY(), mc.player.getZ());
+
+                if (!observeOnly.get() && depth >= maxDepth.get()
+                        && trackedBlock != null && trackedFace != null) {
+                    lock(depth);
+                }
+            }
+        }
+    }
+
+    // ── Move: freeze position when locked ──────────────────────────────────
+
+    @EventHandler(priority = EventPriority.HIGH)
+    private void onMove(PlayerMoveEvent event) {
+        if (!locked || lockedPos == null || mc.player == null) return;
+
+        double yMovement = lockVertical.get() ? 0 : event.movement.y;
+        ((IVec3d) event.movement).meteor$set(0, yMovement, 0);
+        mc.player.setPosition(lockedPos.x, mc.player.getY(), lockedPos.z);
+    }
+
+    // ── Depth calc: distance from CENTER to entry face ──────────────────────
+
+    /**
+     * Center-based depth from a specific entry face.
+     * Returns how far the player CENTER has crossed the given face, inward.
+     * Negative values (center outside) are clamped to 0.
+     */
+    private static double calcDepth(Box bb, BlockPos block, Face face) {
+        double cx = (bb.minX + bb.maxX) / 2.0;
+        double cz = (bb.minZ + bb.maxZ) / 2.0;
+        double pen = face.centerPenetration(cx, cz, block.getX(), block.getZ());
+        return Math.max(0, pen);
+    }
+
+    // ── Phase depth scan ────────────────────────────────────────────────────
+
+    /**
+     * Scans for solid blocks the player's BB overlaps, detects entry face
+     * on first contact, and measures center-based depth from that face.
+     * <p>
+     * The tracked block+face persist between ticks — depth always increases
+     * monotonically along the entry axis as the player walks deeper.
+     */
+    private double scanPhaseDepth() {
+        if (mc.player == null || mc.world == null) return 0;
+
+        Box bb = mc.player.getBoundingBox();
+        double cx = (bb.minX + bb.maxX) / 2.0;
+        double cz = (bb.minZ + bb.maxZ) / 2.0;
+        int playerFootY = (int) Math.floor(bb.minY + 0.02);
+
+        // ── Reuse tracked block+face if still valid ─────────────────────
+        if (trackedBlock != null && trackedFace != null) {
+            if (trackedBlock.getY() != playerFootY) {
+                trackedBlock = null;
+                trackedFace = null;
+            } else {
+                BlockState state = mc.world.getBlockState(trackedBlock);
+                if (state.isFullCube(mc.world, trackedBlock)) {
+                    double d = calcDepth(bb, trackedBlock, trackedFace);
+                    if (d > 0) return d;
+                }
+                trackedBlock = null;
+                trackedFace = null;
+            }
         }
 
-        boolean horizontalDelta = Math.abs(oldVec.x - freezeX) > EPSILON || Math.abs(oldVec.z - freezeZ) > EPSILON;
-        if (!horizontalDelta) return;
+        // ── Full scan ───────────────────────────────────────────────────
+        int bY = playerFootY;
+        int minBX = (int) Math.floor(bb.minX);
+        int maxBX = (int) Math.floor(bb.maxX);
+        int minBZ = (int) Math.floor(bb.minZ);
+        int maxBZ = (int) Math.floor(bb.maxZ);
 
-        PlayerPosition newPos = new PlayerPosition(
-            new Vec3d(freezeX, oldVec.y, freezeZ),
-            oldPos.deltaMovement(),
-            oldPos.yaw(),
-            oldPos.pitch()
-        );
+        double bestDepth = 0;
+        BlockPos bestBlock = null;
+        Face bestFace = null;
 
-        event.packet = PlayerPositionLookS2CPacket.of(packet.teleportId(), newPos, packet.relatives());
-    }
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
 
-    private PlayerMoveC2SPacket forceHorizontalPacket(PlayerMoveC2SPacket packet) {
-        return rewritePacketXZ(packet, freezeX, freezeZ);
-    }
+        for (int bx = minBX; bx <= maxBX; bx++) {
+            for (int bz = minBZ; bz <= maxBZ; bz++) {
+                mutable.set(bx, bY, bz);
+                BlockState state = mc.world.getBlockState(mutable);
+                if (!state.isFullCube(mc.world, mutable)) continue;
 
-    private PlayerMoveC2SPacket rewritePacketXZ(PlayerMoveC2SPacket packet, double x, double z) {
-        double y = packet.getY(mc.player.getY());
-        boolean onGround = packet.isOnGround();
-        boolean horizontalCollision = mc.player.horizontalCollision;
+                // Determine entry face
+                boolean insideX = cx > bx && cx < bx + 1;
+                boolean insideZ = cz > bz && cz < bz + 1;
+                Face face;
 
-        if (packet instanceof PlayerMoveC2SPacket.Full) {
-            float yaw = packet.getYaw(mc.player.getYaw());
-            float pitch = packet.getPitch(mc.player.getPitch());
-            return new PlayerMoveC2SPacket.Full(x, y, z, yaw, pitch, onGround, horizontalCollision);
-        }
+                if (!insideX && !insideZ) {
+                    continue; // corner overlap
+                } else if (!insideX) {
+                    face = cx <= bx ? Face.WEST : Face.EAST;
+                } else if (!insideZ) {
+                    face = cz <= bz ? Face.NORTH : Face.SOUTH;
+                } else {
+                    // Center inside both axes — use nearest face
+                    face = Face.detectNearest(cx, cz, bx, bz);
+                }
 
-        if (packet instanceof PlayerMoveC2SPacket.PositionAndOnGround) {
-            return new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, onGround, horizontalCollision);
-        }
-
-        return packet;
-    }
-
-    private void armForPearl() {
-        int ping = getLatency();
-        armedTicks = MathHelper.clamp(30 + ping / 6, MIN_ARM_TICKS, MAX_ARM_TICKS);
-        pearlThrowPos = mc.player.getPos();
-
-        // Smaller max-penetration -> earlier latch candidate.
-        minLockOverlap = MathHelper.clamp(maxPenetration.get() * 0.65, 0.08, 0.28);
-
-        clearLock("rearm");
-        logDebug(String.format("arm ping=%d armedTicks=%d throwPos=(%.3f,%.3f,%.3f) minOverlap=%.4f",
-            ping, armedTicks, pearlThrowPos.x, pearlThrowPos.y, pearlThrowPos.z, minLockOverlap));
-    }
-
-    private void latchToBlock(BlockPos block) {
-        lockedBlock = block.toImmutable();
-        hardLocked = false;
-
-        Vec3d origin = pearlThrowPos != null ? pearlThrowPos : mc.player.getPos();
-        lockX = resolveAxisLock(origin.x, mc.player.getX(), lockedBlock.getX());
-        lockZ = resolveAxisLock(origin.z, mc.player.getZ(), lockedBlock.getZ());
-        primaryAxis = resolvePrimaryAxis(origin, mc.player.getPos(), lockedBlock, lockX, lockZ);
-
-        freezeX = mc.player.getX();
-        freezeZ = mc.player.getZ();
-        maxDepthThisLock = 0.0;
-        hardLockDepth = -1.0;
-        invalidTicks = 0;
-        verticalExitTicks = 0;
-        clearArm();
-        logDebug(String.format("latch block=%s axis=%s lockX=%s lockZ=%s cfg=%.3f effective=%.3f",
-            lockedBlock, primaryAxis, lockX, lockZ, maxPenetration.get(), getEffectivePenetrationLimit()));
-    }
-
-    private boolean reachedLimitAt(double x, double z) {
-        double depth = getDepthFor(x, z);
-        double limit = getEffectivePenetrationLimit();
-        return depth >= limit - EPSILON;
-    }
-
-    private Vec3d clampToLimit(double x, double z) {
-        if (lockedBlock == null || primaryAxis == null) return new Vec3d(x, 0.0, z);
-
-        if (primaryAxis == PrimaryAxis.X) {
-            double clampedX = clampAxisByLock(x, lockX, lockedBlock.getX());
-            return new Vec3d(clampedX, 0.0, z);
-        }
-
-        double clampedZ = clampAxisByLock(z, lockZ, lockedBlock.getZ());
-        return new Vec3d(x, 0.0, clampedZ);
-    }
-
-    private Vec3d clampSecondaryAxis(double x, double z) {
-        if (lockedBlock == null || primaryAxis == null) return new Vec3d(x, 0.0, z);
-
-        double half = getHalfHorizontalSize();
-        double minX = lockedBlock.getX() + half;
-        double maxX = lockedBlock.getX() + 1.0 - half;
-        double minZ = lockedBlock.getZ() + half;
-        double maxZ = lockedBlock.getZ() + 1.0 - half;
-
-        if (primaryAxis == PrimaryAxis.X) {
-            double clampedZ = MathHelper.clamp(z, minZ, maxZ);
-            return new Vec3d(x, 0.0, clampedZ);
-        }
-
-        double clampedX = MathHelper.clamp(x, minX, maxX);
-        return new Vec3d(clampedX, 0.0, z);
-    }
-
-    private void enforceFrozenPosition() {
-        double x = mc.player.getX();
-        double z = mc.player.getZ();
-        if (Math.abs(x - freezeX) <= EPSILON && Math.abs(z - freezeZ) <= EPSILON) return;
-        mc.player.setPosition(freezeX, mc.player.getY(), freezeZ);
-    }
-
-    private BlockPos findInsideSolidBlock(Box playerBox, double requiredOverlap) {
-        Box shrunk = shrink(playerBox);
-        if (shrunk == null) return null;
-
-        int xMin = MathHelper.floor(shrunk.minX);
-        int yMin = MathHelper.floor(shrunk.minY);
-        int zMin = MathHelper.floor(shrunk.minZ);
-        int xMax = MathHelper.floor(shrunk.maxX - EPSILON);
-        int yMax = MathHelper.floor(shrunk.maxY - EPSILON);
-        int zMax = MathHelper.floor(shrunk.maxZ - EPSILON);
-
-        BlockPos best = null;
-        double bestOverlap = 0.0;
-
-        for (int x = xMin; x <= xMax; x++) {
-            for (int y = yMin; y <= yMax; y++) {
-                for (int z = zMin; z <= zMax; z++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    if (!isSolidAt(pos)) continue;
-
-                    double overlap = intersectionVolume(shrunk, pos);
-                    if (overlap <= EPSILON) continue;
-                    double hOverlap = horizontalOverlap(shrunk, pos);
-                    if (hOverlap < requiredOverlap) continue;
-
-                    if (overlap > bestOverlap + EPSILON) {
-                        bestOverlap = overlap;
-                        best = pos;
-                    }
+                double d = calcDepth(bb, mutable, face);
+                if (d > bestDepth) {
+                    bestDepth = d;
+                    bestBlock = mutable.toImmutable();
+                    bestFace = face;
                 }
             }
         }
 
-        if (best != null) return best;
-
-        BlockPos body = getBodyBlock();
-        if (isSolidAt(body)) return body;
-        BlockPos eyes = BlockPos.ofFloored(mc.player.getEyePos());
-        if (isSolidAt(eyes)) return eyes;
-        BlockPos feet = mc.player.getBlockPos();
-        if (isSolidAt(feet)) return feet;
-
-        return null;
-    }
-
-    private boolean isLockStillValid() {
-        if (lockedBlock == null) return false;
-        if (!isSolidAt(lockedBlock)) return false;
-
-        Box playerBox = mc.player.getBoundingBox();
-        double intersection = intersectionVolume(playerBox, lockedBlock);
-        if (intersection > EPSILON) return true;
-
-        BlockPos feet = mc.player.getBlockPos();
-        BlockPos body = getBodyBlock();
-        BlockPos eyes = BlockPos.ofFloored(mc.player.getEyePos());
-        if (feet.equals(lockedBlock) || body.equals(lockedBlock) || eyes.equals(lockedBlock)) return true;
-
-        double cx = lockedBlock.getX() + 0.5;
-        double cz = lockedBlock.getZ() + 0.5;
-        double dx = Math.abs(mc.player.getX() - cx);
-        double dz = Math.abs(mc.player.getZ() - cz);
-        double dy = Math.abs(mc.player.getY() - (lockedBlock.getY() + 0.5));
-        return dx <= 1.05 && dz <= 1.05 && dy <= 1.6;
-    }
-
-    private boolean isSolidAt(BlockPos pos) {
-        BlockState state = mc.world.getBlockState(pos);
-        if (state.isAir()) return false;
-        VoxelShape shape = state.getCollisionShape(mc.world, pos);
-        return !shape.isEmpty();
-    }
-
-    private double intersectionVolume(Box playerBox, BlockPos pos) {
-        VoxelShape shape = mc.world.getBlockState(pos).getCollisionShape(mc.world, pos);
-        if (shape.isEmpty()) return 0.0;
-
-        Box blockBox = shape.getBoundingBox().offset(pos);
-        if (!playerBox.intersects(blockBox)) return 0.0;
-
-        double minX = Math.max(playerBox.minX, blockBox.minX);
-        double minY = Math.max(playerBox.minY, blockBox.minY);
-        double minZ = Math.max(playerBox.minZ, blockBox.minZ);
-        double maxX = Math.min(playerBox.maxX, blockBox.maxX);
-        double maxY = Math.min(playerBox.maxY, blockBox.maxY);
-        double maxZ = Math.min(playerBox.maxZ, blockBox.maxZ);
-
-        double dx = maxX - minX;
-        double dy = maxY - minY;
-        double dz = maxZ - minZ;
-        if (dx <= 0 || dy <= 0 || dz <= 0) return 0.0;
-        return dx * dy * dz;
-    }
-
-    private double horizontalOverlap(Box playerBox, BlockPos pos) {
-        VoxelShape shape = mc.world.getBlockState(pos).getCollisionShape(mc.world, pos);
-        if (shape.isEmpty()) return 0.0;
-
-        Box blockBox = shape.getBoundingBox().offset(pos);
-        if (!playerBox.intersects(blockBox)) return 0.0;
-
-        double minX = Math.max(playerBox.minX, blockBox.minX);
-        double minZ = Math.max(playerBox.minZ, blockBox.minZ);
-        double maxX = Math.min(playerBox.maxX, blockBox.maxX);
-        double maxZ = Math.min(playerBox.maxZ, blockBox.maxZ);
-
-        double overlapX = maxX - minX;
-        double overlapZ = maxZ - minZ;
-        if (overlapX <= 0 || overlapZ <= 0) return 0.0;
-        return Math.max(overlapX, overlapZ);
-    }
-
-    private Box shrink(Box box) {
-        Box shrunk = new Box(
-            box.minX + EPSILON,
-            box.minY + EPSILON,
-            box.minZ + EPSILON,
-            box.maxX - EPSILON,
-            box.maxY - EPSILON,
-            box.maxZ - EPSILON
-        );
-        if (shrunk.maxX <= shrunk.minX || shrunk.maxY <= shrunk.minY || shrunk.maxZ <= shrunk.minZ) return null;
-        return shrunk;
-    }
-
-    private AxisLock resolveAxisLock(double originCoord, double currentCoord, int blockCoord) {
-        double min = blockCoord;
-        double max = blockCoord + 1.0;
-
-        if (originCoord <= min + EPSILON) return AxisLock.Min;
-        if (originCoord >= max - EPSILON) return AxisLock.Max;
-
-        double middle = (min + max) * 0.5;
-        if (originCoord < middle) return AxisLock.Min;
-        if (originCoord > middle) return AxisLock.Max;
-
-        double distToMin = Math.abs(currentCoord - min);
-        double distToMax = Math.abs(max - currentCoord);
-        return distToMin <= distToMax ? AxisLock.Min : AxisLock.Max;
-    }
-
-    private PrimaryAxis resolvePrimaryAxis(Vec3d origin, Vec3d current, BlockPos block, AxisLock axisX, AxisLock axisZ) {
-        double depthX = axisX == AxisLock.Min ? current.x - block.getX() : (block.getX() + 1.0) - current.x;
-        double depthZ = axisZ == AxisLock.Min ? current.z - block.getZ() : (block.getZ() + 1.0) - current.z;
-
-        depthX = MathHelper.clamp(depthX, 0.0, 1.0);
-        depthZ = MathHelper.clamp(depthZ, 0.0, 1.0);
-
-        // The axis with smaller current depth is usually the entry face axis.
-        if (Math.abs(depthX - depthZ) > 0.02) return depthX <= depthZ ? PrimaryAxis.X : PrimaryAxis.Z;
-
-        double dx = Math.abs(current.x - origin.x);
-        double dz = Math.abs(current.z - origin.z);
-        if (Math.abs(dx - dz) > DEPTH_EPSILON) return dx >= dz ? PrimaryAxis.X : PrimaryAxis.Z;
-
-        return depthX <= depthZ ? PrimaryAxis.X : PrimaryAxis.Z;
-    }
-
-    private double clampAxisByLock(double value, AxisLock lock, int blockCoord) {
-        double limit = getEffectivePenetrationLimit();
-        if (lock == AxisLock.Min) {
-            double centerLimit = blockCoord + limit;
-            return Math.min(value, centerLimit);
+        if (bestBlock != null) {
+            trackedBlock = bestBlock;
+            trackedFace = bestFace;
         }
 
-        double centerLimit = blockCoord + 1.0 - limit;
-        return Math.max(value, centerLimit);
+        return bestDepth;
     }
 
-    private void updateDepthStats() {
-        double depth = getCurrentDepth();
-        if (depth > maxDepthThisLock) maxDepthThisLock = depth;
-    }
+    // ── Lock / Unlock ───────────────────────────────────────────────────────
 
-    private double getCurrentDepth() {
-        return getDepthFor(mc.player.getX(), mc.player.getZ());
-    }
+    private void lock(double rawDepth) {
+        locked = true;
+        lockedBlock = trackedBlock;
+        lockedFace = trackedFace;
+        lockTicks = 0;
+        zeroDepthTicks = 0;
 
-    private double getDepthFor(double x, double z) {
-        if (lockedBlock == null || primaryAxis == null) return 0.0;
+        // Snap position back to exactly maxDepth on the entry axis
+        // so per-tick overshoot doesn't push us past the safe limit.
+        double target = maxDepth.get();
+        double px = mc.player.getX();
+        double pz = mc.player.getZ();
+        int bx = lockedBlock.getX();
+        int bz = lockedBlock.getZ();
 
-        if (primaryAxis == PrimaryAxis.X) {
-            if (lockX == AxisLock.Min) return x - lockedBlock.getX();
-            return (lockedBlock.getX() + 1.0) - x;
-        }
-        if (lockZ == AxisLock.Min) return z - lockedBlock.getZ();
-        return (lockedBlock.getZ() + 1.0) - z;
-    }
-
-    private double getHalfHorizontalSize() {
-        if (mc.player == null) return 0.3;
-        return (mc.player.getBoundingBox().maxX - mc.player.getBoundingBox().minX) * 0.5;
-    }
-
-    private double getEffectivePenetrationLimit() {
-        return MathHelper.clamp(maxPenetration.get(), 0.01, 0.99);
-    }
-
-    private void engageHardLock(double x, double z, String source) {
-        hardLocked = true;
-        freezeX = x;
-        freezeZ = z;
-        hardLockDepth = getDepthFor(x, z);
-        logDebug(String.format("hard-lock source=%s depth=%.3f effective=%.3f freezeX=%.3f freezeZ=%.3f",
-            source, hardLockDepth, getEffectivePenetrationLimit(), freezeX, freezeZ));
-    }
-
-    private boolean isVerticallyInsideLockedBlock() {
-        if (lockedBlock == null) return false;
-        Box playerBox = mc.player.getBoundingBox();
-        double blockMinY = lockedBlock.getY();
-        double blockMaxY = lockedBlock.getY() + 1.0;
-        return playerBox.maxY > blockMinY + EPSILON && playerBox.minY < blockMaxY - EPSILON;
-    }
-
-    private boolean isPearlInHand(Hand hand) {
-        if (hand == Hand.MAIN_HAND) return mc.player.getMainHandStack().isOf(Items.ENDER_PEARL);
-        if (hand == Hand.OFF_HAND) return mc.player.getOffHandStack().isOf(Items.ENDER_PEARL);
-        return false;
-    }
-
-    private BlockPos getBodyBlock() {
-        double y = mc.player.getY() + mc.player.getHeight() * 0.5;
-        return BlockPos.ofFloored(mc.player.getX(), y, mc.player.getZ());
-    }
-
-    private int getLatency() {
-        if (mc.getNetworkHandler() == null || mc.player == null) return 0;
-        PlayerListEntry entry = mc.getNetworkHandler().getPlayerListEntry(mc.player.getUuid());
-        return entry != null ? Math.max(0, entry.getLatency()) : 0;
-    }
-
-    private void clearLock() {
-        clearLock("clear");
-    }
-
-    private void clearLock(String reason) {
-        if (lockedBlock != null) {
-            logDebug(String.format("unlock reason=%s maxDepth=%.3f hardDepth=%.3f block=%s", reason, maxDepthThisLock, hardLockDepth, lockedBlock));
+        if (lockedFace != null) {
+            switch (lockedFace) {
+                case WEST  -> px = bx + target;              // cx = bx + depth
+                case EAST  -> px = (bx + 1.0) - target;     // cx = bx+1 - depth
+                case NORTH -> pz = bz + target;              // cz = bz + depth
+                case SOUTH -> pz = (bz + 1.0) - target;     // cz = bz+1 - depth
+            }
         }
 
+        lockedPos = new Vec3d(px, mc.player.getY(), pz);
+        mc.player.setPosition(lockedPos.x, lockedPos.y, lockedPos.z);
+        double finalDepth = calcDepth(mc.player.getBoundingBox(), lockedBlock, lockedFace);
+
+        String msg = String.format(
+            "§a[LOCKED] depth=%.4f→%.4f face=%s at (%.4f, %.4f, %.4f) | block=%s",
+            rawDepth, finalDepth, lockedFace,
+            lockedPos.x, lockedPos.y, lockedPos.z,
+            lockedBlock != null ? lockedBlock.toShortString() : "?");
+
+        if (debugChat.get()) debugMsg(msg);
+        log("t=%d LOCK raw=%.4f snapped=%.4f face=%s pos=(%.4f,%.4f,%.4f) block=%s",
+            totalTicks, rawDepth, finalDepth, lockedFace,
+            lockedPos.x, lockedPos.y, lockedPos.z,
+            lockedBlock != null ? lockedBlock.toShortString() : "?");
+
+        info("Position locked (depth %.3f)", finalDepth);
+    }
+
+    private void unlock(String reason) {
+        if (!locked) return;
+
+        String msg = String.format("§c[UNLOCKED] reason=%s after %d ticks | depth=%.4f peak=%.4f",
+            reason, lockTicks, lastDepth, peakDepth);
+
+        if (debugChat.get()) debugMsg(msg);
+        log("t=%d UNLOCK reason=%s lockTicks=%d depth=%.4f peak=%.4f",
+            totalTicks, reason, lockTicks, lastDepth, peakDepth);
+
+        locked = false;
+        lockedPos = null;
         lockedBlock = null;
-        lockX = null;
-        lockZ = null;
-        primaryAxis = null;
-        hardLocked = false;
-        freezeX = 0.0;
-        freezeZ = 0.0;
-        maxDepthThisLock = 0.0;
-        hardLockDepth = -1.0;
-        invalidTicks = 0;
-        verticalExitTicks = 0;
+        lockedFace = null;
+        lockTicks = 0;
+        zeroDepthTicks = 0;
+
+        info("Position unlocked (%s)", reason);
     }
 
-    private void clearArm() {
-        armedTicks = 0;
-        pearlThrowPos = null;
+    private void clearTracking() {
+        trackedBlock = null;
+        trackedFace = null;
     }
 
-    private void clearState() {
-        clearLock("state-reset");
-        clearArm();
-        minLockOverlap = 0.0;
-        lastDebugKey = null;
-        lastDebugTick = Long.MIN_VALUE;
+    // ── Debug helpers ───────────────────────────────────────────────────────
+
+    private void debugMsg(String msg) {
+        if (mc.player == null) return;
+        ChatUtils.sendMsg(Text.literal("[PhaseLimiter] " + msg));
     }
 
-    private void logDebug(String message) {
-        if (!debugLogs.get()) return;
-        debugSeq++;
-        info("[dbg] #" + debugSeq + " " + message);
+    private void log(String fmt, Object... args) {
+        debugLog.append(String.format(fmt, args)).append('\n');
     }
 
-    private void logDebugRateLimited(String key, String message) {
-        if (!debugLogs.get()) return;
-        if (mc.world != null) {
-            long nowTick = mc.world.getTime();
-            if (key.equals(lastDebugKey) && nowTick - lastDebugTick < DEBUG_REPEAT_TICKS) return;
-            lastDebugKey = key;
-            lastDebugTick = nowTick;
-        }
-
-        logDebug(message);
-    }
+    // ── HUD info string ─────────────────────────────────────────────────────
 
     @Override
     public String getInfoString() {
-        if (lockedBlock != null) return hardLocked
-            ? "locked " + lockedBlock.getX() + " " + lockedBlock.getY() + " " + lockedBlock.getZ()
-            : "limit";
-        if (armedTicks > 0) return "armed " + armedTicks;
-        return String.format("%.0f%%", maxPenetration.get() * 100);
-    }
-
-    private enum AxisLock {
-        Min,
-        Max
-    }
-
-    private enum PrimaryAxis {
-        X,
-        Z
+        if (observeOnly.get()) {
+            if (lastDepth > 0.001) return String.format("OBS %.3f pk%.3f", lastDepth, peakDepth);
+            return "OBS";
+        }
+        if (locked) return String.format("LOCKED %.3f", lastDepth);
+        if (lastDepth > 0.001) return String.format("%.3f", lastDepth);
+        return null;
     }
 }
