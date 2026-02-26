@@ -4,6 +4,7 @@ import com.example.addon.AddonTemplate;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
+import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
@@ -15,6 +16,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -43,6 +45,13 @@ public class LavaBucket extends Module {
         .defaultValue(1)
         .min(0)
         .sliderMax(20)
+        .build()
+    );
+
+    private final Setting<Priority> priority = sgGeneral.add(new EnumSetting.Builder<Priority>()
+        .name("priority")
+        .description("Which lava source block to collect first.")
+        .defaultValue(Priority.Closest)
         .build()
     );
 
@@ -86,7 +95,7 @@ public class LavaBucket extends Module {
         BlockPos lavaPos = findClosestLavaSource();
         if (lavaPos == null) return;
 
-        if (collectLava(lavaPos, bucket)) timer = delay.get();
+        collectLava(lavaPos, bucket);
     }
 
     private FindItemResult ensureBucketAvailable() {
@@ -136,7 +145,7 @@ public class LavaBucket extends Module {
                     FluidState fluidState = mc.world.getFluidState(pos);
                     if (!fluidState.isOf(Fluids.LAVA) || !fluidState.isStill()) continue;
 
-                    if (distSq < bestDistSq) {
+                    if (isBetterCandidate(pos, distSq, bestPos, bestDistSq)) {
                         bestDistSq = distSq;
                         bestPos = pos.toImmutable();
                     }
@@ -147,31 +156,57 @@ public class LavaBucket extends Module {
         return bestPos;
     }
 
-    private boolean collectLava(BlockPos pos, FindItemResult bucket) {
-        Hand hand = bucket.getHand();
-        boolean swapped = false;
-
-        if (hand == null) {
-            if (!InvUtils.swap(bucket.slot(), true)) return false;
-            hand = Hand.MAIN_HAND;
-            swapped = true;
-        }
-
+    private void collectLava(BlockPos pos, FindItemResult bucket) {
         Vec3d hitPos = Vec3d.ofCenter(pos);
-        Direction side = facingFromEye(hitPos);
-        Hand finalHand = hand;
-        boolean[] success = { false };
 
         Runnable interact = () -> {
             if (mc.interactionManager == null) return;
 
-            success[0] = mc.interactionManager.interactBlock(
-                mc.player,
-                finalHand,
-                new BlockHitResult(hitPos, side, pos, false)
-            ).isAccepted();
+            Hand hand = bucket.getHand();
+            boolean swapped = false;
 
-            if (success[0]) swing(finalHand);
+            if (hand == null) {
+                if (!InvUtils.swap(bucket.slot(), true)) return;
+                hand = Hand.MAIN_HAND;
+                swapped = true;
+            }
+
+            if (!mc.player.getStackInHand(hand).isOf(Items.BUCKET)) {
+                if (swapped) InvUtils.swapBack();
+                return;
+            }
+
+            int emptyBefore = countItem(Items.BUCKET);
+            int lavaBefore = countItem(Items.LAVA_BUCKET);
+
+            ActionResult itemResult = mc.interactionManager.interactItem(mc.player, hand);
+
+            // Fallback path: explicit block interaction if generic use did not consume.
+            if (!itemResult.isAccepted() && !didCollect(emptyBefore, lavaBefore)) {
+                Direction side = Direction.UP;
+                for (Direction direction : Direction.values()) {
+                    ActionResult blockResult = mc.interactionManager.interactBlock(
+                        mc.player,
+                        hand,
+                        new BlockHitResult(hitPos, direction, pos, false)
+                    );
+
+                    if (blockResult.isAccepted()) {
+                        side = direction;
+                        break;
+                    }
+                }
+
+                // Retry once with the best known side in case first pass was inconclusive.
+                mc.interactionManager.interactBlock(mc.player, hand, new BlockHitResult(hitPos, side, pos, false));
+            }
+
+            if (didCollect(emptyBefore, lavaBefore)) {
+                swing(hand);
+                timer = delay.get();
+            }
+
+            if (swapped) InvUtils.swapBack();
         };
 
         if (rotate.get()) {
@@ -179,19 +214,39 @@ public class LavaBucket extends Module {
         } else {
             interact.run();
         }
-
-        if (swapped) InvUtils.swapBack();
-        return success[0];
     }
 
-    private Direction facingFromEye(Vec3d targetPos) {
-        Vec3d eye = mc.player.getEyePos();
-        Vec3d delta = eye.subtract(targetPos);
-        Direction facing = Direction.getFacing(delta.x, delta.y, delta.z);
-        return facing == null ? Direction.UP : facing;
+    private int countItem(net.minecraft.item.Item item) {
+        return InvUtils.find(item).count();
+    }
+
+    private boolean didCollect(int emptyBefore, int lavaBefore) {
+        int emptyAfter = countItem(Items.BUCKET);
+        int lavaAfter = countItem(Items.LAVA_BUCKET);
+        return emptyAfter < emptyBefore || lavaAfter > lavaBefore;
+    }
+
+    private boolean isBetterCandidate(BlockPos candidatePos, double candidateDistSq, BlockPos currentBestPos, double currentBestDistSq) {
+        if (currentBestPos == null) return true;
+
+        return switch (priority.get()) {
+            case Closest -> candidateDistSq < currentBestDistSq;
+            case Furthest -> candidateDistSq > currentBestDistSq;
+            case Highest -> candidatePos.getY() > currentBestPos.getY()
+                || (candidatePos.getY() == currentBestPos.getY() && candidateDistSq < currentBestDistSq);
+            case Lowest -> candidatePos.getY() < currentBestPos.getY()
+                || (candidatePos.getY() == currentBestPos.getY() && candidateDistSq < currentBestDistSq);
+        };
     }
 
     private void swing(Hand hand) {
         if (swingHand.get()) mc.player.swingHand(hand);
+    }
+
+    public enum Priority {
+        Closest,
+        Furthest,
+        Highest,
+        Lowest
     }
 }
