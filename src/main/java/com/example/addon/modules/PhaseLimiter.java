@@ -224,11 +224,6 @@ public class PhaseLimiter extends Module {
             }
         }
 
-        // ── Re-snap X/Z BEFORE depth calc when locked ───────────────────
-        if (locked && lockedPos != null) {
-            mc.player.setPosition(lockedPos.x, mc.player.getY(), lockedPos.z);
-        }
-
         // ── Depth calculation ───────────────────────────────────────────
         double depth;
 
@@ -308,15 +303,90 @@ public class PhaseLimiter extends Module {
         }
     }
 
-    // ── Move: freeze position when locked ──────────────────────────────────
+    // ── Move: clamp BEFORE position is applied ─────────────────────────────
 
     @EventHandler(priority = EventPriority.HIGH)
     private void onMove(PlayerMoveEvent event) {
-        if (!locked || lockedPos == null || mc.player == null) return;
+        if (mc.player == null || mc.world == null) return;
 
-        double yMovement = lockVertical.get() ? 0 : event.movement.y;
-        ((IVec3d) event.movement).meteor$set(0, yMovement, 0);
-        mc.player.setPosition(lockedPos.x, mc.player.getY(), lockedPos.z);
+        if (locked) {
+            double yMovement = lockVertical.get() ? 0 : event.movement.y;
+            ((IVec3d) event.movement).meteor$set(0, yMovement, 0);
+            return;
+        }
+
+        if (observeOnly.get()) return;
+
+        double mx = event.movement.x;
+        double mz = event.movement.z;
+        if (mx == 0 && mz == 0) return;
+
+        Box bb = mc.player.getBoundingBox();
+        Box projBB = bb.offset(mx, 0, mz);
+        double projCX = (projBB.minX + projBB.maxX) / 2.0;
+        double projCZ = (projBB.minZ + projBB.maxZ) / 2.0;
+        int footY = (int) Math.floor(bb.minY + 0.02);
+
+        double bestDepth = 0;
+        BlockPos bestBlock = null;
+        Face bestFace = null;
+
+        int minBX = (int) Math.floor(projBB.minX);
+        int maxBX = (int) Math.floor(projBB.maxX);
+        int minBZ = (int) Math.floor(projBB.minZ);
+        int maxBZ = (int) Math.floor(projBB.maxZ);
+
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
+
+        for (int bx = minBX; bx <= maxBX; bx++) {
+            for (int bz = minBZ; bz <= maxBZ; bz++) {
+                mutable.set(bx, footY, bz);
+                BlockState state = mc.world.getBlockState(mutable);
+                if (!state.isFullCube(mc.world, mutable)) continue;
+
+                boolean insideX = projCX > bx && projCX < bx + 1;
+                boolean insideZ = projCZ > bz && projCZ < bz + 1;
+                Face face;
+
+                if (!insideX && !insideZ) continue;
+                else if (!insideX) face = projCX <= bx ? Face.WEST : Face.EAST;
+                else if (!insideZ) face = projCZ <= bz ? Face.NORTH : Face.SOUTH;
+                else face = Face.detectNearest(projCX, projCZ, bx, bz);
+
+                double d = face.centerPenetration(projCX, projCZ, bx, bz);
+                if (d > bestDepth) {
+                    bestDepth = d;
+                    bestBlock = mutable.toImmutable();
+                    bestFace = face;
+                }
+            }
+        }
+
+        double lockDepth = maxDepth.get();
+        if (bestDepth < lockDepth || bestBlock == null || bestFace == null) return;
+
+        int bx = bestBlock.getX();
+        int bz = bestBlock.getZ();
+        double clampedCX = projCX;
+        double clampedCZ = projCZ;
+
+        switch (bestFace) {
+            case WEST  -> clampedCX = bx + lockDepth;
+            case EAST  -> clampedCX = (bx + 1.0) - lockDepth;
+            case NORTH -> clampedCZ = bz + lockDepth;
+            case SOUTH -> clampedCZ = (bz + 1.0) - lockDepth;
+        }
+
+        double curCX = (bb.minX + bb.maxX) / 2.0;
+        double curCZ = (bb.minZ + bb.maxZ) / 2.0;
+        double newMX = clampedCX - curCX;
+        double newMZ = clampedCZ - curCZ;
+
+        ((IVec3d) event.movement).meteor$set(newMX, event.movement.y, newMZ);
+
+        trackedBlock = bestBlock;
+        trackedFace = bestFace;
+        lockAtPosition(bestDepth, lockDepth, clampedCX, clampedCZ, bestBlock, bestFace);
     }
 
     // ── Depth calc: distance from CENTER to entry face ──────────────────────
@@ -421,35 +491,19 @@ public class PhaseLimiter extends Module {
     // ── Lock / Unlock ───────────────────────────────────────────────────────
 
     private void lock(double rawDepth) {
+        if (trackedBlock == null || trackedFace == null || mc.player == null) return;
+
         locked = true;
         lockedBlock = trackedBlock;
         lockedFace = trackedFace;
         lockTicks = 0;
         zeroDepthTicks = 0;
 
-        // Snap position back to exactly maxDepth on the entry axis
-        // so per-tick overshoot doesn't push us past the safe limit.
-        double target = maxDepth.get();
-        double px = mc.player.getX();
-        double pz = mc.player.getZ();
-        int bx = lockedBlock.getX();
-        int bz = lockedBlock.getZ();
-
-        if (lockedFace != null) {
-            switch (lockedFace) {
-                case WEST  -> px = bx + target;              // cx = bx + depth
-                case EAST  -> px = (bx + 1.0) - target;     // cx = bx+1 - depth
-                case NORTH -> pz = bz + target;              // cz = bz + depth
-                case SOUTH -> pz = (bz + 1.0) - target;     // cz = bz+1 - depth
-            }
-        }
-
-        lockedPos = new Vec3d(px, mc.player.getY(), pz);
-        mc.player.setPosition(lockedPos.x, lockedPos.y, lockedPos.z);
+        lockedPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         double finalDepth = calcDepth(mc.player.getBoundingBox(), lockedBlock, lockedFace);
 
         String msg = String.format(
-            "§a[LOCKED] depth=%.4f→%.4f face=%s at (%.4f, %.4f, %.4f) | block=%s",
+            "§a[LOCKED] depth=%.4f→%.4f face=%s (tick-fallback) at (%.4f, %.4f, %.4f) | block=%s",
             rawDepth, finalDepth, lockedFace,
             lockedPos.x, lockedPos.y, lockedPos.z,
             lockedBlock != null ? lockedBlock.toShortString() : "?");
@@ -461,6 +515,32 @@ public class PhaseLimiter extends Module {
             lockedBlock != null ? lockedBlock.toShortString() : "?");
 
         info("Position locked (depth %.3f)", finalDepth);
+    }
+
+    private void lockAtPosition(double rawDepth, double targetDepth,
+                                double clampedCX, double clampedCZ,
+                                BlockPos block, Face face) {
+        locked = true;
+        lockedBlock = block;
+        lockedFace = face;
+        lockTicks = 0;
+        zeroDepthTicks = 0;
+
+        lockedPos = new Vec3d(clampedCX, mc.player.getY(), clampedCZ);
+
+        String msg = String.format(
+            "§a[LOCKED] depth=%.4f→%.4f face=%s at (%.4f, %.4f, %.4f) | block=%s",
+            rawDepth, targetDepth, face,
+            lockedPos.x, lockedPos.y, lockedPos.z,
+            block.toShortString());
+
+        if (debugChat.get()) debugMsg(msg);
+        log("t=%d LOCK raw=%.4f clamped=%.4f face=%s pos=(%.4f,%.4f,%.4f) block=%s",
+            totalTicks, rawDepth, targetDepth, face,
+            lockedPos.x, lockedPos.y, lockedPos.z,
+            block.toShortString());
+
+        info("Position locked (depth %.3f)", targetDepth);
     }
 
     private void unlock(String reason) {
