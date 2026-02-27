@@ -128,7 +128,7 @@ public class AutoCev extends Module {
     private MineMode lastMineMode;
 
     public AutoCev() {
-        super(AddonTemplate.CATEGORY, "auto-cev", "Places cev base, crystals and breaks obsidian in cycles.");
+        super(AddonTemplate.CATEGORY, "auto-cev", "Automatically places obsidian, end crystals and breaks the base to damage nearby players.");
     }
 
     @Override

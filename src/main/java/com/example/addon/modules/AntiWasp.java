@@ -267,7 +267,7 @@ public class AntiWasp extends Module {
     private boolean prevForwardState;
 
     public AntiWasp() {
-        super(AddonTemplate.CATEGORY, "anti-wasp", "Smooth figure flight: circle, square, triangle.");
+        super(AddonTemplate.CATEGORY, "anti-wasp", "Elytra flight patterns (circle, square, triangle) to evade wasp attacks.");
     }
 
     @Override

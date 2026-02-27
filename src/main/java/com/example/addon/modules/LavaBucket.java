@@ -72,7 +72,7 @@ public class LavaBucket extends Module {
     private int timer;
 
     public LavaBucket() {
-        super(AddonTemplate.CATEGORY, "lava-bucket", "Automatically collects nearby lava source blocks with buckets.");
+        super(AddonTemplate.CATEGORY, "lava-bucket", "Automatically places and collects lava buckets on nearby players.");
     }
 
     @Override

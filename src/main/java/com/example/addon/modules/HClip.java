@@ -15,7 +15,7 @@ public class HClip extends Module {
     private static final double OFFSET = 0.20000000009497754;
 
     public HClip() {
-        super(AddonTemplate.CATEGORY, "h-clip", "Automatically clips to block corners to prevent crystal placement.");
+        super(AddonTemplate.CATEGORY, "h-clip", "Shifts into block corners when surround is mined to block crystal placement.");
     }
 
     @EventHandler
