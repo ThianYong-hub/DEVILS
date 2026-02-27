@@ -86,6 +86,11 @@ public class LavaBucket extends Module {
     @Override
     public void onActivate() {
         timer = 0;
+
+        if (mc.player != null && InvUtils.find(Items.BUCKET).count() == 0) {
+            error("No empty buckets in inventory.");
+            toggle();
+        }
     }
 
     @EventHandler
@@ -98,6 +103,12 @@ public class LavaBucket extends Module {
         }
 
         if (dropLava.get()) dropAllLavaBuckets();
+
+        if (!dropLava.get() && !hasEmptySlot()) {
+            error("Inventory full.");
+            toggle();
+            return;
+        }
 
         FindItemResult bucket = ensureBucketAvailable();
         if (!bucket.found()) return;
@@ -224,6 +235,13 @@ public class LavaBucket extends Module {
         } else {
             interact.run();
         }
+    }
+
+    private boolean hasEmptySlot() {
+        for (int i = 0; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return true;
+        }
+        return false;
     }
 
     private void dropAllLavaBuckets() {
