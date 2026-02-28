@@ -249,12 +249,16 @@ public class AutoWasp extends Module {
         if (!mc.player.isGliding()) {
             if (!incrementJumpTimer) incrementJumpTimer = true;
 
+            boolean inLiquid = mc.player.isTouchingWater() || mc.player.isInLava();
+
             if (mc.player.isOnGround() && incrementJumpTimer) {
                 mc.player.jump();
                 return;
             }
 
-            if (jumpTimer >= 4) {
+            // Reopen elytra faster when in liquid (no need to wait for fall)
+            int reopenDelay = inLiquid ? 1 : 4;
+            if (jumpTimer >= reopenDelay) {
                 jumpTimer = 0;
                 mc.player.setJumping(false);
                 mc.player.setSprinting(true);
@@ -459,7 +463,6 @@ public class AutoWasp extends Module {
     }
 
     private boolean isInDragState() {
-        if (mc.player.isTouchingWater() || mc.player.isInLava()) return true;
         return isInsideSoftDragBlock(mc.player.getBoundingBox());
     }
 
@@ -827,8 +830,8 @@ public class AutoWasp extends Module {
         BlockPos startBlock = toGrid(BlockPos.ofFloored(start), res);
         BlockPos goalBlock = toGrid(BlockPos.ofFloored(goal), res);
 
-        startBlock = findNearestPassable(startBlock, res, 6);
-        goalBlock = findNearestPassable(goalBlock, res, 7);
+        startBlock = findNearestPassable(startBlock, res, 10);
+        goalBlock = findNearestPassable(goalBlock, res, 10);
 
         if (startBlock == null || goalBlock == null) {
             currentPath.clear();
@@ -1046,8 +1049,8 @@ public class AutoWasp extends Module {
         if (floorDist <= 0.1 || ceilingDist <= 0.1) return false;
 
         // Avoid diving into 1x1 holes and tiny pockets unless absolutely necessary.
-        if (countLateralOpenings(p, 0.9) <= 1) return false;
-        return countLateralOpenings(p, 1.5) >= 1;
+        if (countLateralOpenings(p, 0.9) == 0) return false;
+        return true;
     }
 
     private boolean isEdgeFlyable(BlockPos from, BlockPos to) {
