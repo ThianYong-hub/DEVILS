@@ -12,6 +12,8 @@ import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
 import com.example.addon.modules.JoinWatcher;
 import com.example.addon.modules.LavaBucket;
+import com.example.addon.modules.TnTBomber;
+import com.example.addon.modules.VClip;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
@@ -49,6 +51,8 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new AutoCev());
         Modules.get().add(new JoinWatcher());
         Modules.get().add(new LavaBucket());
+        Modules.get().add(new TnTBomber());
+        Modules.get().add(new VClip());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());

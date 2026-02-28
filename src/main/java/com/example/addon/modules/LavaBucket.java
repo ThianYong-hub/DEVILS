@@ -16,6 +16,7 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -69,15 +70,27 @@ public class LavaBucket extends Module {
         .build()
     );
 
+    private final Setting<Boolean> dropLava = sgGeneral.add(new BoolSetting.Builder()
+        .name("drop-lava")
+        .description("Drop lava buckets when no empty buckets are available.")
+        .defaultValue(false)
+        .build()
+    );
+
     private int timer;
 
     public LavaBucket() {
-        super(AddonTemplate.CATEGORY, "lava-bucket", "Automatically collects nearby lava source blocks with buckets.");
+        super(AddonTemplate.CATEGORY, "lava-bucket", "Automatically places and collects lava buckets on nearby players.");
     }
 
     @Override
     public void onActivate() {
         timer = 0;
+
+        if (mc.player != null && InvUtils.find(Items.BUCKET).count() == 0) {
+            error("No empty buckets in inventory.");
+            toggle();
+        }
     }
 
     @EventHandler
@@ -86,6 +99,14 @@ public class LavaBucket extends Module {
 
         if (timer > 0) {
             timer--;
+            return;
+        }
+
+        if (dropLava.get()) dropAllLavaBuckets();
+
+        if (!dropLava.get() && !hasEmptySlot()) {
+            error("Inventory full.");
+            toggle();
             return;
         }
 
@@ -213,6 +234,32 @@ public class LavaBucket extends Module {
             Rotations.rotate(Rotations.getYaw(hitPos), Rotations.getPitch(hitPos), ROTATE_PRIORITY, interact);
         } else {
             interact.run();
+        }
+    }
+
+    private boolean hasEmptySlot() {
+        for (int i = 0; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private void dropAllLavaBuckets() {
+        if (mc.interactionManager == null) return;
+        int syncId = mc.player.currentScreenHandler.syncId;
+
+        // Hotbar: inventory 0-8 → screen handler 36-44
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.LAVA_BUCKET)) {
+                mc.interactionManager.clickSlot(syncId, 36 + i, 1, SlotActionType.THROW, mc.player);
+            }
+        }
+
+        // Main inventory: inventory 9-35 → screen handler 9-35
+        for (int i = 9; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isOf(Items.LAVA_BUCKET)) {
+                mc.interactionManager.clickSlot(syncId, i, 1, SlotActionType.THROW, mc.player);
+            }
         }
     }
 

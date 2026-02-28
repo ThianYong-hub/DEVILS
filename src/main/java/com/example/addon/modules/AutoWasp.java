@@ -127,7 +127,7 @@ public class AutoWasp extends Module {
     private final Map<Long, Double> ceilingDistanceCache = new HashMap<>();
 
     public AutoWasp() {
-        super(AddonTemplate.CATEGORY, "auto-wasp", "Wasp follow with obstacle-aware elytra routing.");
+        super(AddonTemplate.CATEGORY, "auto-wasp", "Follows a target with elytra using obstacle-aware routing.");
     }
 
     @Override
