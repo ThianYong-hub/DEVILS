@@ -14,6 +14,7 @@ import com.example.addon.modules.JoinWatcher;
 import com.example.addon.modules.LavaBucket;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.VClip;
+import com.example.addon.modules.highwaybuilder.HighwayBuilder;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
@@ -53,6 +54,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new LavaBucket());
         Modules.get().add(new TnTBomber());
         Modules.get().add(new VClip());
+        Modules.get().add(new HighwayBuilder());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());

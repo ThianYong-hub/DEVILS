@@ -290,17 +290,17 @@ public class TnTBomber extends Module {
     // --- Item finding ---
 
     private FindItemResult findObsidian() {
-        if (swapMode.get() == SwapMode.SilentInv) return InvUtils.find(Items.OBSIDIAN);
+        if (swapMode.get() == SwapMode.SilentInt) return InvUtils.find(Items.OBSIDIAN);
         return InvUtils.findInHotbar(Items.OBSIDIAN);
     }
 
     private FindItemResult findTnt() {
-        if (swapMode.get() == SwapMode.SilentInv) return InvUtils.find(Items.TNT);
+        if (swapMode.get() == SwapMode.SilentInt) return InvUtils.find(Items.TNT);
         return InvUtils.findInHotbar(Items.TNT);
     }
 
     private FindItemResult findIgniter() {
-        if (swapMode.get() == SwapMode.SilentInv) {
+        if (swapMode.get() == SwapMode.SilentInt) {
             return InvUtils.find(item -> {
                 if (!(item.getItem() instanceof FlintAndSteelItem)) return false;
                 return !antiBreak.get() || (item.getMaxDamage() - item.getDamage()) > 10;
@@ -313,7 +313,7 @@ public class TnTBomber extends Module {
     }
 
     private void ensureHotbar(FindItemResult item) {
-        if (swapMode.get() != SwapMode.SilentInv || item.isHotbar()) return;
+        if (swapMode.get() != SwapMode.SilentInt || item.isHotbar()) return;
         int safeSlot = findSafeHotbarSlot();
         if (safeSlot == -1) return;
         InvUtils.move().from(item.slot()).toHotbar(safeSlot);
@@ -396,7 +396,7 @@ public class TnTBomber extends Module {
     public enum SwapMode {
         Normal,
         Silent,
-        SilentInv
+        SilentInt
     }
 
     private enum Stage {

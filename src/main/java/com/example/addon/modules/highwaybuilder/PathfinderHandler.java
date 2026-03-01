@@ -1,0 +1,315 @@
+package com.example.addon.modules.highwaybuilder;
+
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+
+import java.lang.reflect.Method;
+
+public class PathfinderHandler {
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
+
+    private final HighwayBuilder module;
+
+    public HWDirection startingDirection = HWDirection.NORTH;
+    public BlockPos currentBlockPos = BlockPos.ORIGIN;
+    public BlockPos startingBlockPos = BlockPos.ORIGIN;
+    public MovementState moveState = MovementState.RUNNING;
+    public long rubberbandTimer = 0;
+
+    private BlockPos goal = null;
+    private BlockPos minerGoal = null; // External goal from EChestMiner — takes priority
+    private boolean baritoneActive = false;
+    private boolean baritoneAvailable = false;
+
+    // Cached reflection objects for Baritone
+    private Object baritoneInstance;
+    private Method setGoalAndPathMethod;
+    private Method setGoalMethod;
+    private java.lang.reflect.Constructor<?> goalBlockConstructor;
+
+    public PathfinderHandler(HighwayBuilder module) {
+        this.module = module;
+        initBaritoneReflection();
+    }
+
+    private void initBaritoneReflection() {
+        try {
+            Class<?> apiClass = Class.forName("baritone.api.BaritoneAPI");
+            Method getProvider = apiClass.getMethod("getProvider");
+            Object provider = getProvider.invoke(null);
+            Method getPrimary = provider.getClass().getMethod("getPrimaryBaritone");
+            baritoneInstance = getPrimary.invoke(provider);
+
+            Method getCustomGoalProcess = baritoneInstance.getClass().getMethod("getCustomGoalProcess");
+            Object process = getCustomGoalProcess.invoke(baritoneInstance);
+
+            Class<?> goalClass = Class.forName("baritone.api.pathing.goals.Goal");
+            Class<?> goalBlockClass = Class.forName("baritone.api.pathing.goals.GoalBlock");
+            goalBlockConstructor = goalBlockClass.getConstructor(BlockPos.class);
+
+            setGoalAndPathMethod = process.getClass().getMethod("setGoalAndPath", goalClass);
+            setGoalMethod = process.getClass().getMethod("setGoal", goalClass);
+
+            baritoneAvailable = true;
+        } catch (Exception e) {
+            baritoneAvailable = false;
+        }
+    }
+
+    public void setupPathing() {
+        if (mc.player == null) return;
+        moveState = MovementState.RUNNING;
+        startingBlockPos = mc.player.getBlockPos();
+        currentBlockPos = startingBlockPos;
+        startingDirection = HWDirection.fromYaw(mc.player.getYaw());
+    }
+
+    public void setMinerGoal(BlockPos pos) {
+        minerGoal = pos;
+    }
+
+    public void clearMinerGoal() {
+        minerGoal = null;
+    }
+
+    public boolean hasMinerGoal() {
+        return minerGoal != null;
+    }
+
+    public void updatePathing() {
+        if (mc.player == null || mc.world == null) return;
+
+        // External goal from EChest miner — bypass normal movement logic
+        if (minerGoal != null) {
+            goal = minerGoal;
+            updateBaritoneGoal();
+            return;
+        }
+
+        switch (moveState) {
+            case RUNNING -> updateRunning();
+            case BRIDGE -> updateBridge();
+            case PICKUP -> {
+                goal = module.containerHandler.getCollectingPosition();
+            }
+            case RESTOCK -> {
+                Vec3d target = Vec3d.ofCenter(currentBlockPos);
+                if (mc.player.getPos().distanceTo(target) < 2) {
+                    goal = null;
+                    moveTo(target);
+                } else {
+                    goal = currentBlockPos;
+                }
+            }
+        }
+
+        updateBaritoneGoal();
+    }
+
+    private void updateRunning() {
+        goal = currentBlockPos;
+
+        BlockPos possiblePos = currentBlockPos.add(
+            startingDirection.directionVec.getX(),
+            startingDirection.directionVec.getY(),
+            startingDirection.directionVec.getZ()
+        );
+
+        if (!isTaskDone(possiblePos.up())
+            || !isTaskDone(possiblePos)
+            || !isTaskDone(possiblePos.down())) return;
+
+        if (!checkForResidue(possiblePos.up())) return;
+
+        BlockState downState = mc.world.getBlockState(possiblePos.down());
+        if (downState.isAir() || downState.isReplaceable()) return;
+
+        if (!currentBlockPos.equals(possiblePos)
+            && mc.player.getPos().distanceTo(Vec3d.ofCenter(currentBlockPos)) < 2) {
+            module.statistics.simpleMovingAverageDistance.add(System.currentTimeMillis());
+            module.inventoryHandler.lastHitVec = Vec3d.ZERO;
+            currentBlockPos = possiblePos;
+            module.taskManager.populateTasks();
+        }
+    }
+
+    private void updateBridge() {
+        goal = null;
+        BlockState belowState = mc.world.getBlockState(mc.player.getBlockPos().down());
+        boolean isAboveAir = belowState.isAir() || belowState.isReplaceable();
+
+        if (isAboveAir && mc.player.input != null) {
+            mc.player.input.playerInput = new net.minecraft.util.PlayerInput(
+                mc.player.input.playerInput.forward(),
+                mc.player.input.playerInput.backward(),
+                mc.player.input.playerInput.left(),
+                mc.player.input.playerInput.right(),
+                mc.player.input.playerInput.jump(),
+                true,
+                mc.player.input.playerInput.sprint()
+            );
+        }
+
+        if (shouldBridge()) {
+            Vec3d target = Vec3d.ofCenter(currentBlockPos).add(
+                startingDirection.directionVec.getX(),
+                0,
+                startingDirection.directionVec.getZ()
+            );
+            moveTo(target);
+        } else if (!isAboveAir) {
+            moveState = MovementState.RUNNING;
+        }
+    }
+
+    private boolean isTaskDone(BlockPos pos) {
+        if (mc.world == null) return false;
+        BlockTask task = module.taskManager.getTasks().get(pos);
+        if (task == null) return false;
+
+        if (task.taskState != TaskState.DONE) return false;
+        if (HWUtils.isLiquid(pos)) return false;
+
+        // Verify the block still matches what we expect
+        // If someone broke it, the task is stale — re-populate
+        net.minecraft.block.Block currentBlock = mc.world.getBlockState(pos).getBlock();
+        if (task.targetBlock != net.minecraft.block.Blocks.AIR && currentBlock == net.minecraft.block.Blocks.AIR) {
+            // Block was destroyed externally — force re-check
+            module.taskManager.populateTasks();
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean checkForResidue(BlockPos pos) {
+        if (module.containerHandler.containerTask.taskState != TaskState.DONE) return false;
+
+        for (BlockTask task : module.taskManager.getTasks().values()) {
+            // Only block on tasks that still need active work, not on pending confirmations
+            if ((task.taskState == TaskState.BREAK
+                || task.taskState == TaskState.PLACE
+                || task.taskState == TaskState.LIQUID)
+                && module.taskManager.isBehindPos(pos, task.blockPos)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public boolean shouldBridge() {
+        if (!module.scaffold.get()) return false;
+        if (mc.world == null) return false;
+        if (module.containerHandler.containerTask.taskState != TaskState.DONE) return false;
+
+        BlockPos ahead = currentBlockPos.add(
+            startingDirection.directionVec.getX(),
+            startingDirection.directionVec.getY(),
+            startingDirection.directionVec.getZ()
+        );
+
+        BlockState aheadState = mc.world.getBlockState(ahead);
+        BlockState aheadUpState = mc.world.getBlockState(ahead.up());
+        BlockState aheadDownState = mc.world.getBlockState(ahead.down());
+
+        if (!aheadState.isAir() || !aheadUpState.isAir()) return false;
+        if (!aheadDownState.isAir() && !aheadDownState.isReplaceable()) return false;
+
+        for (BlockTask task : module.taskManager.getTasks().values()) {
+            if (task.taskState == TaskState.PENDING_PLACE) return false;
+            if ((task.taskState == TaskState.PLACE || task.taskState == TaskState.LIQUID)
+                && !task.sequence.isEmpty()) return false;
+        }
+
+        return true;
+    }
+
+    private void moveTo(Vec3d target) {
+        if (mc.player == null) return;
+        double speed = module.moveSpeed.get();
+        mc.player.setVelocity(
+            Math.max(-speed, Math.min(speed, target.x - mc.player.getX())),
+            mc.player.getVelocity().y,
+            Math.max(-speed, Math.min(speed, target.z - mc.player.getZ()))
+        );
+    }
+
+    private void updateBaritoneGoal() {
+        if (!baritoneAvailable) {
+            if (goal != null) moveTo(Vec3d.ofCenter(goal));
+            return;
+        }
+
+        try {
+            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
+                .invoke(baritoneInstance);
+
+            if (goal != null) {
+                Object goalBlock = goalBlockConstructor.newInstance(goal);
+                setGoalAndPathMethod.invoke(process, goalBlock);
+                baritoneActive = true;
+            } else if (baritoneActive) {
+                setGoalMethod.invoke(process, (Object) null);
+                baritoneActive = false;
+            }
+        } catch (Exception e) {
+            if (goal != null) moveTo(Vec3d.ofCenter(goal));
+        }
+    }
+
+    public void setupBaritone() {
+        if (!baritoneAvailable) return;
+
+        try {
+            Class<?> apiClass = Class.forName("baritone.api.BaritoneAPI");
+            Method getSettings = apiClass.getMethod("getSettings");
+            Object settings = getSettings.invoke(null);
+
+            setBaritoneField(settings, "allowPlace", false);
+            setBaritoneField(settings, "allowBreak", false);
+            setBaritoneField(settings, "renderGoal", module.goalRender.get());
+            setBaritoneField(settings, "allowInventory", false);
+        } catch (Exception e) {
+            // Baritone settings not available
+        }
+    }
+
+    private void setBaritoneField(Object settings, String fieldName, Object value) {
+        try {
+            var field = settings.getClass().getField(fieldName);
+            var setting = field.get(settings);
+            var valueField = setting.getClass().getField("value");
+            valueField.set(setting, value);
+        } catch (Exception ignored) {}
+    }
+
+    public void resetBaritone() {
+        if (!baritoneAvailable) return;
+
+        try {
+            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
+                .invoke(baritoneInstance);
+            setGoalMethod.invoke(process, (Object) null);
+            baritoneActive = false;
+        } catch (Exception ignored) {}
+    }
+
+    public boolean pauseCheck() {
+        if (mc.player == null) return true;
+
+        long timeSinceRubberband = System.currentTimeMillis() - rubberbandTimer;
+        if (timeSinceRubberband < module.rubberbandTimeout.get() * 50L) return true;
+
+        if (!mc.player.isAlive()) return true;
+
+        return false;
+    }
+
+    public void clearProcess() {
+        baritoneActive = false;
+        goal = null;
+        minerGoal = null;
+    }
+}
