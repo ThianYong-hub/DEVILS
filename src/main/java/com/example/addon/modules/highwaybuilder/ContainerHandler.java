@@ -1,6 +1,5 @@
 package com.example.addon.modules.highwaybuilder;
 
-import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;

@@ -18,6 +18,7 @@
       "com.example.addon.AddonTemplate"
     ]
   },
+  "accessWidener": "devils-addon.accesswidener",
   "mixins": [
     "addon-template.mixins.json"
   ],

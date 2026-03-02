@@ -177,9 +177,6 @@ public class AutoPearl extends Module {
 
     private int stuckTicks;
 
-    /** true while performing a multi-step descent (target is below). */
-    private boolean descending;
-
     /**
      * When set via chat command ({@code !pearl Nick}), overrides auto-targeting.
      * All filters (height, gliding, friends) are ignored — the bots chase this
@@ -205,7 +202,7 @@ public class AutoPearl extends Module {
         prevTargetPos      = null;
         targetHorizSpeed   = 0;
         stuckTicks         = 0;
-        descending         = false;
+
         // forcedTargetName is NOT reset — persists across toggle so you
         // can do !pearl off / !pearl on without losing the forced target.
     }
@@ -218,7 +215,7 @@ public class AutoPearl extends Module {
         prevTarget         = null;
         prevTargetPos      = null;
         stuckTicks         = 0;
-        descending         = false;
+
     }
 
     // ── Chat command listener ─────────────────────────────────────────────────
@@ -352,10 +349,7 @@ public class AutoPearl extends Module {
         // ── Descent: if target is significantly below us, pearl down first ────
         double heightDiff = mc.player.getY() - target.getY();
         if (enableDescent.get() && heightDiff > 3.0 && distToTarget > stopRange.get()) {
-            descending = true;
             if (tryDescentPearl(pearlSlot)) return;
-        } else {
-            descending = false;
         }
 
         // Within sword range: keep timer ready for instant throw when they leave

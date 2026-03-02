@@ -27,6 +27,10 @@ base {
     group = properties["maven_group"] as String
 }
 
+loom {
+    accessWidenerPath = file("src/main/resources/devils-addon.accesswidener")
+}
+
 repositories {
     maven {
         name = "meteor-maven"

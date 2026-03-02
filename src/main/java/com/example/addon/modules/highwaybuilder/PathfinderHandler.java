@@ -34,7 +34,6 @@ public class PathfinderHandler {
     private Object followProcess;
     private Method pickupMethod;
     private Method followCancelMethod;
-    private Method followIsActiveMethod;
     private boolean pickupActive = false;
 
     public PathfinderHandler(HighwayBuilder module) {
@@ -73,7 +72,6 @@ public class PathfinderHandler {
 
                 pickupMethod = followProcess.getClass().getMethod("pickup", Predicate.class);
                 followCancelMethod = followProcess.getClass().getMethod("cancel");
-                followIsActiveMethod = followProcess.getClass().getMethod("isActive");
             } catch (Exception e) {
                 // Pickup not available — EChestMiner will fall back to manual collection
                 followProcess = null;

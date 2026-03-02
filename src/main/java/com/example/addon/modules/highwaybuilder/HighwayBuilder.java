@@ -484,7 +484,7 @@ public class HighwayBuilder extends Module {
     // ── Constructor ─────────────────────────────────────────────────────
 
     public HighwayBuilder() {
-        super(AddonTemplate.CATEGORY, "highway-builder", "Automatically builds highways, tunnels, and flat paths in the Nether.");
+        super(AddonTemplate.CATEGORY, "highway-builder-plus", "Automatically builds highways, tunnels, and flat paths in the Nether.");
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────
