@@ -576,8 +576,10 @@ public class HighwayBuilder extends Module {
             // tick() may have triggered disableWithError() nullifying all components
             if (!isActive() || taskManager == null || inventoryHandler == null) return;
             if (miner.isActive()) {
-                if (pathfinder.hasMinerGoal()) {
-                    // Miner needs movement (collecting) — let Baritone walk
+                if (pathfinder.isPickupActive()) {
+                    // Baritone FollowProcess is collecting items — don't interfere
+                } else if (pathfinder.hasMinerGoal()) {
+                    // Miner needs movement — let Baritone walk
                     pathfinder.updatePathing();
                 } else {
                     // Miner is placing/mining — player must stay still, stop Baritone

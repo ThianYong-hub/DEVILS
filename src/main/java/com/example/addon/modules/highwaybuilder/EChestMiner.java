@@ -9,8 +9,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -21,11 +21,9 @@ import net.minecraft.util.math.Vec3d;
 /**
  * EChest Miner — places and breaks ender chests to farm obsidian.
  *
- * Flow: IDLE → SWAP_TO_ECHEST → PLACE_ECHEST → SWAP_TO_PICK → MINE_HIT → WAIT_BREAK
- *       → (loop until chestsRemaining == 0) → COLLECTING → IDLE
- *
- * No centering — places at the nearest valid adjacent block from current position.
- * Pre-calculates how many ECs to break, breaks ALL, THEN collects all dropped obsidian.
+ * Silent mode: swap+action+swapback in one tick, no separate SWAP states.
+ * Normal mode: separate SWAP_TO_ECHEST / SWAP_TO_PICK states.
+ * Insta mode: one attackBlock, no re-hits. interactBlock for instant placement.
  */
 public class EChestMiner {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
@@ -47,9 +45,10 @@ public class EChestMiner {
     private int chestsRemaining = 0;
     private int tickDelay = 0;
     private int stuckTicks = 0;
-    private int savedSlot = -1;
+
     private boolean hitSent = false;
     private boolean sneakingForPlace = false;
+    private int pickSlot = -1; // cached pickaxe slot for the cycle
 
     public EChestMiner(HighwayBuilder module) {
         this.module = module;
@@ -57,6 +56,10 @@ public class EChestMiner {
 
     private boolean isInsta() {
         return module.echestMineMode.get() == EChestMineMode.Insta;
+    }
+
+    private boolean isSilent() {
+        return module.echestSwapMode.get() == EChestSwapMode.Silent;
     }
 
     public boolean isActive() {
@@ -75,7 +78,6 @@ public class EChestMiner {
             return;
         }
 
-        // In Insta mode: chain multiple states per tick
         int maxChain = isInsta() ? 10 : 1;
         for (int i = 0; i < maxChain; i++) {
             State before = state;
@@ -100,15 +102,12 @@ public class EChestMiner {
         if (mc.player == null) return;
         if (module.getMaterial() != Blocks.OBSIDIAN) return;
 
-        // Don't start until player is AT the build area
         double distToBuild = mc.player.getPos().distanceTo(
             Vec3d.ofCenter(module.pathfinder.currentBlockPos));
         if (distToBuild > 1.5) return;
 
-        // Check if there are dropped obsidian items nearby — collect them first
         if (hasNearbyObsidian()) {
-            state = State.COLLECTING;
-            stuckTicks = 0;
+            goToCollecting();
             return;
         }
 
@@ -125,30 +124,35 @@ public class EChestMiner {
         int currentObsidian = countItem(Items.OBSIDIAN);
         if (currentObsidian > module.saveMaterial.get()) return;
 
-        int freeSlots = countEmptySlots();
-        if (freeSlots <= 0) return; // Inventory full — nothing to fill
+        int freeSpace = countFreeObsidianSpace();
+        if (freeSpace < 8) return;
 
-        // Pre-calculate: each EC gives 8 obsidian, each slot holds 64
-        // We need enough ECs to fill free slots: freeSlots * 8 ECs (64/8 = 8 ECs per slot)
-        int chestsNeeded = freeSlots * 8;
+        int chestsNeeded = (int) Math.ceil(freeSpace / 8.0);
         chestsRemaining = Math.min(chestsNeeded, echest.count());
         if (chestsRemaining <= 0) return;
 
-        // Find place position from current spot — no centering needed
         actionPos = findAdjacentPlacePos();
         if (actionPos == null) return;
 
-        state = State.SWAP_TO_ECHEST;
+        // Cache pickaxe slot for the whole cycle
+        pickSlot = findBestPickSlot();
+        if (pickSlot == -1) return;
+
         stuckTicks = 0;
-        savedSlot = mc.player.getInventory().getSelectedSlot();
+
+        if (isSilent()) {
+            // Silent: skip SWAP_TO_ECHEST, go directly to PLACE_ECHEST
+            state = State.PLACE_ECHEST;
+        } else {
+            state = State.SWAP_TO_ECHEST;
+        }
     }
 
-    // ── SWAP_TO_ECHEST ──────────────────────────────────────────────────
+    // ── SWAP_TO_ECHEST (Normal mode only) ────────────────────────────────
 
     private void doSwapToEchest() {
         if (mc.player == null) { reset(); return; }
 
-        // If the block is still there from previous cycle, wait
         if (mc.world != null && mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
             stuckTicks++;
             if (stuckTicks > 40) { goToCollecting(); return; }
@@ -158,19 +162,13 @@ public class EChestMiner {
         FindItemResult echest = InvUtils.findInHotbar(Items.ENDER_CHEST);
         if (!echest.found()) {
             FindItemResult invEchest = InvUtils.find(Items.ENDER_CHEST);
-            if (!invEchest.found()) {
-                // No more ECs — collect dropped obsidian
-                goToCollecting();
-                return;
-            }
+            if (!invEchest.found()) { goToCollecting(); return; }
             InvUtils.move().from(invEchest.slot()).toHotbar(findSafeHotbarSlot());
             tickDelay = isInsta() ? 0 : 1;
             return;
         }
 
-        savedSlot = mc.player.getInventory().getSelectedSlot();
         InvUtils.swap(echest.slot(), false);
-
         state = State.PLACE_ECHEST;
         stuckTicks = 0;
     }
@@ -178,12 +176,16 @@ public class EChestMiner {
     // ── PLACE_ECHEST ────────────────────────────────────────────────────
 
     private void doPlaceEchest() {
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) { reset(); return; }
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) { reset(); return; }
 
         // Already placed?
         if (mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
-            swapBackIfSilent();
-            state = State.SWAP_TO_PICK;
+            if (isSilent()) {
+                // Go directly to mining, no separate swap state
+                state = State.MINE_HIT;
+            } else {
+                state = State.SWAP_TO_PICK;
+            }
             return;
         }
 
@@ -209,75 +211,81 @@ public class EChestMiner {
             Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec));
         }
 
-        // Sneak to prevent opening GUI
         mc.player.setSneaking(true);
 
-        if (!isInsta() && !sneakingForPlace) {
+        if (!isInsta() && !isSilent() && !sneakingForPlace) {
             sneakingForPlace = true;
             tickDelay = 1;
             return;
         }
 
-        // Send place packet
-        BlockHitResult hitResult = new BlockHitResult(hitVec, supportDir.getOpposite(), supportPos, false);
-        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
-        mc.player.swingHand(Hand.MAIN_HAND);
+        if (isSilent()) {
+            // Silent: find EC, swap → place → swap back, all in one tick
+            FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
+            if (!echest.found()) { mc.player.setSneaking(false); goToCollecting(); return; }
+            int prevSlot = mc.player.getInventory().getSelectedSlot();
+            if (echest.isHotbar()) {
+                InvUtils.swap(echest.slot(), false);
+            } else {
+                InvUtils.move().from(echest.slot()).toHotbar(prevSlot);
+            }
+
+            BlockHitResult hitResult = new BlockHitResult(hitVec, supportDir.getOpposite(), supportPos, false);
+            mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            mc.player.swingHand(Hand.MAIN_HAND);
+
+            // Swap back
+            InvUtils.swap(prevSlot, false);
+        } else {
+            // Normal: EC is already in hand from SWAP_TO_ECHEST
+            BlockHitResult hitResult = new BlockHitResult(hitVec, supportDir.getOpposite(), supportPos, false);
+            ActionResult result = mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            if (result.isAccepted()) mc.player.swingHand(Hand.MAIN_HAND);
+        }
 
         mc.player.setSneaking(false);
         sneakingForPlace = false;
-        swapBackIfSilent();
 
-        // Skip WAIT_ECHEST_PLACED — go directly to mining, check block in SWAP_TO_PICK/MINE_HIT
-        state = State.SWAP_TO_PICK;
-        tickDelay = isInsta() ? 0 : 2;
+        if (isSilent()) {
+            // Silent: skip SWAP_TO_PICK, go directly to MINE_HIT
+            state = State.MINE_HIT;
+        } else {
+            state = State.SWAP_TO_PICK;
+        }
         stuckTicks = 0;
     }
 
-    // ── SWAP_TO_PICK ────────────────────────────────────────────────────
+    // ── SWAP_TO_PICK (Normal mode only) ──────────────────────────────────
 
     private void doSwapToPick() {
         if (mc.player == null) { reset(); return; }
 
-        // Wait for EC to actually be placed before mining
+        // Wait for EC to be placed
         if (mc.world != null && mc.world.getBlockState(actionPos).getBlock() != Blocks.ENDER_CHEST) {
             stuckTicks++;
-            if (stuckTicks > 30) {
-                // Placement failed — retry
+            if (stuckTicks > 20) {
                 state = State.SWAP_TO_ECHEST;
                 stuckTicks = 0;
             }
             return;
         }
 
-        int bestSlot = -1;
-        float bestSpeed = 0;
-
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isIn(ItemTags.PICKAXES)) continue;
-            float speed = stack.getMiningSpeedMultiplier(Blocks.ENDER_CHEST.getDefaultState());
-            if (speed > bestSpeed) {
-                bestSpeed = speed;
-                bestSlot = i;
+        if (pickSlot == -1) {
+            pickSlot = findBestPickSlot();
+            if (pickSlot == -1) {
+                module.disableWithError("No pickaxe found for mining ender chests.");
+                return;
             }
         }
 
-        if (bestSlot == -1) {
-            module.disableWithError("No pickaxe found for mining ender chests.");
-            return;
-        }
-
-        savedSlot = mc.player.getInventory().getSelectedSlot();
-
-        if (bestSlot < 9) {
-            InvUtils.swap(bestSlot, false);
+        if (pickSlot < 9) {
+            InvUtils.swap(pickSlot, false);
         } else {
-            InvUtils.move().from(bestSlot).toHotbar(mc.player.getInventory().getSelectedSlot());
+            InvUtils.move().from(pickSlot).toHotbar(mc.player.getInventory().getSelectedSlot());
             tickDelay = isInsta() ? 0 : 1;
         }
 
         state = State.MINE_HIT;
-        hitSent = false;
         stuckTicks = 0;
     }
 
@@ -303,15 +311,32 @@ public class EChestMiner {
 
         if (isInsta()) {
             if (!hitSent) {
-                mc.interactionManager.attackBlock(actionPos, side);
-                mc.player.swingHand(Hand.MAIN_HAND);
+                if (isSilent()) {
+                    // Silent: swap pick → attack → swap back
+                    int prevSlot = mc.player.getInventory().getSelectedSlot();
+                    swapToPickSilent();
+                    mc.interactionManager.attackBlock(actionPos, side);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                    InvUtils.swap(prevSlot, false);
+                } else {
+                    mc.interactionManager.attackBlock(actionPos, side);
+                    mc.player.swingHand(Hand.MAIN_HAND);
+                }
                 hitSent = true;
             }
             state = State.WAIT_BREAK;
             stuckTicks = 0;
         } else {
-            mc.interactionManager.attackBlock(actionPos, side);
-            mc.player.swingHand(Hand.MAIN_HAND);
+            if (isSilent()) {
+                int prevSlot = mc.player.getInventory().getSelectedSlot();
+                swapToPickSilent();
+                mc.interactionManager.attackBlock(actionPos, side);
+                mc.player.swingHand(Hand.MAIN_HAND);
+                InvUtils.swap(prevSlot, false);
+            } else {
+                mc.interactionManager.attackBlock(actionPos, side);
+                mc.player.swingHand(Hand.MAIN_HAND);
+            }
 
             stuckTicks++;
             if (stuckTicks > 200) { goToCollecting(); return; }
@@ -343,68 +368,52 @@ public class EChestMiner {
     // ── Called when EC is confirmed broken ───────────────────────────────
 
     private void onEchestBroken() {
-        swapBackIfSilent();
         chestsRemaining--;
-        hitSent = false;
+        if (!isInsta()) hitSent = false;
         stuckTicks = 0;
 
-        // Don't check inventory space here — obsidian is on the ground
-        // Just keep breaking until chestsRemaining reaches 0
-        if (chestsRemaining > 0) {
-            FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
-            if (echest.found()) {
-                // Place next EC at the SAME position
-                state = State.SWAP_TO_ECHEST;
-                tickDelay = isInsta() ? 0 : 1;
-                return;
-            }
+        if (chestsRemaining <= 0) {
+            goToCollecting();
+            return;
         }
 
-        // All ECs broken (or ran out) — now collect all dropped obsidian
+        FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
+        if (echest.found()) {
+            if (isSilent()) {
+                // Silent: skip SWAP_TO_ECHEST, go directly to placement
+                state = State.PLACE_ECHEST;
+            } else {
+                state = State.SWAP_TO_ECHEST;
+                tickDelay = isInsta() ? 0 : 1;
+            }
+            return;
+        }
+
         goToCollecting();
     }
 
     // ── COLLECTING ──────────────────────────────────────────────────────
-    // After all ECs are broken, walk to pick up all dropped obsidian.
 
     private void doCollecting() {
         if (mc.player == null || mc.world == null) { reset(); return; }
 
-        ItemEntity closest = findClosestObsidian();
-
-        if (closest == null) {
-            // No more obsidian on ground — done
-            module.pathfinder.clearMinerGoal();
+        // No obsidian left on ground — done collecting
+        if (!hasNearbyObsidian()) {
+            module.pathfinder.stopPickup();
             reset();
             return;
         }
 
-        double dist = mc.player.squaredDistanceTo(closest);
-
-        if (dist < 2.0 * 2.0) {
-            // Within pickup range — wait for auto-pickup
-            module.pathfinder.clearMinerGoal();
-            stuckTicks++;
-            if (stuckTicks > 60) {
-                module.pathfinder.clearMinerGoal();
-                reset();
-                return;
-            }
-            return;
-        }
-
-        // Walk toward the obsidian via Baritone
-        BlockPos itemBlockPos = closest.getBlockPos();
-        module.pathfinder.setMinerGoal(itemBlockPos);
-
+        // Baritone's FollowProcess handles all pathing automatically.
+        // Just wait and check for timeout.
         stuckTicks++;
-        if (stuckTicks > 120) {
-            module.pathfinder.clearMinerGoal();
+        if (stuckTicks > 200) {
+            module.pathfinder.stopPickup();
             reset();
         }
     }
 
-    // ── Helper: transition to COLLECTING ─────────────────────────────────
+    // ── Transitions ─────────────────────────────────────────────────────
 
     private void goToCollecting() {
         state = State.COLLECTING;
@@ -412,9 +421,38 @@ public class EChestMiner {
         stuckTicks = 0;
         chestsRemaining = 0;
         hitSent = false;
+
+        // Start Baritone's FollowProcess to pick up obsidian on the ground
+        module.pathfinder.startPickup(stack -> stack.getItem() == Items.OBSIDIAN);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
+
+    private void swapToPickSilent() {
+        if (pickSlot == -1) pickSlot = findBestPickSlot();
+        if (pickSlot == -1) return;
+        if (pickSlot < 9) {
+            InvUtils.swap(pickSlot, false);
+        } else {
+            InvUtils.move().from(pickSlot).toHotbar(mc.player.getInventory().getSelectedSlot());
+        }
+    }
+
+    private int findBestPickSlot() {
+        if (mc.player == null) return -1;
+        int bestSlot = -1;
+        float bestSpeed = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isIn(ItemTags.PICKAXES)) continue;
+            float speed = stack.getMiningSpeedMultiplier(Blocks.ENDER_CHEST.getDefaultState());
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
 
     private boolean hasNearbyObsidian() {
         return findClosestObsidian() != null;
@@ -422,11 +460,9 @@ public class EChestMiner {
 
     private ItemEntity findClosestObsidian() {
         if (mc.player == null || mc.world == null) return null;
-
-        Box searchBox = mc.player.getBoundingBox().expand(8.0);
+        Box searchBox = mc.player.getBoundingBox().expand(16.0);
         ItemEntity closest = null;
         double closestDist = Double.MAX_VALUE;
-
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
@@ -440,61 +476,55 @@ public class EChestMiner {
         return closest;
     }
 
+    private int countGroundObsidian() {
+        if (mc.player == null || mc.world == null) return 0;
+        Box searchBox = mc.player.getBoundingBox().expand(16.0);
+        int count = 0;
+        for (var entity : mc.world.getEntities()) {
+            if (!(entity instanceof ItemEntity itemEntity)) continue;
+            if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
+            if (!searchBox.contains(itemEntity.getPos())) continue;
+            count += itemEntity.getStack().getCount();
+        }
+        return count;
+    }
+
     private BlockPos findAdjacentPlacePos() {
         if (mc.player == null || mc.world == null) return null;
-
         BlockPos playerPos = mc.player.getBlockPos();
         double maxReach = module.maxReach.get();
-
         HWDirection hwDir = module.pathfinder.startingDirection;
-
-        // 1) Directly behind player (opposite of build direction)
         if (hwDir != null) {
             BlockPos behind = playerPos.add(
                 -hwDir.directionVec.getX(), 0, -hwDir.directionVec.getZ());
             if (isValidPlacePos(behind, maxReach)) return behind;
         }
-
-        // 2) Any adjacent horizontal
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos pos = playerPos.offset(dir);
             if (isValidPlacePos(pos, maxReach)) return pos;
         }
-
         return null;
     }
 
     private boolean isValidPlacePos(BlockPos pos, double maxReach) {
         if (mc.world == null || mc.player == null) return false;
-
         if (!mc.world.getBlockState(pos).isAir()
             && !mc.world.getBlockState(pos).isReplaceable()) return false;
-
         BlockPos below = pos.down();
         if (mc.world.getBlockState(below).isAir()
             || mc.world.getBlockState(below).isReplaceable()
             || !mc.world.getFluidState(below).isEmpty()) return false;
-
         if (findSupportSide(pos) == null) return false;
-
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
         return dist <= maxReach;
     }
 
-    private void swapBackIfSilent() {
-        if (module.echestSwapMode.get() == EChestSwapMode.Silent && savedSlot >= 0) {
-            InvUtils.swap(savedSlot, false);
-        }
-    }
-
     private Direction findSupportSide(BlockPos pos) {
         if (mc.world == null) return null;
-
         BlockPos below = pos.down();
         if (!mc.world.getBlockState(below).isAir() && !mc.world.getBlockState(below).isReplaceable()) {
             return Direction.DOWN;
         }
-
         for (Direction dir : Direction.values()) {
             if (dir == Direction.DOWN) continue;
             BlockPos neighbor = pos.offset(dir);
@@ -516,13 +546,19 @@ public class EChestMiner {
         return count;
     }
 
-    private int countEmptySlots() {
+    private int countFreeObsidianSpace() {
         if (mc.player == null) return 0;
-        int count = 0;
+        int space = 0;
         for (int i = 0; i < 36; i++) {
-            if (mc.player.getInventory().getStack(i).isEmpty()) count++;
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                space += 64;
+            } else if (stack.getItem() == Items.OBSIDIAN) {
+                space += stack.getMaxCount() - stack.getCount();
+            }
         }
-        return count;
+        space -= countGroundObsidian();
+        return Math.max(0, space);
     }
 
     private int findSafeHotbarSlot() {
@@ -539,9 +575,12 @@ public class EChestMiner {
         chestsRemaining = 0;
         tickDelay = 0;
         stuckTicks = 0;
-        savedSlot = -1;
         hitSent = false;
         sneakingForPlace = false;
+        pickSlot = -1;
         module.pathfinder.clearMinerGoal();
+        if (module.pathfinder.isPickupActive()) {
+            module.pathfinder.stopPickup();
+        }
     }
 }
