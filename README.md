@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/main/resources/assets/devils-addon/icon.png" alt="Devils Addon" width="128" height="128">
+  <img src="src/main/resources/assets/devils-addon/icon.png" alt="Devils Addon" width="400" height="400">
 </p>
 
 <h1 align="center">Devils Addon</h1>
