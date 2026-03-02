@@ -5,7 +5,7 @@ import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.ActionResult;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -52,7 +52,7 @@ public class BlockPlacer {
     }
 
     private void placeBlockNormal(BlockTask blockTask, BlockPos placePos, Direction side) {
-        if (mc.world == null || mc.interactionManager == null || mc.player == null) return;
+        if (mc.world == null || mc.getNetworkHandler() == null || mc.player == null) return;
 
         BlockState currentBlock = mc.world.getBlockState(placePos);
 
@@ -69,11 +69,11 @@ public class BlockPlacer {
             mc.player.setSneaking(true);
         }
 
-        // interactBlock sends packet AND does client-side prediction (block appears instantly)
+        // Raw packet — bypasses client-side reach/placement checks (needed for wide highways)
         Vec3d hitVec = HWUtils.getHitVec(placePos, side);
         BlockHitResult hitResult = new BlockHitResult(hitVec, side, placePos, false);
-        ActionResult result = mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
-        if (result.isAccepted()) mc.player.swingHand(Hand.MAIN_HAND);
+        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
+        mc.player.swingHand(Hand.MAIN_HAND);
 
         if (needSneak && !wasSneaking) {
             mc.player.setSneaking(false);
