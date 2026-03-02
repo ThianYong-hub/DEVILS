@@ -12,8 +12,8 @@ public enum TaskState {
     BREAKING(100, 100, new Color(240, 222, 60)),
     BREAK(20, 20, new Color(222, 0, 0)),
     PLACE(20, 20, new Color(35, 188, 254)),
-    PENDING_BREAK(100, 100, new Color(0, 0, 0)),
-    PENDING_PLACE(100, 100, new Color(0, 0, 0)),
+    PENDING_BREAK(20, 20, new Color(0, 0, 0)),
+    PENDING_PLACE(20, 20, new Color(0, 0, 0)),
     IMPOSSIBLE_PLACE(100, 100, new Color(16, 74, 94)),
     DONE(69420, 34, new Color(50, 50, 50));
 

@@ -6,6 +6,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
 import java.lang.reflect.Method;
+import java.util.function.Predicate;
 
 public class PathfinderHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
@@ -28,6 +29,13 @@ public class PathfinderHandler {
     private Method setGoalAndPathMethod;
     private Method setGoalMethod;
     private java.lang.reflect.Constructor<?> goalBlockConstructor;
+
+    // FollowProcess for item pickup
+    private Object followProcess;
+    private Method pickupMethod;
+    private Method followCancelMethod;
+    private Method followIsActiveMethod;
+    private boolean pickupActive = false;
 
     public PathfinderHandler(HighwayBuilder module) {
         this.module = module;
@@ -56,6 +64,23 @@ public class PathfinderHandler {
         } catch (Exception e) {
             baritoneAvailable = false;
         }
+
+        // FollowProcess for item pickup — separate try so it can't break core pathing
+        if (baritoneAvailable) {
+            try {
+                Method getFollowProcess = baritoneInstance.getClass().getMethod("getFollowProcess");
+                followProcess = getFollowProcess.invoke(baritoneInstance);
+
+                pickupMethod = followProcess.getClass().getMethod("pickup", Predicate.class);
+                followCancelMethod = followProcess.getClass().getMethod("cancel");
+                followIsActiveMethod = followProcess.getClass().getMethod("isActive");
+            } catch (Exception e) {
+                // Pickup not available — EChestMiner will fall back to manual collection
+                followProcess = null;
+                pickupMethod = null;
+                followCancelMethod = null;
+            }
+        }
     }
 
     public void setupPathing() {
@@ -78,8 +103,48 @@ public class PathfinderHandler {
         return minerGoal != null;
     }
 
+    /**
+     * Start Baritone's FollowProcess in pickup mode — it will automatically
+     * path to all matching dropped items (GoalComposite of GoalBlocks).
+     */
+    public void startPickup(Predicate<net.minecraft.item.ItemStack> filter) {
+        pickupActive = true;
+        if (!baritoneAvailable || pickupMethod == null || followProcess == null) return;
+
+        try {
+            // Cancel any custom goal pathing first
+            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
+                .invoke(baritoneInstance);
+            setGoalMethod.invoke(process, (Object) null);
+            baritoneActive = false;
+
+            pickupMethod.invoke(followProcess, (Predicate<?>) filter);
+        } catch (Exception e) {
+            // Fallback handled by EChestMiner if pickup doesn't work
+        }
+    }
+
+    /**
+     * Stop Baritone's FollowProcess pickup mode.
+     */
+    public void stopPickup() {
+        pickupActive = false;
+        if (!baritoneAvailable || followCancelMethod == null) return;
+
+        try {
+            followCancelMethod.invoke(followProcess);
+        } catch (Exception ignored) {}
+    }
+
+    public boolean isPickupActive() {
+        return pickupActive;
+    }
+
     public void updatePathing() {
         if (mc.player == null || mc.world == null) return;
+
+        // Baritone FollowProcess is handling pickup — don't interfere
+        if (pickupActive) return;
 
         // External goal from EChest miner — bypass normal movement logic
         if (minerGoal != null) {
@@ -294,6 +359,8 @@ public class PathfinderHandler {
             setGoalMethod.invoke(process, (Object) null);
             baritoneActive = false;
         } catch (Exception ignored) {}
+
+        if (pickupActive) stopPickup();
     }
 
     public boolean pauseCheck() {
@@ -311,5 +378,6 @@ public class PathfinderHandler {
         baritoneActive = false;
         goal = null;
         minerGoal = null;
+        if (pickupActive) stopPickup();
     }
 }

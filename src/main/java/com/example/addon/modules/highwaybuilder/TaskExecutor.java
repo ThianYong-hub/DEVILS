@@ -264,8 +264,8 @@ public class TaskExecutor {
         if (mc.world == null) { blockTask.onStuck(); return; }
 
         Block currentBlock = mc.world.getBlockState(blockTask.blockPos).getBlock();
-        if (currentBlock == Blocks.AIR || currentBlock != blockTask.targetBlock) {
-            // Block already broken — skip waiting
+        if (currentBlock == Blocks.AIR) {
+            // Block is gone — confirmed broken
             module.inventoryHandler.waitTicks = module.breakDelay.get();
             blockTask.updateState(TaskState.BROKEN);
         } else {
