@@ -1,17 +1,11 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ThianYong-hub/DEVILS/main/src/main/resources/assets/devils-addon/icon.png" alt="Devils Addon" width="128" height="128">
+  <img src="src/main/resources/assets/devils-addon/icon.png" alt="Devils Addon" width="128" height="128">
 </p>
 
 <h1 align="center">Devils Addon</h1>
 
 <p align="center">
   A feature-rich addon for <a href="https://github.com/MeteorDevelopment/meteor-client">Meteor Client</a> focused on combat, automation, and utility modules for Minecraft 1.21.6–1.21.8.
-</p>
-
-<p align="center">
-  <a href="https://github.com/ThianYong-hub/DEVILS/releases"><img src="https://img.shields.io/github/v/release/ThianYong-hub/DEVILS?style=flat-square&color=blue" alt="Release"></a>
-  <a href="https://github.com/ThianYong-hub/DEVILS/actions"><img src="https://img.shields.io/github/actions/workflow/status/ThianYong-hub/DEVILS/dev_build.yml?style=flat-square" alt="Build"></a>
-  <a href="https://github.com/ThianYong-hub/DEVILS/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ThianYong-hub/DEVILS?style=flat-square" alt="License"></a>
 </p>
 
 ---
@@ -59,10 +53,10 @@
 
 ## Commands
 
-| Command | Usage | Description |
-|---------|-------|-------------|
-| `.autoraname setname <text>` | Sets the rename text for AutoAnvilRename | |
-| `.autoraname clearitems` | Clears the item filter list | |
+| Command | Description |
+|---------|-------------|
+| `.autoraname setname <text>` | Sets the rename text for AutoAnvilRename |
+| `.autoraname clearitems` | Clears the item filter list |
 
 ## Building from Source
 
