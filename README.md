@@ -1,74 +1,78 @@
-# Devils Addon
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ThianYong-hub/DEVILS/main/src/main/resources/assets/devils-addon/icon.png" alt="Devils Addon" width="128" height="128">
+</p>
 
-A Meteor Client addon for Minecraft 1.21.6–1.21.8.
+<h1 align="center">Devils Addon</h1>
+
+<p align="center">
+  A feature-rich addon for <a href="https://github.com/MeteorDevelopment/meteor-client">Meteor Client</a> focused on combat, automation, and utility modules for Minecraft 1.21.6–1.21.8.
+</p>
+
+<p align="center">
+  <a href="https://github.com/ThianYong-hub/DEVILS/releases"><img src="https://img.shields.io/github/v/release/ThianYong-hub/DEVILS?style=flat-square&color=blue" alt="Release"></a>
+  <a href="https://github.com/ThianYong-hub/DEVILS/actions"><img src="https://img.shields.io/github/actions/workflow/status/ThianYong-hub/DEVILS/dev_build.yml?style=flat-square" alt="Build"></a>
+  <a href="https://github.com/ThianYong-hub/DEVILS/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ThianYong-hub/DEVILS?style=flat-square" alt="License"></a>
+</p>
+
+---
+
+## Installation
+
+1. Install [Meteor Client](https://meteorclient.com/) for your Minecraft version.
+2. Download the latest JAR from [Releases](https://github.com/ThianYong-hub/DEVILS/releases).
+3. Place the JAR in your `mods` folder.
+4. Launch the game — modules appear under the **Devils** category.
 
 ## Modules
 
-### AutoWasp
-Automatically flies toward a target player using elytra. Features movement prediction, landing avoidance, friend filtering, and configurable actions on target loss (toggle, find new target, or disconnect).
+### Combat
 
-### AntiWasp
-Evasive elytra flight along geometric figures (circle, square, triangle) to dodge pursuers. Includes obstacle avoidance with raycasting, automatic figure cycling, firework boost support, smooth camera rotation, and automatic elytra recovery if flight is interrupted.
+| Module | Description |
+|--------|-------------|
+| **AutoCev** | Automatically places obsidian, end crystals and breaks the base to damage nearby players. |
+| **AutoPearl** | Locks onto a target and chases with ender pearls. Supports multi-bot orbit formations and remote chat commands (`!pearl <nick>`, `!pearl on/off`). |
+| **TnTBomber** | Traps target in an obsidian box and bombs them with TNT. |
+| **LavaBucket** | Automatically places and collects lava buckets on nearby players. |
 
-### AutoPearl
-Locks onto a target and chases them with ender pearls. Simulates pearl trajectories to calculate optimal throw angles. Supports multi-bot orbit formations (up to 4 bots approaching from different sides), platform descent, stuck detection with auto-breakout, and remote chat commands (`!pearl <nick>`, `!pearl auto`, `!pearl on/off`).
+### Movement
 
-### AutoAnvilRename
-Automatically renames items in an open anvil GUI. Pulls items from inventory, sends rename packets, and collects output. Supports item/shulker box filters, auto XP bottle usage, and stuck detection.
+| Module | Description |
+|--------|-------------|
+| **AutoWasp** | Follows a target with elytra using obstacle-aware routing, movement prediction, and friend filtering. |
+| **AntiWasp** | Evasive elytra flight along geometric figures (circle, square, triangle) to dodge pursuers. Includes obstacle avoidance with raycasting and firework boost support. |
+| **HClip** | Shifts into block corners when surround is mined to block crystal placement. |
+| **VClip** | Instantly clips you vertically by a configured distance. |
 
-### TrackerPlayer
-Tracks players with fully per-player rules. Each rule has player name, event mode (`Join`, `Leave`, `Both`, `Death`), sound toggle, send toggle, command text, per-player chat send delay (ms), and sound source mode (`Local folder`, `Game sound`, `Manual ID`).
-Each rule stores separate sound values for `Join`, `Leave`, and `Death` under the same source mode.
-`Both` means only `Join + Leave` (it does not include `Death`).
+### World
 
-Sound workflow:
-- Put `.ogg` files inside `<gameDir>/devils-addon/sounds` (subfolders supported)
-- Use `Refresh Sounds` and select per-event sounds (`J/L/D`) in the rule
-- Or pick an existing game sound from selector
-- Or use manual sound id for custom packs/mod integrations
-- If event-specific sound value is empty/invalid, the module falls back to `default-sound`, then to built-in fallback sound
+| Module | Description |
+|--------|-------------|
+| **HighwayBuilder** | Automatically builds highways, tunnels, and flat paths in the Nether. Features EChest mining for obsidian farming, Baritone integration, multi-block placement, blueprint system, and auto-liquid handling. |
+
+### Player
+
+| Module | Description |
+|--------|-------------|
+| **AutoAnvilRename** | Automatically renames items in an open anvil GUI. Supports item/shulker box filters and auto XP bottle usage. |
+| **TrackerPlayer** | Universal per-player tracker with join/leave/death rules, custom sound playback (local `.ogg` files, game sounds, or manual IDs), and optional chat command execution. |
+| **DiscordRPC** | Shows Devils Addon branding in Discord status. |
 
 ## Commands
 
 | Command | Usage | Description |
 |---------|-------|-------------|
-| `autoraname` | `.autoraname setname <text>` | Sets the rename text for AutoAnvilRename |
-| `autoraname` | `.autoraname clearitems` | Clears the item filter list |
+| `.autoraname setname <text>` | Sets the rename text for AutoAnvilRename | |
+| `.autoraname clearitems` | Clears the item filter list | |
 
-## Installation
-
-1. Download the latest JAR from [Releases](https://github.com/ThianYong-hub/DEVILS/releases)
-2. Place it in your `mods` folder alongside Meteor Client
-3. Launch the game
-
-## Building from source
+## Building from Source
 
 ```bash
-git clone https://github.com/ThianYong-hub/DEVILS
+git clone https://github.com/ThianYong-hub/DEVILS.git
 cd DEVILS
 ./gradlew build
 ```
 
 The built JAR will be in `build/libs/`.
-
-## Release Process
-
-Manual-only release flow:
-- Feature/PR pipelines run tests and build artifacts only (no tag and no GitHub Release).
-- Merge to `main` does not create tags and does not publish releases automatically.
-- Stable release is created manually through `Actions -> Manual Release Tag -> Run workflow`.
-- Leave `version` empty to auto-increment PATCH (`Z`) from the latest `vX.Y.Z`.
-- Set `version` manually to `vX.Y.Z` when you want explicit MINOR/MAJOR.
-
-Stable version source:
-- Stable builds use Git tag as source of truth (`APP_VERSION` from tag).
-- `mod_version` in `gradle.properties` is fallback for local builds only.
-
-Workflow chaining note:
-- Manual tag workflow triggers `release-on-tag` explicitly via `workflow_dispatch`.
-- No additional PAT secret is required; built-in `GITHUB_TOKEN` is used.
-- `release-auto-patch` remains in repository in disabled/manual mode for optional future use.
-- Plain external tag push does not auto-publish release unless `release-on-tag` is dispatched.
 
 ## Authors
 
@@ -77,4 +81,4 @@ Workflow chaining note:
 
 ## License
 
-This project is available under the CC0 license.
+This project is available under the [CC0](LICENSE) license.
