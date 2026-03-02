@@ -25,6 +25,7 @@ import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudGroup;
 import meteordevelopment.meteorclient.systems.modules.Category;
+import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
@@ -55,6 +56,22 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new TnTBomber());
         Modules.get().add(new VClip());
         Modules.get().add(new HighwayBuilder());
+
+        // Fix Meteor's ClientConnectionMixin NPE on disconnect —
+        // their mixin calls Modules.get().get(HighwayBuilder.class).isActive()
+        // referencing meteordevelopment.meteorclient.systems.modules.world.HighwayBuilder.
+        // If that module isn't registered, .get() returns null → NPE crash.
+        // We register it here so the lookup never returns null.
+        try {
+            @SuppressWarnings("unchecked")
+            Class<? extends Module> meteorHW = (Class<? extends Module>)
+                Class.forName("meteordevelopment.meteorclient.systems.modules.world.HighwayBuilder");
+            if (Modules.get().get(meteorHW) == null) {
+                Modules.get().add(meteorHW.getDeclaredConstructor().newInstance());
+            }
+        } catch (Exception ignored) {
+            // Class doesn't exist or can't be instantiated — no fix needed
+        }
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
