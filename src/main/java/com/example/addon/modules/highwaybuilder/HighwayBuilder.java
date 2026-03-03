@@ -600,7 +600,7 @@ public class HighwayBuilder extends Module {
         // (Only when miner is NOT active — miner places/breaks ECs which would
         // create phantom tasks and cause black blocks)
         repopulateTimer++;
-        if (repopulateTimer >= 10) {
+        if (repopulateTimer >= 2) {
             repopulateTimer = 0;
             taskManager.populateTasks();
         }

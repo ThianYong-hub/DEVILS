@@ -11,7 +11,7 @@ import java.util.function.Predicate;
 public class PathfinderHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final double RESTOCK_NEAR_RANGE = 3.0;
-    private static final double RESTOCK_CENTER_TOLERANCE = 0.05;
+    private static final double RESTOCK_CENTER_TOLERANCE = 0.08;
 
     private final HighwayBuilder module;
 
@@ -163,19 +163,30 @@ public class PathfinderHandler {
                 Vec3d standTarget = module.containerHandler != null
                     ? module.containerHandler.getRestockStandPos()
                     : Vec3d.ofCenter(currentBlockPos);
+                boolean canInteract = module.containerHandler != null
+                    && module.containerHandler.canInteractWithContainerFromCurrentPos();
 
                 if (horizontalDistanceSq(mc.player.getPos(), standTarget)
                     <= RESTOCK_NEAR_RANGE * RESTOCK_NEAR_RANGE) {
                     goal = null;
                     if (isCenteredOn(standTarget)) {
-                        stopHorizontalMovement();
+                        if (canInteract) {
+                            stopHorizontalMovement();
+                        } else {
+                            // Center target is not actually usable, force a new candidate.
+                            if (module.containerHandler != null) {
+                                module.containerHandler.invalidateRestockStandTarget();
+                                standTarget = module.containerHandler.getRestockStandPos();
+                            }
+                            moveTo(standTarget);
+                        }
                     } else {
                         moveTo(standTarget);
                     }
                 } else {
                     goal = new BlockPos(
                         (int) Math.floor(standTarget.x),
-                        currentBlockPos.getY(),
+                        (int) Math.floor(standTarget.y),
                         (int) Math.floor(standTarget.z)
                     );
                 }
@@ -276,14 +287,21 @@ public class PathfinderHandler {
     }
 
     private boolean hasPendingTasksBefore(BlockPos nextPos) {
-        double nextDistance = Vec3d.ofCenter(startingBlockPos).distanceTo(Vec3d.ofCenter(nextPos)) + 0.25;
+        double nextProgress = getForwardProgressFromStart(nextPos) + 0.5;
 
         for (BlockTask task : module.taskManager.getTasks().values()) {
             if (!isMovementBlockingState(task.taskState)) continue;
-            if (task.getStartDistance() <= nextDistance) return true;
+            if (getForwardProgressFromStart(task.blockPos) <= nextProgress) return true;
         }
 
         return false;
+    }
+
+    private double getForwardProgressFromStart(BlockPos pos) {
+        int dx = pos.getX() - startingBlockPos.getX();
+        int dz = pos.getZ() - startingBlockPos.getZ();
+        return dx * startingDirection.directionVec.getX()
+            + dz * startingDirection.directionVec.getZ();
     }
 
     private boolean isMovementBlockingState(TaskState state) {
@@ -340,8 +358,8 @@ public class PathfinderHandler {
 
     private boolean isCenteredOn(Vec3d target) {
         if (mc.player == null) return false;
-        return Math.abs(target.x - mc.player.getX()) <= RESTOCK_CENTER_TOLERANCE
-            && Math.abs(target.z - mc.player.getZ()) <= RESTOCK_CENTER_TOLERANCE;
+        return horizontalDistanceSq(target, mc.player.getPos())
+            <= RESTOCK_CENTER_TOLERANCE * RESTOCK_CENTER_TOLERANCE;
     }
 
     private void stopHorizontalMovement() {

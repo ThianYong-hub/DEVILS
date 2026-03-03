@@ -77,10 +77,7 @@ public class InventoryHandler {
 
         blockTask.toolToUse = mc.player.getInventory().getStack(bestSlot);
 
-        boolean silent = module.swapMode.get() == EChestSwapMode.Silent;
-        if (silent) {
-            swapBackSlot = mc.player.getInventory().getSelectedSlot();
-        }
+        captureSwapBackSlotIfSilent();
 
         if (bestSlot < 9) {
             InvUtils.swap(bestSlot, false);
@@ -105,10 +102,7 @@ public class InventoryHandler {
         Block useMat = findMaterial(blockTask);
         if (useMat == Blocks.AIR) return false;
 
-        boolean silent = module.swapMode.get() == EChestSwapMode.Silent;
-        if (silent) {
-            swapBackSlot = mc.player.getInventory().getSelectedSlot();
-        }
+        captureSwapBackSlotIfSilent();
 
         FindItemResult result = InvUtils.findInHotbar(itemStack ->
             itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == useMat);
@@ -129,6 +123,28 @@ public class InventoryHandler {
         }
 
         return false;
+    }
+
+    private void captureSwapBackSlotIfSilent() {
+        if (mc.player == null) return;
+        if (module.swapMode.get() != EChestSwapMode.Silent) return;
+
+        // Keep the very first source slot until we explicitly restore.
+        if (swapBackSlot == -1) {
+            swapBackSlot = mc.player.getInventory().getSelectedSlot();
+        }
+    }
+
+    public void restoreSilentSwap() {
+        if (mc.player == null) {
+            swapBackSlot = -1;
+            return;
+        }
+
+        if (swapBackSlot >= 0) {
+            InvUtils.swap(swapBackSlot, false);
+            swapBackSlot = -1;
+        }
     }
 
     private Block findMaterial(BlockTask blockTask) {

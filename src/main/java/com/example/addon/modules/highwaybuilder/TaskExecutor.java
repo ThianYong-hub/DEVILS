@@ -67,9 +67,12 @@ public class TaskExecutor {
             return;
         }
 
-        if (!updateOnly
-            && module.inventoryHandler.swapOrMoveBestTool(blockTask)
-            && module.inventoryHandler.packetLimiter.size() < module.interactionLimit.get()) {
+        if (!updateOnly) {
+            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
+            if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
+                module.inventoryHandler.restoreSilentSwap();
+                return;
+            }
             module.blockBreaker.mineBlock(blockTask);
         }
     }
@@ -198,11 +201,16 @@ public class TaskExecutor {
             return;
         }
 
-        if (!updateOnly
-            && mc.player.isOnGround()
-            && module.inventoryHandler.swapOrMoveBestTool(blockTask)
-            && !module.liquidHandler.handleLiquid(blockTask)
-            && module.inventoryHandler.packetLimiter.size() < module.interactionLimit.get()) {
+        if (!updateOnly) {
+            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
+            if (module.liquidHandler.handleLiquid(blockTask)) {
+                module.inventoryHandler.restoreSilentSwap();
+                return;
+            }
+            if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
+                module.inventoryHandler.restoreSilentSwap();
+                return;
+            }
             module.blockBreaker.mineBlock(blockTask);
         }
     }
@@ -220,6 +228,12 @@ public class TaskExecutor {
         BlockTask containerTask = module.containerHandler.containerTask;
         if (blockTask != containerTask && module.blueprintGenerator != null) {
             BlueprintTask blueprintTask = module.blueprintGenerator.getBlueprint().get(blockTask.blockPos);
+            if (blueprintTask == null) {
+                // Stale task outside current blueprint window.
+                module.taskManager.getTasks().remove(blockTask.blockPos);
+                blockTask.updateState(TaskState.DONE);
+                return;
+            }
             if (blueprintTask != null && blueprintTask.targetBlock == Blocks.AIR
                 && blockTask.targetBlock != Blocks.AIR) {
                 blockTask.targetBlock = Blocks.AIR;
@@ -280,6 +294,12 @@ public class TaskExecutor {
 
         if (blockTask == containerTask
             && module.pathfinder.moveState == MovementState.RESTOCK) {
+            if (!module.pathfinder.isCenteredForRestock()
+                && !module.containerHandler.canInteractWithContainerFromCurrentPos()) {
+                blockTask.resetStuck();
+                return;
+            }
+
             if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
                 // Never place while player's hitbox intersects the placement block.
                 blockTask.resetStuck();
@@ -334,6 +354,10 @@ public class TaskExecutor {
             && !currentState.isReplaceable()) {
             // Block already placed — skip waiting
             blockTask.updateState(TaskState.PLACED);
+        } else if ((currentState.isAir() || currentState.isReplaceable())
+            && blockTask.targetBlock != Blocks.AIR) {
+            // Placement did not land (lag/packet drop). Retry immediately instead of sitting in black state.
+            blockTask.updateState(TaskState.PLACE);
         } else {
             blockTask.onStuck();
         }

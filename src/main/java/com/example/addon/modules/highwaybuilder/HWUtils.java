@@ -44,7 +44,9 @@ public class HWUtils {
             // Check if face is visible from player
             BlockPos adjacent = pos.offset(side);
             BlockState adjacentState = mc.world.getBlockState(adjacent);
-            if (!adjacentState.isAir() && adjacentState.isOpaque()) continue;
+            if (!adjacentState.isAir()
+                && !adjacentState.isReplaceable()
+                && adjacentState.isOpaque()) continue;
 
             double dist = eyePos.squaredDistanceTo(hitVec);
             if (dist < bestDist) {
@@ -54,6 +56,18 @@ public class HWUtils {
         }
 
         return best;
+    }
+
+    public static Direction getMiningSideFallback(BlockPos pos) {
+        if (mc.player == null) return Direction.UP;
+
+        Vec3d eye = mc.player.getEyePos();
+        Vec3d center = Vec3d.ofCenter(pos);
+        double dx = eye.x - center.x;
+        double dy = eye.y - center.y;
+        double dz = eye.z - center.z;
+
+        return Direction.getFacing(dx, dy, dz);
     }
 
     public static List<PlaceInfo> getNeighbourSequence(BlockPos pos, int depth, double reach, boolean visibleOnly) {

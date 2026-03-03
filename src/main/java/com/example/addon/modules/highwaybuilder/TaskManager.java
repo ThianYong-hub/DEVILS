@@ -7,6 +7,7 @@ import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
@@ -42,6 +43,14 @@ public class TaskManager {
         for (Map.Entry<BlockPos, BlueprintTask> entry : blueprint.entrySet()) {
             generateTask(entry.getKey(), entry.getValue());
         }
+
+        // Drop stale tasks that are no longer part of the active blueprint window.
+        BlockTask containerTask = module.containerHandler.containerTask;
+        tasks.entrySet().removeIf(entry ->
+            !blueprint.containsKey(entry.getKey())
+                && !(entry.getKey().equals(containerTask.blockPos)
+                && containerTask.taskState != TaskState.DONE)
+        );
 
         // Remove old done tasks that are far away
         double maxReach = module.maxReach.get();
@@ -142,9 +151,20 @@ public class TaskManager {
 
         BlockTask blockTask = new BlockTask(blockPos, TaskState.BREAK, blueprintTask.targetBlock);
         updateTaskData(blockTask);
-        if (blockTask.getEyeDistance() < maxReach) {
+        if (getBreakReachDistance(blockPos) <= maxReach + 0.35) {
             addTask(blockTask, blueprintTask);
         }
+    }
+
+    private double getBreakReachDistance(BlockPos pos) {
+        if (mc.player == null) return Double.MAX_VALUE;
+        Vec3d eyePos = mc.player.getEyePos();
+        double best = eyePos.distanceTo(Vec3d.ofCenter(pos));
+        for (Direction side : Direction.values()) {
+            double dist = eyePos.distanceTo(HWUtils.getHitVec(pos, side));
+            if (dist < best) best = dist;
+        }
+        return best;
     }
 
     public void addTask(BlockTask blockTask, BlueprintTask blueprintTask) {
@@ -177,11 +197,20 @@ public class TaskManager {
 
         blockTask.isLiquidSource = HWUtils.isLiquidSource(blockTask.blockPos);
 
-        if (blockTask.taskState == TaskState.PLACE || blockTask.taskState == TaskState.LIQUID) {
+        blockTask.setStartDistance(Vec3d.ofCenter(module.pathfinder.startingBlockPos)
+            .distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
+        blockTask.setEyeDistance(mc.player.getEyePos().distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
+
+        if (isSequenceDrivenState(blockTask.taskState)) {
             long now = System.currentTimeMillis();
-            boolean shouldRecalculateSequence = blockTask.sequence.isEmpty()
+            long recalcInterval = blockTask.taskState == TaskState.IMPOSSIBLE_PLACE
+                ? 40L
+                : (blockTask.sequence.isEmpty() ? 75L : 200L);
+            boolean isNearPlayer = blockTask.getEyeDistance() <= module.maxReach.get() + 1.5;
+
+            boolean shouldRecalculateSequence = isNearPlayer && (blockTask.sequence.isEmpty()
                 || blockTask.getStuckTicks() > 0
-                || (now - blockTask.lastSequenceUpdate) >= 125L;
+                || (now - blockTask.lastSequenceUpdate) >= recalcInterval);
 
             if (shouldRecalculateSequence) {
                 blockTask.sequence = HWUtils.getNeighbourSequence(
@@ -192,11 +221,13 @@ public class TaskManager {
                 );
                 blockTask.lastSequenceUpdate = now;
             }
-        }
 
-        blockTask.setStartDistance(Vec3d.ofCenter(module.pathfinder.startingBlockPos)
-            .distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
-        blockTask.setEyeDistance(mc.player.getEyePos().distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
+            if (blockTask.taskState == TaskState.IMPOSSIBLE_PLACE && !blockTask.sequence.isEmpty()) {
+                blockTask.updateState(TaskState.PLACE);
+            } else if (blockTask.taskState == TaskState.PLACE && blockTask.sequence.isEmpty()) {
+                blockTask.updateState(TaskState.IMPOSSIBLE_PLACE);
+            }
+        }
     }
 
     public void runTasks() {
@@ -239,7 +270,7 @@ public class TaskManager {
         int maxActions = module.blocksPerTick.get();
 
         for (BlockTask task : sorted) {
-            if (!checkStuckTimeout(task)) return;
+            if (!checkStuckTimeout(task)) continue;
             if (task.taskState != TaskState.DONE && module.inventoryHandler.waitTicks > 0) return;
 
             module.taskExecutor.doTask(task, false);
@@ -275,6 +306,10 @@ public class TaskManager {
                     module.blockPlacer.extraPlaceDelay += 1;
                 }
             }
+            case IMPOSSIBLE_PLACE -> {
+                blockTask.sequence.clear();
+                blockTask.updateState(TaskState.PLACE);
+            }
             case PICKUP -> {
                 blockTask.updateState(TaskState.DONE);
                 module.pathfinder.moveState = MovementState.RUNNING;
@@ -282,6 +317,13 @@ public class TaskManager {
             default -> blockTask.updateState(TaskState.DONE);
         }
         return false;
+    }
+
+    private boolean isSequenceDrivenState(TaskState state) {
+        return switch (state) {
+            case PLACE, LIQUID, IMPOSSIBLE_PLACE -> true;
+            default -> false;
+        };
     }
 
     private boolean startPadding(BlockPos c) {

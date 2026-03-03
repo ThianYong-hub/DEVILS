@@ -1,6 +1,5 @@
 package com.example.addon.modules.highwaybuilder;
 
-import meteordevelopment.meteorclient.utils.player.InvUtils;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -22,7 +21,10 @@ public class BlockBreaker {
     }
 
     public void mineBlock(BlockTask blockTask) {
-        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) return;
+        if (mc.player == null || mc.world == null || mc.getNetworkHandler() == null) {
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
 
         BlockState blockState = mc.world.getBlockState(blockTask.blockPos);
 
@@ -36,15 +38,21 @@ public class BlockBreaker {
 
         Direction side = HWUtils.getMiningSide(blockTask.blockPos);
         if (side == null) {
-            blockTask.onStuck();
-            return;
+            side = HWUtils.getMiningSideFallback(blockTask.blockPos);
         }
 
         if (blockTask.blockPos.equals(primedPos) && module.instantMine.get()) {
             side = side.getOpposite();
         }
 
-        module.inventoryHandler.lastHitVec = HWUtils.getHitVec(blockTask.blockPos, side);
+        Vec3d hitVec = HWUtils.getHitVec(blockTask.blockPos, side);
+        if (mc.player.getEyePos().distanceTo(hitVec) > module.maxReach.get() + 0.35) {
+            blockTask.onStuck();
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
+
+        module.inventoryHandler.lastHitVec = hitVec;
 
         if (blockTask.ticksMined > ticksNeeded * 1.1 && blockTask.taskState == TaskState.BREAKING) {
             blockTask.updateState(TaskState.BREAK);
@@ -107,6 +115,12 @@ public class BlockBreaker {
     }
 
     private void mineBlockNormal(BlockTask blockTask, Direction side, int ticks) {
+        if (mc.player != null && mc.interactionManager != null
+            && isWithinBreakReach(blockTask.blockPos, side)) {
+            mineBlockVanilla(blockTask, side);
+            return;
+        }
+
         if (blockTask.taskState == TaskState.BREAK) {
             blockTask.updateState(TaskState.BREAKING);
             sendMiningPackets(blockTask.blockPos, side, true, false, false);
@@ -119,11 +133,29 @@ public class BlockBreaker {
         }
     }
 
+    private void mineBlockVanilla(BlockTask blockTask, Direction side) {
+        if (mc.player == null || mc.interactionManager == null) return;
+
+        if (blockTask.taskState == TaskState.BREAK) {
+            blockTask.updateState(TaskState.BREAKING);
+            mc.interactionManager.attackBlock(blockTask.blockPos, side);
+        } else {
+            mc.interactionManager.updateBlockBreakingProgress(blockTask.blockPos, side);
+        }
+
+        mc.player.swingHand(Hand.MAIN_HAND);
+        restoreSilentSwapSlot();
+    }
+
+    private boolean isWithinBreakReach(BlockPos pos, Direction side) {
+        if (mc.player == null) return false;
+        return mc.player.getEyePos().distanceTo(HWUtils.getHitVec(pos, side)) <= module.maxReach.get() + 0.35;
+    }
+
     private void handleFire(BlockTask blockTask) {
         Direction side = HWUtils.getMiningSide(blockTask.blockPos);
         if (side == null) {
-            blockTask.updateState(TaskState.PLACE);
-            return;
+            side = HWUtils.getMiningSideFallback(blockTask.blockPos);
         }
 
         module.inventoryHandler.lastHitVec = HWUtils.getHitVec(blockTask.blockPos, side);
@@ -150,11 +182,10 @@ public class BlockBreaker {
                 PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side));
         }
         mc.player.swingHand(Hand.MAIN_HAND);
+        restoreSilentSwapSlot();
+    }
 
-        // Silent swap: restore previous slot after mining packet
-        if (module.inventoryHandler.swapBackSlot >= 0) {
-            InvUtils.swap(module.inventoryHandler.swapBackSlot, false);
-            module.inventoryHandler.swapBackSlot = -1;
-        }
+    private void restoreSilentSwapSlot() {
+        module.inventoryHandler.restoreSilentSwap();
     }
 }
