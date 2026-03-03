@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.mixininterface.IPlayerInteractEntityC2SPacket;
 import meteordevelopment.meteorclient.mixininterface.IPlayerMoveC2SPacket;
@@ -58,6 +59,10 @@ public class MaceSpoof extends Module {
 
     @EventHandler
     private void onSendPacket(PacketEvent.Send event) {
+        CrashGuard.run(this, "onSendPacket", () -> onSendPacketSafe(event));
+    }
+
+    private void onSendPacketSafe(PacketEvent.Send event) {
         if (mc.player == null || mc.world == null) return;
         if (mc.player.getMainHandStack().getItem() != Items.MACE) return;
         if (!(event.packet instanceof IPlayerInteractEntityC2SPacket packet)) return;

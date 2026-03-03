@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
@@ -20,6 +21,10 @@ public class HClip extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
+        CrashGuard.run(this, "onPacketReceive", () -> onPacketReceiveSafe(event));
+    }
+
+    private void onPacketReceiveSafe(PacketEvent.Receive event) {
         if (mc.player == null || mc.world == null) return;
         if (!(event.packet instanceof BlockBreakingProgressS2CPacket packet)) return;
 
