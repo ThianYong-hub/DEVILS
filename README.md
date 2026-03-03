@@ -5,17 +5,24 @@
 <h1 align="center">Devils Addon</h1>
 
 <p align="center">
-  A feature-rich addon for <a href="https://github.com/MeteorDevelopment/meteor-client">Meteor Client</a> focused on combat, automation, and utility modules for Minecraft 1.21.6–1.21.8.
+  Addon for <a href="https://github.com/MeteorDevelopment/meteor-client">Meteor Client</a> with PvP, movement, automation and highway-building modules.
 </p>
 
----
+## Current State
+
+- Minecraft: `1.21.8`
+- Fabric Loader: `0.16.14`
+- Java: `21`
+- Addon category in Meteor: `Devils`
+- Main repository: <https://github.com/ThianYong-hub/DEVILS>
+- Releases: <https://github.com/ThianYong-hub/DEVILS/releases>
 
 ## Installation
 
-1. Install [Meteor Client](https://meteorclient.com/) for your Minecraft version.
-2. Download the latest JAR from [Releases](https://github.com/ThianYong-hub/DEVILS/releases).
-3. Place the JAR in your `mods` folder.
-4. Launch the game — modules appear under the **Devils** category.
+1. Install Meteor Client for Minecraft `1.21.8`.
+2. Download the latest `devils-addon-*.jar` from Releases.
+3. Put the file into your `.minecraft/mods` folder.
+4. Start the game and open Meteor modules category `Devils`.
 
 ## Modules
 
@@ -23,42 +30,44 @@
 
 | Module | Description |
 |--------|-------------|
-| **AutoCev** | Automatically places obsidian, end crystals and breaks the base to damage nearby players. |
-| **AutoPearl** | Locks onto a target and chases with ender pearls. Supports multi-bot orbit formations and remote chat commands (`!pearl <nick>`, `!pearl on/off`). |
-| **TnTBomber** | Traps target in an obsidian box and bombs them with TNT. |
-| **LavaBucket** | Automatically places and collects lava buckets on nearby players. |
+| `auto-cev` | Automatically places obsidian/end crystals and breaks the base to damage nearby players. |
+| `auto-pearl` | Locks onto a target and chases with ender pearls, supports remote chat command `!pearl <nick>`. |
+| `tnt-bomber` | Traps a target in obsidian and bombs with TNT. |
+| `lava-bucket` | Automatically places and collects lava buckets on nearby players. |
+| `mace-spoof` | Spoofs fall distance to amplify mace damage. |
 
 ### Movement
 
 | Module | Description |
 |--------|-------------|
-| **AutoWasp** | Follows a target with elytra using obstacle-aware routing, movement prediction, and friend filtering. |
-| **AntiWasp** | Evasive elytra flight along geometric figures (circle, square, triangle) to dodge pursuers. Includes obstacle avoidance with raycasting and firework boost support. |
-| **HClip** | Shifts into block corners when surround is mined to block crystal placement. |
-| **VClip** | Instantly clips you vertically by a configured distance. |
+| `auto-wasp` | Follows a target with elytra using obstacle-aware routing. |
+| `anti-wasp` | Elytra evasion patterns (circle/square/triangle) to evade wasp attacks. |
+| `h-clip` | Shifts into block corners when surround is mined. |
+| `v-clip` | Instantly clips vertically by configured distance. |
 
 ### World
 
 | Module | Description |
 |--------|-------------|
-| **HighwayBuilder** | Automatically builds highways, tunnels, and flat paths in the Nether. Features EChest mining for obsidian farming, Baritone integration, multi-block placement, blueprint system, and auto-liquid handling. |
+| `highway-builder-plus` | Builds highways, tunnels and flat paths in the Nether with blueprint/task system, restock from shulkers, EChest miner and Baritone-assisted movement. |
 
-### Player
+### Utility / Player
 
 | Module | Description |
 |--------|-------------|
-| **AutoAnvilRename** | Automatically renames items in an open anvil GUI. Supports item/shulker box filters and auto XP bottle usage. |
-| **TrackerPlayer** | Universal per-player tracker with join/leave/death rules, custom sound playback (local `.ogg` files, game sounds, or manual IDs), and optional chat command execution. |
-| **DiscordRPC** | Shows Devils Addon branding in Discord status. |
+| `auto-anvil-rename` | Automatically renames items in an open anvil and manages input/output flow. |
+| `tracker-player` | Per-player join/leave/death tracker with configurable sound alerts and optional delayed chat send. |
+| `discord-rpc` | Shows Devils Addon presence in Discord. |
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `.autoraname setname <text>` | Sets the rename text for AutoAnvilRename |
-| `.autoraname clearitems` | Clears the item filter list |
+| `.autoraname setname <text>` | Set rename text used by `auto-anvil-rename`. |
+| `.autoraname clearitems` | Clear item filter list for `auto-anvil-rename`. |
+| `.example` | Test command from addon template. |
 
-## Building from Source
+## Build from Source
 
 ```bash
 git clone https://github.com/ThianYong-hub/DEVILS.git
@@ -66,13 +75,16 @@ cd DEVILS
 ./gradlew build
 ```
 
-The built JAR will be in `build/libs/`.
+Windows:
 
-## Authors
+```bat
+gradlew.bat build
+```
 
-- **23XT**
-- **SOCKETLOST**
+Output artifact:
+
+- `build/libs/devils-addon-<version>.jar`
 
 ## License
 
-This project is available under the [CC0](LICENSE) license.
+Project license: [CC0](LICENSE).

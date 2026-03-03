@@ -1,6 +1,6 @@
 package com.example.addon.modules.highwaybuilder;
 
-import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
@@ -38,29 +38,43 @@ public class BlockPlacer {
     }
 
     public void placeBlock(BlockTask blockTask) {
-        if (mc.player == null || mc.getNetworkHandler() == null) return;
+        if (mc.player == null || mc.getNetworkHandler() == null) {
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
 
         if (blockTask.sequence.isEmpty()) {
-            blockTask.onStuck(21);
-            blockTask.updateState(TaskState.DONE);
+            // No valid anchor right now. Keep task alive and retry after sequence refresh.
+            blockTask.onStuck();
+            blockTask.updateState(TaskState.IMPOSSIBLE_PLACE);
+            module.inventoryHandler.restoreSilentSwap();
             return;
         }
 
         PlaceInfo last = blockTask.sequence.get(blockTask.sequence.size() - 1);
-        module.inventoryHandler.lastHitVec = HWUtils.getHitVec(last.pos(), last.side());
         placeBlockNormal(blockTask, last.pos(), last.side());
     }
 
     private void placeBlockNormal(BlockTask blockTask, BlockPos placePos, Direction side) {
-        if (mc.world == null || mc.getNetworkHandler() == null || mc.player == null) return;
+        if (mc.world == null || mc.getNetworkHandler() == null || mc.player == null) {
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
+
+        BlockPos targetPos = placePos.offset(side);
+        if (!targetPos.equals(blockTask.blockPos)) {
+            blockTask.onStuck();
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
+
+        if (!HWUtils.isPlaceable(blockTask.blockPos)) {
+            blockTask.onStuck();
+            module.inventoryHandler.restoreSilentSwap();
+            return;
+        }
 
         BlockState currentBlock = mc.world.getBlockState(placePos);
-
-        int delay = module.dynamicDelay.get()
-            ? module.placeDelay.get() + extraPlaceDelay
-            : module.placeDelay.get();
-        module.inventoryHandler.waitTicks = delay;
-        blockTask.updateState(TaskState.PENDING_PLACE);
 
         boolean needSneak = BLACKLIST_BLOCKS.contains(currentBlock.getBlock());
 
@@ -71,18 +85,40 @@ public class BlockPlacer {
 
         // Raw packet — bypasses client-side reach/placement checks (needed for wide highways)
         Vec3d hitVec = HWUtils.getHitVec(placePos, side);
-        BlockHitResult hitResult = new BlockHitResult(hitVec, side, placePos, false);
-        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
-        mc.player.swingHand(Hand.MAIN_HAND);
-
-        if (needSneak && !wasSneaking) {
-            mc.player.setSneaking(false);
+        if (mc.player.getEyePos().distanceTo(hitVec) > module.maxReach.get() + 0.2) {
+            blockTask.onStuck();
+            if (needSneak && !wasSneaking) mc.player.setSneaking(false);
+            module.inventoryHandler.restoreSilentSwap();
+            return;
         }
 
-        // Silent swap: restore previous slot after placing
-        if (module.inventoryHandler.swapBackSlot >= 0) {
-            InvUtils.swap(module.inventoryHandler.swapBackSlot, false);
-            module.inventoryHandler.swapBackSlot = -1;
+        int delay = module.dynamicDelay.get()
+            ? module.placeDelay.get() + extraPlaceDelay
+            : module.placeDelay.get();
+        module.inventoryHandler.waitTicks = delay;
+        blockTask.updateState(TaskState.PENDING_PLACE);
+
+        // Capture sneak state for use in callback
+        boolean finalNeedSneak = needSneak;
+        boolean finalWasSneaking = wasSneaking;
+
+        Runnable doPlace = () -> {
+            BlockHitResult hitResult = new BlockHitResult(hitVec, side, placePos, false);
+            mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
+            mc.player.swingHand(Hand.MAIN_HAND);
+
+            if (finalNeedSneak && !finalWasSneaking) {
+                mc.player.setSneaking(false);
+            }
+
+            // Silent swap: restore previous slot after placing
+            module.inventoryHandler.restoreSilentSwap();
+        };
+
+        if (module.rotate.get()) {
+            Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), 50, doPlace);
+        } else {
+            doPlace.run();
         }
     }
 }

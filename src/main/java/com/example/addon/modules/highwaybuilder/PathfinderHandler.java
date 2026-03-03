@@ -10,6 +10,8 @@ import java.util.function.Predicate;
 
 public class PathfinderHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final double RESTOCK_NEAR_RANGE = 3.0;
+    private static final double RESTOCK_CENTER_TOLERANCE = 0.08;
 
     private final HighwayBuilder module;
 
@@ -34,7 +36,6 @@ public class PathfinderHandler {
     private Object followProcess;
     private Method pickupMethod;
     private Method followCancelMethod;
-    private Method followIsActiveMethod;
     private boolean pickupActive = false;
 
     public PathfinderHandler(HighwayBuilder module) {
@@ -73,7 +74,6 @@ public class PathfinderHandler {
 
                 pickupMethod = followProcess.getClass().getMethod("pickup", Predicate.class);
                 followCancelMethod = followProcess.getClass().getMethod("cancel");
-                followIsActiveMethod = followProcess.getClass().getMethod("isActive");
             } catch (Exception e) {
                 // Pickup not available — EChestMiner will fall back to manual collection
                 followProcess = null;
@@ -160,12 +160,35 @@ public class PathfinderHandler {
                 goal = module.containerHandler.getCollectingPosition();
             }
             case RESTOCK -> {
-                Vec3d target = Vec3d.ofCenter(currentBlockPos);
-                if (mc.player.getPos().distanceTo(target) < 2) {
+                Vec3d standTarget = module.containerHandler != null
+                    ? module.containerHandler.getRestockStandPos()
+                    : Vec3d.ofCenter(currentBlockPos);
+                boolean canInteract = module.containerHandler != null
+                    && module.containerHandler.canInteractWithContainerFromCurrentPos();
+
+                if (horizontalDistanceSq(mc.player.getPos(), standTarget)
+                    <= RESTOCK_NEAR_RANGE * RESTOCK_NEAR_RANGE) {
                     goal = null;
-                    moveTo(target);
+                    if (isCenteredOn(standTarget)) {
+                        if (canInteract) {
+                            stopHorizontalMovement();
+                        } else {
+                            // Center target is not actually usable, force a new candidate.
+                            if (module.containerHandler != null) {
+                                module.containerHandler.invalidateRestockStandTarget();
+                                standTarget = module.containerHandler.getRestockStandPos();
+                            }
+                            moveTo(standTarget);
+                        }
+                    } else {
+                        moveTo(standTarget);
+                    }
                 } else {
-                    goal = currentBlockPos;
+                    goal = new BlockPos(
+                        (int) Math.floor(standTarget.x),
+                        (int) Math.floor(standTarget.y),
+                        (int) Math.floor(standTarget.z)
+                    );
                 }
             }
         }
@@ -187,6 +210,7 @@ public class PathfinderHandler {
             || !isTaskDone(possiblePos.down())) return;
 
         if (!checkForResidue(possiblePos.up())) return;
+        if (hasPendingTasksBefore(possiblePos)) return;
 
         BlockState downState = mc.world.getBlockState(possiblePos.down());
         if (downState.isAir() || downState.isReplaceable()) return;
@@ -253,15 +277,38 @@ public class PathfinderHandler {
         if (module.containerHandler.containerTask.taskState != TaskState.DONE) return false;
 
         for (BlockTask task : module.taskManager.getTasks().values()) {
-            // Only block on tasks that still need active work, not on pending confirmations
-            if ((task.taskState == TaskState.BREAK
-                || task.taskState == TaskState.PLACE
-                || task.taskState == TaskState.LIQUID)
+            // Block on any unfinished build-critical tasks behind the move plane.
+            if (isMovementBlockingState(task.taskState)
                 && module.taskManager.isBehindPos(pos, task.blockPos)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private boolean hasPendingTasksBefore(BlockPos nextPos) {
+        double nextProgress = getForwardProgressFromStart(nextPos) + 0.5;
+
+        for (BlockTask task : module.taskManager.getTasks().values()) {
+            if (!isMovementBlockingState(task.taskState)) continue;
+            if (getForwardProgressFromStart(task.blockPos) <= nextProgress) return true;
+        }
+
+        return false;
+    }
+
+    private double getForwardProgressFromStart(BlockPos pos) {
+        int dx = pos.getX() - startingBlockPos.getX();
+        int dz = pos.getZ() - startingBlockPos.getZ();
+        return dx * startingDirection.directionVec.getX()
+            + dz * startingDirection.directionVec.getZ();
+    }
+
+    private boolean isMovementBlockingState(TaskState state) {
+        return switch (state) {
+            case BREAK, BREAKING, PLACE, LIQUID, PENDING_BREAK, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
+            default -> false;
+        };
     }
 
     public boolean shouldBridge() {
@@ -299,6 +346,31 @@ public class PathfinderHandler {
             mc.player.getVelocity().y,
             Math.max(-speed, Math.min(speed, target.z - mc.player.getZ()))
         );
+    }
+
+    public boolean isCenteredForRestock() {
+        if (mc.player == null) return false;
+        Vec3d standTarget = module.containerHandler != null
+            ? module.containerHandler.getRestockStandPos()
+            : Vec3d.ofCenter(currentBlockPos);
+        return isCenteredOn(standTarget);
+    }
+
+    private boolean isCenteredOn(Vec3d target) {
+        if (mc.player == null) return false;
+        return horizontalDistanceSq(target, mc.player.getPos())
+            <= RESTOCK_CENTER_TOLERANCE * RESTOCK_CENTER_TOLERANCE;
+    }
+
+    private void stopHorizontalMovement() {
+        if (mc.player == null) return;
+        mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
+    }
+
+    private double horizontalDistanceSq(Vec3d a, Vec3d b) {
+        double dx = a.x - b.x;
+        double dz = a.z - b.z;
+        return dx * dx + dz * dz;
     }
 
     private void updateBaritoneGoal() {

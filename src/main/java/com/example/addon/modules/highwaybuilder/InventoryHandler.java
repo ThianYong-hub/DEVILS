@@ -2,7 +2,6 @@ package com.example.addon.modules.highwaybuilder;
 
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -27,15 +26,6 @@ public class InventoryHandler {
 
     public InventoryHandler(HighwayBuilder module) {
         this.module = module;
-    }
-
-    public void updateRotation() {
-        if (!module.rotate.get()) return;
-        if (lastHitVec.equals(Vec3d.ZERO)) return;
-        Rotations.rotate(
-            Rotations.getYaw(lastHitVec),
-            Rotations.getPitch(lastHitVec)
-        );
     }
 
     public void cleanupPacketLimiter() {
@@ -87,10 +77,7 @@ public class InventoryHandler {
 
         blockTask.toolToUse = mc.player.getInventory().getStack(bestSlot);
 
-        boolean silent = module.swapMode.get() == EChestSwapMode.Silent;
-        if (silent) {
-            swapBackSlot = mc.player.getInventory().getSelectedSlot();
-        }
+        captureSwapBackSlotIfSilent();
 
         if (bestSlot < 9) {
             InvUtils.swap(bestSlot, false);
@@ -115,10 +102,7 @@ public class InventoryHandler {
         Block useMat = findMaterial(blockTask);
         if (useMat == Blocks.AIR) return false;
 
-        boolean silent = module.swapMode.get() == EChestSwapMode.Silent;
-        if (silent) {
-            swapBackSlot = mc.player.getInventory().getSelectedSlot();
-        }
+        captureSwapBackSlotIfSilent();
 
         FindItemResult result = InvUtils.findInHotbar(itemStack ->
             itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == useMat);
@@ -141,11 +125,41 @@ public class InventoryHandler {
         return false;
     }
 
+    private void captureSwapBackSlotIfSilent() {
+        if (mc.player == null) return;
+        if (module.swapMode.get() != EChestSwapMode.Silent) return;
+
+        // Keep the very first source slot until we explicitly restore.
+        if (swapBackSlot == -1) {
+            swapBackSlot = mc.player.getInventory().getSelectedSlot();
+        }
+    }
+
+    public void restoreSilentSwap() {
+        if (mc.player == null) {
+            swapBackSlot = -1;
+            return;
+        }
+
+        if (swapBackSlot >= 0) {
+            InvUtils.swap(swapBackSlot, false);
+            swapBackSlot = -1;
+        }
+    }
+
     private Block findMaterial(BlockTask blockTask) {
         if (mc.player == null) return Blocks.AIR;
 
         Block material = module.getMaterial();
         Block target = blockTask.targetBlock;
+        Block filler = module.getFillerMat();
+
+        // For liquid in AIR-designated cells, use filler only as a temporary plug.
+        if (blockTask.taskState == TaskState.LIQUID && target == Blocks.AIR) {
+            if (countBlock(filler) > 0) return filler;
+            if (module.storageManagement.get()) module.containerHandler.handleRestock(filler.asItem());
+            return Blocks.AIR;
+        }
 
         if (target == material) {
             if (countBlock(material) > module.saveMaterial.get()) {
@@ -156,6 +170,16 @@ public class InventoryHandler {
                 if (material == Blocks.OBSIDIAN && hasEnderChests()) {
                     return Blocks.AIR;
                 }
+
+                // If obsidian is low and ECs are stored in shulkers, restock ECs first.
+                if (material == Blocks.OBSIDIAN
+                    && module.storageManagement.get()
+                    && module.containerHandler.containerTask.taskState == TaskState.DONE
+                    && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
+                    module.containerHandler.handleRestock(Items.ENDER_CHEST);
+                    return Blocks.AIR;
+                }
+
                 if (module.storageManagement.get()) {
                     module.containerHandler.handleRestock(material.asItem());
                 }
@@ -177,6 +201,15 @@ public class InventoryHandler {
         if (material == Blocks.OBSIDIAN && hasEnderChests()) {
             return Blocks.AIR;
         }
+
+        if (material == Blocks.OBSIDIAN
+            && module.storageManagement.get()
+            && module.containerHandler.containerTask.taskState == TaskState.DONE
+            && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
+            module.containerHandler.handleRestock(Items.ENDER_CHEST);
+            return Blocks.AIR;
+        }
+
         if (module.storageManagement.get()) {
             module.containerHandler.handleRestock(target.asItem());
         }

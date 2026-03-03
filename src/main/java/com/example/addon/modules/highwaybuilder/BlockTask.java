@@ -36,6 +36,7 @@ public class BlockTask {
     public int itemID = 0;
     public boolean destroy = false;
     public boolean collect = true;
+    public long lastSequenceUpdate = 0L;
 
     // Timing/state
     public long timestamp = System.currentTimeMillis();

@@ -50,6 +50,13 @@ public class LiquidHandler {
             if (existing != null) {
                 updateLiquidTask(existing);
             } else {
+                // Do not create permanent filler tasks in blueprint area.
+                // Blueprint regeneration will create a proper task for this cell.
+                if (module.blueprintGenerator != null
+                    && module.blueprintGenerator.isInsideBlueprint(neighbourPos)) {
+                    continue;
+                }
+
                 BlockTask newTask = new BlockTask(neighbourPos, TaskState.LIQUID, module.getFillerMat());
                 BlueprintTask blueprintTask = new BlueprintTask(module.getFillerMat(), true, false);
                 module.taskManager.addTask(newTask, blueprintTask);
