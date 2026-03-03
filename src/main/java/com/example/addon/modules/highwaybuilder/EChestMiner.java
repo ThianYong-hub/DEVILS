@@ -27,6 +27,7 @@ import net.minecraft.util.math.Vec3d;
  */
 public class EChestMiner {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final int MIN_ECHEST_RESERVE = 16;
 
     private final HighwayBuilder module;
 
@@ -49,6 +50,8 @@ public class EChestMiner {
     private boolean hitSent = false;
     private boolean sneakingForPlace = false;
     private int pickSlot = -1; // cached pickaxe slot for the cycle
+    private BlockPos collectionCenter = null;
+    private static final double COLLECTION_RADIUS = 6.0;
 
     public EChestMiner(HighwayBuilder module) {
         this.module = module;
@@ -72,6 +75,19 @@ public class EChestMiner {
 
     public void tick() {
         if (mc.player == null || mc.world == null) return;
+
+        // Never run EChest mining while shulker restock cycle is active/open.
+        if (module.containerHandler != null) {
+            BlockTask containerTask = module.containerHandler.containerTask;
+            if (containerTask != null && containerTask.taskState != TaskState.DONE) {
+                if (state != State.IDLE) reset();
+                return;
+            }
+        }
+        if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) {
+            if (state != State.IDLE) reset();
+            return;
+        }
 
         if (tickDelay > 0) {
             tickDelay--;
@@ -102,14 +118,15 @@ public class EChestMiner {
         if (mc.player == null) return;
         if (module.getMaterial() != Blocks.OBSIDIAN) return;
 
+        if (module.containerHandler != null) {
+            BlockTask containerTask = module.containerHandler.containerTask;
+            if (containerTask != null && containerTask.taskState != TaskState.DONE) return;
+        }
+        if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) return;
+
         double distToBuild = mc.player.getPos().distanceTo(
             Vec3d.ofCenter(module.pathfinder.currentBlockPos));
         if (distToBuild > 1.5) return;
-
-        if (hasNearbyObsidian()) {
-            goToCollecting();
-            return;
-        }
 
         FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
         if (!echest.found()) {
@@ -128,8 +145,16 @@ public class EChestMiner {
         if (freeSpace < 8) return;
 
         int chestsNeeded = (int) Math.ceil(freeSpace / 8.0);
-        chestsRemaining = Math.min(chestsNeeded, echest.count());
-        if (chestsRemaining <= 0) return;
+        int availableToMine = echest.count() - MIN_ECHEST_RESERVE;
+        chestsRemaining = Math.min(chestsNeeded, Math.max(0, availableToMine));
+        if (chestsRemaining <= 0) {
+            if (module.storageManagement.get()
+                && module.containerHandler.containerTask.taskState == TaskState.DONE
+                && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
+                module.containerHandler.handleRestock(Items.ENDER_CHEST);
+            }
+            return;
+        }
 
         actionPos = findAdjacentPlacePos();
         if (actionPos == null) return;
@@ -371,6 +396,7 @@ public class EChestMiner {
         chestsRemaining--;
         if (!isInsta()) hitSent = false;
         stuckTicks = 0;
+        collectionCenter = actionPos;
 
         if (chestsRemaining <= 0) {
             goToCollecting();
@@ -397,18 +423,27 @@ public class EChestMiner {
     private void doCollecting() {
         if (mc.player == null || mc.world == null) { reset(); return; }
 
-        // No obsidian left on ground — done collecting
-        if (!hasNearbyObsidian()) {
-            module.pathfinder.stopPickup();
+        if (countFreeObsidianSpace() <= 0) {
+            module.pathfinder.clearMinerGoal();
             reset();
             return;
         }
 
-        // Baritone's FollowProcess handles all pathing automatically.
-        // Just wait and check for timeout.
+        ItemEntity closest = findClosestObsidian();
+
+        // No obsidian left on ground — done collecting
+        if (closest == null) {
+            module.pathfinder.clearMinerGoal();
+            reset();
+            return;
+        }
+
+        module.pathfinder.setMinerGoal(closest.getBlockPos());
+
+        // Wait while moving/collecting.
         stuckTicks++;
         if (stuckTicks > 200) {
-            module.pathfinder.stopPickup();
+            module.pathfinder.clearMinerGoal();
             reset();
         }
     }
@@ -421,9 +456,7 @@ public class EChestMiner {
         stuckTicks = 0;
         chestsRemaining = 0;
         hitSent = false;
-
-        // Start Baritone's FollowProcess to pick up obsidian on the ground
-        module.pathfinder.startPickup(stack -> stack.getItem() == Items.OBSIDIAN);
+        collectionCenter = actionPos != null ? actionPos : mc.player != null ? mc.player.getBlockPos() : null;
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────
@@ -460,14 +493,16 @@ public class EChestMiner {
 
     private ItemEntity findClosestObsidian() {
         if (mc.player == null || mc.world == null) return null;
-        Box searchBox = mc.player.getBoundingBox().expand(16.0);
+        Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
+        double radius = collectionCenter != null ? COLLECTION_RADIUS : 16.0;
+        Box searchBox = new Box(center, center).expand(radius);
         ItemEntity closest = null;
         double closestDist = Double.MAX_VALUE;
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
             if (!searchBox.contains(itemEntity.getPos())) continue;
-            double d = mc.player.squaredDistanceTo(itemEntity);
+            double d = itemEntity.getPos().squaredDistanceTo(center);
             if (d < closestDist) {
                 closestDist = d;
                 closest = itemEntity;
@@ -478,7 +513,9 @@ public class EChestMiner {
 
     private int countGroundObsidian() {
         if (mc.player == null || mc.world == null) return 0;
-        Box searchBox = mc.player.getBoundingBox().expand(16.0);
+        Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
+        double radius = collectionCenter != null ? COLLECTION_RADIUS : 16.0;
+        Box searchBox = new Box(center, center).expand(radius);
         int count = 0;
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
@@ -578,6 +615,7 @@ public class EChestMiner {
         hitSent = false;
         sneakingForPlace = false;
         pickSlot = -1;
+        collectionCenter = null;
         module.pathfinder.clearMinerGoal();
         if (module.pathfinder.isPickupActive()) {
             module.pathfinder.stopPickup();

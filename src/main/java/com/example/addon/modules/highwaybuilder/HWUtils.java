@@ -2,6 +2,7 @@ package com.example.addon.modules.highwaybuilder;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
@@ -105,9 +106,9 @@ public class HWUtils {
         BlockState state = mc.world.getBlockState(pos);
         if (!state.isAir() && !state.isReplaceable()) return false;
 
-        // Check entity collision
+        // Item drops should not block placement checks.
         Box box = new Box(pos);
-        return mc.world.getOtherEntities(null, box).isEmpty();
+        return mc.world.getOtherEntities(null, box, entity -> !(entity instanceof ItemEntity)).isEmpty();
     }
 
     public static boolean isLiquid(BlockPos pos) {

@@ -1,6 +1,7 @@
 package com.example.addon.modules.highwaybuilder;
 
 import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ShulkerBoxBlock;
@@ -10,16 +11,23 @@ import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public class ContainerHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final int MAX_EXACT_TRANSFER_PER_TICK = 8;
+    private static final double RESTOCK_SAFE_OFFSET = 0.24;
+    private static final int ENDER_CHEST_RESERVE = 16;
 
     private final HighwayBuilder module;
     public BlockTask containerTask;
@@ -28,6 +36,9 @@ public class ContainerHandler {
     private Item targetItem = null;
     private int transferDelay = 0;
     private int openAttempts = 0;
+    private int openDelay = 0;
+    private boolean waitingForScreenClose = false;
+    private BlockPos lastContainerPos = null;
 
     public ContainerHandler(HighwayBuilder module) {
         this.module = module;
@@ -46,6 +57,12 @@ public class ContainerHandler {
         if (containerTask.taskState != TaskState.DONE) return;
 
         if (mc.player == null) return;
+
+        // Reserve at least one slot for the shulker item after breaking it.
+        if (!hasSpaceForContainerDrop()) {
+            module.disableWithError("Need at least one free inventory slot for shulker pickup.");
+            return;
+        }
 
         // Find a shulker box in inventory containing the target item
         int shulkerSlot = findShulkerWithItem(item);
@@ -69,6 +86,7 @@ public class ContainerHandler {
             module.disableWithError("No valid position found for container placement.");
             return;
         }
+        lastContainerPos = containerPos;
 
         containerTask = new BlockTask(containerPos, TaskState.PLACE, shulkerBlock);
         containerTask.item = item;
@@ -78,6 +96,8 @@ public class ContainerHandler {
         targetItem = item;
         transferDelay = 0;
         openAttempts = 0;
+        openDelay = 0;
+        waitingForScreenClose = false;
 
         module.pathfinder.moveState = MovementState.RESTOCK;
     }
@@ -90,9 +110,23 @@ public class ContainerHandler {
 
         module.pathfinder.moveState = MovementState.RESTOCK;
 
+        // If screen already opened but packet flag was missed, continue to restock.
+        if (!containerTask.isOpen && mc.player.currentScreenHandler != null
+            && mc.player.currentScreenHandler.syncId != 0) {
+            containerTask.isOpen = true;
+            containerTask.isLoaded = true;
+        }
+
         // If already open, transition to RESTOCK to take items
         if (containerTask.isOpen) {
+            openAttempts = 0;
             containerTask.updateState(TaskState.RESTOCK);
+            return;
+        }
+
+        // Delay between open attempts — don't spam interact packets
+        if (openDelay > 0) {
+            openDelay--;
             return;
         }
 
@@ -114,14 +148,24 @@ public class ContainerHandler {
             }
         }
 
-        // Send interact packet to open the shulker
-        Vec3d hitVec = Vec3d.ofCenter(containerTask.blockPos);
-        BlockHitResult hitResult = new BlockHitResult(hitVec, Direction.UP, containerTask.blockPos, false);
-        mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
-        mc.player.swingHand(Hand.MAIN_HAND);
+        Direction side = HWUtils.getMiningSide(containerTask.blockPos);
+        if (side == null) side = Direction.UP;
+        Vec3d hitVec = HWUtils.getHitVec(containerTask.blockPos, side);
+        BlockHitResult hitResult = new BlockHitResult(hitVec, side, containerTask.blockPos, false);
 
+        if (module.rotate.get()) {
+            Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), 50, () -> {
+                mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
+                mc.player.swingHand(Hand.MAIN_HAND);
+            });
+        } else {
+            mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
+            mc.player.swingHand(Hand.MAIN_HAND);
+        }
+
+        openDelay = 10; // wait 10 ticks before retrying (server needs time to respond)
         openAttempts++;
-        if (openAttempts > 40) {
+        if (openAttempts > 10) {
             // Stuck trying to open — break and abort
             containerTask.destroy = true;
             containerTask.collect = true;
@@ -135,6 +179,18 @@ public class ContainerHandler {
      */
     public void doRestock() {
         if (mc.player == null || mc.interactionManager == null) return;
+
+        if (waitingForScreenClose) {
+            if (mc.player.currentScreenHandler == null || mc.player.currentScreenHandler.syncId == 0) {
+                waitingForScreenClose = false;
+                containerTask.isOpen = false;
+                containerTask.isLoaded = false;
+                containerTask.destroy = true;
+                containerTask.collect = true;
+                containerTask.updateState(TaskState.BREAK);
+            }
+            return;
+        }
 
         // Wait for container contents to load
         if (!containerTask.isLoaded) {
@@ -150,13 +206,20 @@ public class ContainerHandler {
 
         var handler = mc.player.currentScreenHandler;
         if (handler == null || handler.syncId == 0) {
-            // Screen closed unexpectedly — break and collect
+            // Screen closed unexpectedly — reopen if shulker is still present.
             containerTask.isOpen = false;
             containerTask.isLoaded = false;
-            containerTask.destroy = true;
-            containerTask.collect = true;
-            containerTask.updateState(TaskState.BREAK);
-            module.pathfinder.moveState = MovementState.RUNNING;
+            containerTask.updateState(TaskState.OPEN_CONTAINER);
+            return;
+        }
+
+        if (targetItem == Items.ENDER_CHEST) {
+            doEnderChestRestock(handler);
+            return;
+        }
+
+        if (targetItem != null && !canTakeAnotherStack(targetItem)) {
+            closeAndBreak();
             return;
         }
 
@@ -184,12 +247,29 @@ public class ContainerHandler {
      * Wait for the shulker item to be picked up after breaking.
      */
     public void doPickup() {
+        if (mc.world == null) return;
+
         if (getCollectingPosition() == null) {
             containerTask.updateState(TaskState.DONE);
             module.pathfinder.moveState = MovementState.RUNNING;
             grindCycles++;
             return;
         }
+
+        // Wait until the dropped shulker item is gone (picked up), then resume.
+        boolean hasShulkerDrop = mc.world.getEntitiesByClass(
+            ItemEntity.class,
+            new Box(containerTask.blockPos).expand(1.5),
+            itemEntity -> itemEntity.getStack().getItem() == containerTask.targetBlock.asItem()
+        ).stream().findAny().isPresent();
+
+        if (!hasShulkerDrop) {
+            containerTask.updateState(TaskState.DONE);
+            module.pathfinder.moveState = MovementState.RUNNING;
+            grindCycles++;
+            return;
+        }
+
         containerTask.onStuck();
     }
 
@@ -197,14 +277,191 @@ public class ContainerHandler {
      * Close the shulker screen and transition to BREAK state.
      */
     private void closeAndBreak() {
-        if (mc.player != null) {
+        if (mc.player != null
+            && mc.player.currentScreenHandler != null
+            && mc.player.currentScreenHandler.syncId != 0) {
             mc.player.closeHandledScreen();
+            waitingForScreenClose = true;
+            transferDelay = 2;
+            return;
         }
+
+        waitingForScreenClose = false;
         containerTask.isOpen = false;
         containerTask.isLoaded = false;
         containerTask.destroy = true;
         containerTask.collect = true;
         containerTask.updateState(TaskState.BREAK);
+    }
+
+    private boolean canTakeAnotherStack(Item item) {
+        if (mc.player == null) return false;
+
+        int emptySlots = 0;
+        boolean hasPartialTargetStack = false;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                emptySlots++;
+                continue;
+            }
+            if (stack.getItem() == item && stack.getCount() < stack.getMaxCount()) {
+                hasPartialTargetStack = true;
+            }
+        }
+
+        if (hasPartialTargetStack) return true;
+        // Keep one slot reserved for shulker pickup.
+        return emptySlots > 1;
+    }
+
+    private void doEnderChestRestock(ScreenHandler handler) {
+        if (mc.player == null || mc.interactionManager == null) return;
+
+        int desiredTotal = getDesiredEnderChestCount();
+        int currentCount = countInventoryItem(Items.ENDER_CHEST);
+        int needed = desiredTotal - currentCount;
+
+        if (desiredTotal <= 0 || needed <= 0) {
+            closeAndBreak();
+            return;
+        }
+
+        if (findPlayerSlotForSingleInsert(handler, Items.ENDER_CHEST) == -1) {
+            // No room for additional ender chests right now.
+            closeAndBreak();
+            return;
+        }
+
+        // Keep cursor clean. If something is already held, wait until next tick.
+        if (!handler.getCursorStack().isEmpty()) {
+            containerTask.onStuck();
+            return;
+        }
+
+        for (int i = 0; i < 27; i++) {
+            ItemStack slotStack = handler.getSlot(i).getStack();
+            if (slotStack.isEmpty() || slotStack.getItem() != Items.ENDER_CHEST) continue;
+
+            int toMove = Math.min(needed, slotStack.getCount());
+            if (toMove == slotStack.getCount()) {
+                mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
+                transferDelay = 2;
+                return;
+            }
+
+            int moved = moveExactItemsFromContainer(
+                handler,
+                i,
+                Items.ENDER_CHEST,
+                Math.min(toMove, MAX_EXACT_TRANSFER_PER_TICK)
+            );
+            if (moved > 0) {
+                transferDelay = 2;
+            } else {
+                containerTask.onStuck();
+            }
+            return;
+        }
+
+        // No more ender chests in this shulker.
+        closeAndBreak();
+    }
+
+    private int moveExactItemsFromContainer(ScreenHandler handler, int sourceSlot, Item item, int amount) {
+        if (mc.player == null || mc.interactionManager == null || amount <= 0) return 0;
+
+        ItemStack sourceStack = handler.getSlot(sourceSlot).getStack();
+        if (sourceStack.isEmpty() || sourceStack.getItem() != item) return 0;
+
+        // Pick up the full stack from the container slot.
+        mc.interactionManager.clickSlot(handler.syncId, sourceSlot, 0, SlotActionType.PICKUP, mc.player);
+
+        int moved = 0;
+        for (int i = 0; i < amount; i++) {
+            int playerSlot = findPlayerSlotForSingleInsert(handler, item);
+            if (playerSlot == -1) break;
+
+            // Right-click places exactly one item from cursor.
+            mc.interactionManager.clickSlot(handler.syncId, playerSlot, 1, SlotActionType.PICKUP, mc.player);
+            moved++;
+        }
+
+        // Put the remaining cursor stack back into the source slot.
+        if (!handler.getCursorStack().isEmpty()) {
+            mc.interactionManager.clickSlot(handler.syncId, sourceSlot, 0, SlotActionType.PICKUP, mc.player);
+        }
+
+        return moved;
+    }
+
+    private int findPlayerSlotForSingleInsert(ScreenHandler handler, Item item) {
+        int playerStart = Math.max(0, handler.slots.size() - 36);
+        int playerEnd = handler.slots.size();
+
+        // Prefer topping up existing stacks first.
+        for (int i = playerStart; i < playerEnd; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (stack.isEmpty()) continue;
+            if (stack.getItem() == item && stack.getCount() < stack.getMaxCount()) {
+                return i;
+            }
+        }
+
+        // Then use empty slots.
+        for (int i = playerStart; i < playerEnd; i++) {
+            if (handler.getSlot(i).getStack().isEmpty()) return i;
+        }
+
+        return -1;
+    }
+
+    private int getDesiredEnderChestCount() {
+        int capacity = countObsidianCapacityWithReserve();
+        // Keep reserve and add only EC count that can be fully converted into obsidian.
+        int forObsidian = capacity < 8 ? 0 : capacity / 8;
+        return ENDER_CHEST_RESERVE + forObsidian;
+    }
+
+    private int countObsidianCapacityWithReserve() {
+        if (mc.player == null) return 0;
+
+        int emptySlots = 0;
+        int partialObsidianSpace = 0;
+
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) {
+                emptySlots++;
+                continue;
+            }
+            if (stack.getItem() == Items.OBSIDIAN && stack.getCount() < stack.getMaxCount()) {
+                partialObsidianSpace += stack.getMaxCount() - stack.getCount();
+            }
+        }
+
+        // Reserve one empty slot for shulker pickup after breaking it.
+        if (emptySlots > 0) emptySlots--;
+
+        return partialObsidianSpace + emptySlots * 64;
+    }
+
+    private int countInventoryItem(Item item) {
+        if (mc.player == null) return 0;
+        int count = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.getItem() == item) count += stack.getCount();
+        }
+        return count;
+    }
+
+    private boolean hasSpaceForContainerDrop() {
+        if (mc.player == null) return false;
+        for (int i = 0; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return true;
+        }
+        return false;
     }
 
     // ── Shulker scanning ─────────────────────────────────────────────────
@@ -238,50 +495,126 @@ public class ContainerHandler {
     // ── Position helpers ─────────────────────────────────────────────────
 
     /**
-     * Find a valid position near the player to place a container.
-     * Outside the blueprint, on solid ground, within reach.
+     * Find a valid position adjacent to the player to place a container.
+     * Prioritises the position behind the player (relative to highway direction),
+     * then falls back to all four cardinal directions.
+     * Does NOT exclude blueprint positions — the shulker is temporary.
      */
     private BlockPos getRemotePos() {
         if (mc.player == null || mc.world == null) return null;
 
         BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos anchorPos = module.pathfinder != null ? module.pathfinder.currentBlockPos : playerPos;
         double maxReach = module.maxReach.get();
-        double minDist = module.minDistance.get();
-        BlockPos best = null;
-        int bestScore = -1;
 
-        for (int x = (int) -maxReach; x <= (int) maxReach; x++) {
-            for (int y = -1; y <= 1; y++) {
-                for (int z = (int) -maxReach; z <= (int) maxReach; z++) {
-                    BlockPos pos = playerPos.add(x, y, z);
+        // Reuse previous successful container position if still valid.
+        if (lastContainerPos != null && isValidContainerPos(lastContainerPos, maxReach)) {
+            return lastContainerPos;
+        }
 
-                    if (pos.equals(playerPos)) continue;
-                    if (!mc.world.getBlockState(pos).isAir()) continue;
+        // 1) Try behind anchor block (already-built highway — guaranteed solid floor)
+        HWDirection hwDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
+        if (hwDir != null) {
+            BlockPos behind = anchorPos.add(
+                -hwDir.directionVec.getX(), 0, -hwDir.directionVec.getZ());
+            if (isValidContainerPos(behind, maxReach)) return behind;
+        }
 
-                    // Must have ground below
-                    if (mc.world.getBlockState(pos.down()).isAir()) continue;
+        // 2) Try all four cardinal directions around anchor
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos pos = anchorPos.offset(dir);
+            if (isValidContainerPos(pos, maxReach)) return pos;
+        }
 
-                    double dist = mc.player.getPos().distanceTo(Vec3d.ofCenter(pos));
-                    if (dist < minDist || dist > maxReach) continue;
+        // 3) Try one block above in the same directions (in case floor is uneven)
+        if (hwDir != null) {
+            BlockPos behindUp = anchorPos.add(
+                -hwDir.directionVec.getX(), 1, -hwDir.directionVec.getZ());
+            if (isValidContainerPos(behindUp, maxReach)) return behindUp;
+        }
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos pos = anchorPos.offset(dir).up();
+            if (isValidContainerPos(pos, maxReach)) return pos;
+        }
 
-                    // Not inside blueprint
-                    if (module.blueprintGenerator != null && module.blueprintGenerator.isInsideBlueprint(pos)) continue;
-
-                    // Score by surrounding support
-                    int score = 0;
-                    for (Direction dir : Direction.values()) {
-                        if (!mc.world.getBlockState(pos.offset(dir)).isAir()) score++;
-                    }
-
-                    if (score > bestScore) {
-                        bestScore = score;
-                        best = pos;
-                    }
-                }
+        // 4) Fallback around actual player block (edge cases on uneven terrain)
+        if (!anchorPos.equals(playerPos)) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                BlockPos pos = playerPos.offset(dir);
+                if (isValidContainerPos(pos, maxReach)) return pos;
             }
         }
 
-        return best;
+        return null;
+    }
+
+    private boolean isValidContainerPos(BlockPos pos, double maxReach) {
+        if (mc.world == null || mc.player == null) return false;
+        // Position must be air or replaceable
+        if (!mc.world.getBlockState(pos).isAir()
+            && !mc.world.getBlockState(pos).isReplaceable()) return false;
+        // Must have solid ground below (not air, not replaceable, not fluid)
+        BlockPos below = pos.down();
+        if (mc.world.getBlockState(below).isAir()
+            || mc.world.getBlockState(below).isReplaceable()
+            || !mc.world.getFluidState(below).isEmpty()) return false;
+        // Must be within reach
+        double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
+        return dist <= maxReach;
+    }
+
+    public Vec3d getRestockStandPos() {
+        if (mc.player == null) return Vec3d.ZERO;
+
+        BlockPos anchor = module.pathfinder != null ? module.pathfinder.currentBlockPos : mc.player.getBlockPos();
+        Vec3d anchorCenter = Vec3d.ofCenter(anchor);
+
+        if (containerTask.taskState == TaskState.DONE) return anchorCenter;
+
+        Vec3d containerCenter = Vec3d.ofCenter(containerTask.blockPos);
+        double dx = anchorCenter.x - containerCenter.x;
+        double dz = anchorCenter.z - containerCenter.z;
+
+        // Fallback: if vector degenerates, step back along highway direction.
+        if (dx * dx + dz * dz < 1.0e-6) {
+            HWDirection dir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
+            if (dir != null) {
+                dx = -dir.directionVec.getX();
+                dz = -dir.directionVec.getZ();
+            } else {
+                dz = 1.0;
+            }
+        }
+
+        double len = Math.sqrt(dx * dx + dz * dz);
+        double nx = dx / len;
+        double nz = dz / len;
+
+        double tx = anchorCenter.x + nx * RESTOCK_SAFE_OFFSET;
+        double tz = anchorCenter.z + nz * RESTOCK_SAFE_OFFSET;
+
+        // Keep stand target safely inside anchor block footprint.
+        double minX = anchor.getX() + 0.18;
+        double maxX = anchor.getX() + 0.82;
+        double minZ = anchor.getZ() + 0.18;
+        double maxZ = anchor.getZ() + 0.82;
+
+        // Also constrain by player hitbox so it cannot overlap the container block.
+        double halfWidth = mc.player != null ? (mc.player.getWidth() / 2.0 + 0.01) : 0.31;
+        int offX = containerTask.blockPos.getX() - anchor.getX();
+        int offZ = containerTask.blockPos.getZ() - anchor.getZ();
+        if (offX > 0) maxX = Math.min(maxX, anchor.getX() + 1.0 - halfWidth);
+        else if (offX < 0) minX = Math.max(minX, anchor.getX() + halfWidth);
+        if (offZ > 0) maxZ = Math.min(maxZ, anchor.getZ() + 1.0 - halfWidth);
+        else if (offZ < 0) minZ = Math.max(minZ, anchor.getZ() + halfWidth);
+
+        tx = clamp(tx, minX, maxX);
+        tz = clamp(tz, minZ, maxZ);
+        return new Vec3d(tx, anchorCenter.y, tz);
+    }
+
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     public BlockPos getCollectingPosition() {

@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 public class TaskExecutor {
@@ -209,14 +210,49 @@ public class TaskExecutor {
     private void doPlace(BlockTask blockTask, boolean updateOnly) {
         if (mc.world == null) return;
 
-        Block currentBlock = mc.world.getBlockState(blockTask.blockPos).getBlock();
+        BlockState currentState = mc.world.getBlockState(blockTask.blockPos);
+        Block currentBlock = currentState.getBlock();
         Block material = module.getMaterial();
         Block fillerMat = module.getFillerMat();
 
-        // Liquid already gone
-        if (blockTask.taskState == TaskState.LIQUID
-            && mc.world.getFluidState(blockTask.blockPos).isEmpty()) {
-            blockTask.updateState(TaskState.DONE);
+        // Hard guard against stale tasks: never place a non-AIR block into a blueprint AIR cell.
+        // Skip temporary container task (shulker restock), it can be intentionally outside/over blueprint.
+        BlockTask containerTask = module.containerHandler.containerTask;
+        if (blockTask != containerTask && module.blueprintGenerator != null) {
+            BlueprintTask blueprintTask = module.blueprintGenerator.getBlueprint().get(blockTask.blockPos);
+            if (blueprintTask != null && blueprintTask.targetBlock == Blocks.AIR
+                && blockTask.targetBlock != Blocks.AIR) {
+                blockTask.targetBlock = Blocks.AIR;
+                if (currentBlock == Blocks.AIR || currentState.isReplaceable()) {
+                    blockTask.updateState(TaskState.DONE);
+                } else {
+                    blockTask.updateState(TaskState.BREAK);
+                }
+                return;
+            }
+        }
+
+        // Liquid handling completion. For AIR targets, clear temporary plug blocks after drain.
+        if (blockTask.taskState == TaskState.LIQUID) {
+            boolean fluidGone = mc.world.getFluidState(blockTask.blockPos).isEmpty();
+            if (fluidGone) {
+                if (blockTask.targetBlock == Blocks.AIR) {
+                    if (currentBlock != Blocks.AIR && !currentState.isReplaceable()) {
+                        blockTask.updateState(TaskState.BREAK);
+                    } else {
+                        blockTask.updateState(TaskState.DONE);
+                    }
+                } else {
+                    blockTask.updateState(TaskState.PLACE);
+                }
+                return;
+            }
+        }
+
+        // A LIQUID task with AIR target must not directly place primary material.
+        if (blockTask.taskState == TaskState.LIQUID && blockTask.targetBlock == Blocks.AIR
+            && currentBlock == material) {
+            blockTask.updateState(TaskState.BREAK);
             return;
         }
 
@@ -242,10 +278,27 @@ public class TaskExecutor {
 
         if (updateOnly) return;
 
+        if (blockTask == containerTask
+            && module.pathfinder.moveState == MovementState.RESTOCK) {
+            if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
+                // Never place while player's hitbox intersects the placement block.
+                blockTask.resetStuck();
+                return;
+            }
+
+            if (mc.player != null
+                && mc.player.getEyePos().distanceTo(Vec3d.ofCenter(blockTask.blockPos)) > module.maxReach.get() + 0.2) {
+                // Wait until pathing brings us into reach.
+                blockTask.resetStuck();
+                return;
+            }
+        }
+
         if (!HWUtils.isPlaceable(blockTask.blockPos)) {
-            BlockTask containerTask = module.containerHandler.containerTask;
             if (blockTask == containerTask) {
-                containerTask.updateState(TaskState.BREAK);
+                // Don't destroy the container task if placement spot is temporarily blocked
+                // (usually by player positioning while centering).
+                containerTask.resetStuck();
             } else {
                 module.taskManager.getTasks().remove(blockTask.blockPos);
             }

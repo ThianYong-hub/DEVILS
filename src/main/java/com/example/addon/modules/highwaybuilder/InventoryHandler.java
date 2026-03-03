@@ -2,7 +2,6 @@ package com.example.addon.modules.highwaybuilder;
 
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -27,15 +26,6 @@ public class InventoryHandler {
 
     public InventoryHandler(HighwayBuilder module) {
         this.module = module;
-    }
-
-    public void updateRotation() {
-        if (!module.rotate.get()) return;
-        if (lastHitVec.equals(Vec3d.ZERO)) return;
-        Rotations.rotate(
-            Rotations.getYaw(lastHitVec),
-            Rotations.getPitch(lastHitVec)
-        );
     }
 
     public void cleanupPacketLimiter() {
@@ -146,6 +136,14 @@ public class InventoryHandler {
 
         Block material = module.getMaterial();
         Block target = blockTask.targetBlock;
+        Block filler = module.getFillerMat();
+
+        // For liquid in AIR-designated cells, use filler only as a temporary plug.
+        if (blockTask.taskState == TaskState.LIQUID && target == Blocks.AIR) {
+            if (countBlock(filler) > 0) return filler;
+            if (module.storageManagement.get()) module.containerHandler.handleRestock(filler.asItem());
+            return Blocks.AIR;
+        }
 
         if (target == material) {
             if (countBlock(material) > module.saveMaterial.get()) {
@@ -156,6 +154,16 @@ public class InventoryHandler {
                 if (material == Blocks.OBSIDIAN && hasEnderChests()) {
                     return Blocks.AIR;
                 }
+
+                // If obsidian is low and ECs are stored in shulkers, restock ECs first.
+                if (material == Blocks.OBSIDIAN
+                    && module.storageManagement.get()
+                    && module.containerHandler.containerTask.taskState == TaskState.DONE
+                    && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
+                    module.containerHandler.handleRestock(Items.ENDER_CHEST);
+                    return Blocks.AIR;
+                }
+
                 if (module.storageManagement.get()) {
                     module.containerHandler.handleRestock(material.asItem());
                 }
@@ -177,6 +185,15 @@ public class InventoryHandler {
         if (material == Blocks.OBSIDIAN && hasEnderChests()) {
             return Blocks.AIR;
         }
+
+        if (material == Blocks.OBSIDIAN
+            && module.storageManagement.get()
+            && module.containerHandler.containerTask.taskState == TaskState.DONE
+            && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
+            module.containerHandler.handleRestock(Items.ENDER_CHEST);
+            return Blocks.AIR;
+        }
+
         if (module.storageManagement.get()) {
             module.containerHandler.handleRestock(target.asItem());
         }

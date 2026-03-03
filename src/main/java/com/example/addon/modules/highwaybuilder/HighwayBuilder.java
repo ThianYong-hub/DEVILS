@@ -10,6 +10,11 @@ import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.item.BlockItem;
+import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
@@ -496,10 +501,12 @@ public class HighwayBuilder extends Module {
             return;
         }
 
-        // Check for building material or ender chests (echest miner will provide obsidian)
+        // Check for building material, ender chests, or ender chests inside shulker boxes
         boolean hasMaterial = InvUtils.find(material.get().asItem()).count() > 0;
         boolean hasEchests = material.get() == Blocks.OBSIDIAN && InvUtils.find(Items.ENDER_CHEST).found();
-        if (!hasMaterial && !hasEchests) {
+        boolean hasEchestsInShulker = !hasMaterial && !hasEchests
+            && material.get() == Blocks.OBSIDIAN && hasEnderChestsInShulkers();
+        if (!hasMaterial && !hasEchests && !hasEchestsInShulker) {
             error("No building material (%s) or ender chests found in inventory.", material.get().getName().getString());
             toggle();
             return;
@@ -638,6 +645,22 @@ public class HighwayBuilder extends Module {
     public void disableWithError(String message) {
         error(message);
         toggle();
+    }
+
+    private boolean hasEnderChestsInShulkers() {
+        if (mc.player == null) return false;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (!(stack.getItem() instanceof BlockItem bi)) continue;
+            if (!(bi.getBlock() instanceof ShulkerBoxBlock)) continue;
+            ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+            if (container == null) continue;
+            for (ItemStack contained : container.iterateNonEmpty()) {
+                if (contained.getItem() == Items.ENDER_CHEST) return true;
+            }
+        }
+        return false;
     }
 
     private void rebuildBlueprint() {

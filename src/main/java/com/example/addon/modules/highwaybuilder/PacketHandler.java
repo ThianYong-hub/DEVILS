@@ -10,6 +10,7 @@ import net.minecraft.network.packet.s2c.play.OpenScreenS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
 import net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket;
 import net.minecraft.item.ItemStack;
+import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.util.math.BlockPos;
 
 public class PacketHandler {
@@ -84,9 +85,10 @@ public class PacketHandler {
         BlockTask containerTask = module.containerHandler.containerTask;
         if (containerTask.taskState == TaskState.DONE) return;
 
-        String screenId = packet.getScreenHandlerType().toString();
-        boolean isShulker = screenId.contains("shulker") && containerTask.isShulker();
-        boolean isGeneric = screenId.contains("generic") && !containerTask.isShulker();
+        ScreenHandlerType<?> type = packet.getScreenHandlerType();
+        boolean isShulker = type == ScreenHandlerType.SHULKER_BOX && containerTask.isShulker();
+        boolean isGeneric = (type == ScreenHandlerType.GENERIC_9X3
+            || type == ScreenHandlerType.GENERIC_9X6) && !containerTask.isShulker();
 
         if (isShulker || isGeneric) {
             containerTask.isOpen = true;

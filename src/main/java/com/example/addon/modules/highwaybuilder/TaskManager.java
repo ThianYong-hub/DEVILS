@@ -178,12 +178,20 @@ public class TaskManager {
         blockTask.isLiquidSource = HWUtils.isLiquidSource(blockTask.blockPos);
 
         if (blockTask.taskState == TaskState.PLACE || blockTask.taskState == TaskState.LIQUID) {
-            blockTask.sequence = HWUtils.getNeighbourSequence(
-                blockTask.blockPos,
-                module.placementSearch.get(),
-                module.maxReach.get(),
-                !module.illegalPlacements.get()
-            );
+            long now = System.currentTimeMillis();
+            boolean shouldRecalculateSequence = blockTask.sequence.isEmpty()
+                || blockTask.getStuckTicks() > 0
+                || (now - blockTask.lastSequenceUpdate) >= 125L;
+
+            if (shouldRecalculateSequence) {
+                blockTask.sequence = HWUtils.getNeighbourSequence(
+                    blockTask.blockPos,
+                    module.placementSearch.get(),
+                    module.maxReach.get(),
+                    !module.illegalPlacements.get()
+                );
+                blockTask.lastSequenceUpdate = now;
+            }
         }
 
         blockTask.setStartDistance(Vec3d.ofCenter(module.pathfinder.startingBlockPos)
@@ -200,9 +208,7 @@ public class TaskManager {
         if (containerTask.taskState != TaskState.DONE) {
             updateTaskData(containerTask);
             if (containerTask.getStuckTicks() > containerTask.taskState.stuckTimeout) {
-                if (containerTask.taskState == TaskState.PICKUP) {
-                    module.pathfinder.moveState = MovementState.RUNNING;
-                }
+                module.pathfinder.moveState = MovementState.RUNNING;
                 containerTask.updateState(TaskState.DONE);
             } else {
                 tasks.values().forEach(t -> module.taskExecutor.doTask(t, true));
@@ -222,7 +228,9 @@ public class TaskManager {
         List<BlockTask> sorted = new ArrayList<>(tasks.values());
         for (BlockTask task : sorted) {
             module.taskExecutor.doTask(task, true);
-            updateTaskData(task);
+            if (task.taskState != TaskState.DONE) {
+                updateTaskData(task);
+            }
         }
 
         sorted.sort(blockTaskComparator());
@@ -313,11 +321,42 @@ public class TaskManager {
             .thenComparingDouble(t -> {
                 if (module.pathfinder.moveState == MovementState.BRIDGE) {
                     return t.sequence.isEmpty() ? 69 : t.sequence.size();
+                } else if (isClosingPlacementState(t.taskState)) {
+                    // Prioritize nearest forward slice first (close holes before extending).
+                    return getForwardPriority(t.blockPos);
                 } else {
                     return module.multiBuilding.get() ? t.getShuffle() : t.getStartDistance();
                 }
             })
-            .thenComparingDouble(BlockTask::getEyeDistance);
+            .thenComparingDouble(t -> isClosingPlacementState(t.taskState)
+                ? getLateralPriority(t.blockPos) // center lane first, edges/railings later
+                : 0.0)
+            .thenComparingDouble(BlockTask::getEyeDistance)
+            .thenComparingDouble(BlockTask::getStartDistance);
+    }
+
+    private boolean isClosingPlacementState(TaskState state) {
+        return switch (state) {
+            case PLACE, LIQUID, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
+            default -> false;
+        };
+    }
+
+    private double getForwardPriority(BlockPos pos) {
+        HWDirection dir = module.pathfinder.startingDirection;
+        BlockPos origin = module.pathfinder.currentBlockPos;
+        int dx = pos.getX() - origin.getX();
+        int dz = pos.getZ() - origin.getZ();
+        return Math.abs(dx * dir.directionVec.getX() + dz * dir.directionVec.getZ());
+    }
+
+    private double getLateralPriority(BlockPos pos) {
+        HWDirection dir = module.pathfinder.startingDirection;
+        HWDirection lateral = dir.clockwise(dir.isDiagonal ? 1 : 2);
+        BlockPos origin = module.pathfinder.currentBlockPos;
+        int dx = pos.getX() - origin.getX();
+        int dz = pos.getZ() - origin.getZ();
+        return Math.abs(dx * lateral.directionVec.getX() + dz * lateral.directionVec.getZ());
     }
 
     public void clearTasks() {
