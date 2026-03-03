@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
@@ -206,6 +207,10 @@ public class AutoWasp extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", () -> onTickSafe(event));
+    }
+
+    private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         if (++cacheSweepTicks >= 8) {
             cacheSweepTicks = 0;
@@ -380,6 +385,10 @@ public class AutoWasp extends Module {
 
     @EventHandler
     private void onMove(PlayerMoveEvent event) {
+        CrashGuard.run(this, "onMove", () -> onMoveSafe(event));
+    }
+
+    private void onMoveSafe(PlayerMoveEvent event) {
         if (mc.player == null || mc.world == null) return;
         if (target == null || target.isRemoved() || target.isDead()) return;
         if (!mc.player.getEquippedStack(EquipmentSlot.CHEST).contains(DataComponentTypes.GLIDER)) return;

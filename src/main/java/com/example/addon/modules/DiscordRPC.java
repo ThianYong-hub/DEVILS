@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.discordipc.DiscordIPC;
 import meteordevelopment.discordipc.RichPresence;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
@@ -46,12 +47,20 @@ public class DiscordRPC extends Module {
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
+        CrashGuard.run(this, "onGameJoined", () -> onGameJoinedSafe(event));
+    }
+
+    private void onGameJoinedSafe(GameJoinedEvent event) {
         if (!DiscordIPC.isConnected()) tryConnect();
         else updatePresence();
     }
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        CrashGuard.run(this, "onGameLeft", () -> onGameLeftSafe(event));
+    }
+
+    private void onGameLeftSafe(GameLeftEvent event) {
         lastWasInMainMenu = false;
         if (!DiscordIPC.isConnected()) tryConnect();
         else updatePresence();
@@ -59,6 +68,10 @@ public class DiscordRPC extends Module {
 
     @EventHandler
     private void onOpenScreen(OpenScreenEvent event) {
+        CrashGuard.run(this, "onOpenScreen", () -> onOpenScreenSafe(event));
+    }
+
+    private void onOpenScreenSafe(OpenScreenEvent event) {
         if (!DiscordIPC.isConnected()) {
             tryConnect();
             return;
@@ -71,6 +84,10 @@ public class DiscordRPC extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
+        CrashGuard.run(this, "onTickPost", () -> onTickSafe(event));
+    }
+
+    private void onTickSafe(TickEvent.Post event) {
         tickCounter++;
         if (tickCounter >= 100) {
             tickCounter = 0;

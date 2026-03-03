@@ -2,6 +2,7 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.mixin.AnvilScreenHandlerAccessor;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -96,6 +97,10 @@ public class AutoAnvilRename extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", () -> onTickSafe(event));
+    }
+
+    private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
         // ── Guard: rename-text must be set ────────────────────────────────────

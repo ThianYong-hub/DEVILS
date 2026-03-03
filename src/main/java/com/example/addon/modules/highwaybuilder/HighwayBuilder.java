@@ -1,6 +1,7 @@
 package com.example.addon.modules.highwaybuilder;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -560,6 +561,10 @@ public class HighwayBuilder extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", () -> onTickSafe(event));
+    }
+
+    private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         if (taskManager == null || pathfinder == null) return;
 
@@ -615,11 +620,19 @@ public class HighwayBuilder extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
+        CrashGuard.run(this, "onRender3D", () -> onRenderSafe(event));
+    }
+
+    private void onRenderSafe(Render3DEvent event) {
         if (renderer != null) renderer.render(event);
     }
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
+        CrashGuard.run(this, "onPacketReceive", () -> onPacketReceiveSafe(event));
+    }
+
+    private void onPacketReceiveSafe(PacketEvent.Receive event) {
         if (packetHandler != null) packetHandler.handlePacket(event.packet);
     }
 

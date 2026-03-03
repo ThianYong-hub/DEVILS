@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -144,6 +145,10 @@ public class AutoCev extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", this::tickSafe);
+    }
+
+    private void tickSafe() {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
         if (PlayerUtils.shouldPause(false, pauseOnEat.get(), pauseOnEat.get())) return;
         if (pauseOnSword.get() && mc.player.getMainHandStack().isIn(ItemTags.SWORDS)) return;
@@ -305,6 +310,8 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice chooseBase(PlayerEntity player) {
+        if (player == null || mc.player == null || mc.world == null) return null;
+
         BaseChoice topChoice = chooseTopPriorityBase(player);
         if (topChoice != null) return topChoice;
 
@@ -318,6 +325,8 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice chooseTopPriorityBase(PlayerEntity player) {
+        if (player == null || mc.player == null || mc.world == null) return null;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int headY = MathHelper.floor(player.getBoundingBox().maxY);
@@ -331,6 +340,7 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice choosePreferredBase(PlayerEntity player) {
+        if (player == null || mc.player == null || mc.world == null) return null;
         if (preferredBase == null) return null;
 
         if (!isPreferredStillRelevant(preferredBase, player)) {
@@ -355,6 +365,8 @@ public class AutoCev extends Module {
     }
 
     private boolean isPreferredStillRelevant(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return false;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int headY = MathHelper.floor(player.getBoundingBox().maxY);
@@ -370,6 +382,7 @@ public class AutoCev extends Module {
     }
 
     private boolean isTopBase(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return false;
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int headY = MathHelper.floor(player.getBoundingBox().maxY);
@@ -377,6 +390,8 @@ public class AutoCev extends Module {
     }
 
     private BlockPos chooseFallbackBase(PlayerEntity player) {
+        if (player == null || mc.player == null || mc.world == null) return null;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int faceY = MathHelper.floor(player.getEyeY());
@@ -412,6 +427,8 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice chooseUnblockedBase(PlayerEntity player, BlockPos exclude) {
+        if (player == null || mc.player == null || mc.world == null) return null;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int headY = MathHelper.floor(player.getBoundingBox().maxY);
@@ -447,6 +464,8 @@ public class AutoCev extends Module {
     }
 
     private BaseChoice chooseOpenFaceBase(PlayerEntity player, BlockPos exclude) {
+        if (player == null || mc.player == null || mc.world == null) return null;
+
         int x = player.getBlockX();
         int z = player.getBlockZ();
         int faceY = MathHelper.floor(player.getEyeY());
@@ -472,6 +491,8 @@ public class AutoCev extends Module {
     }
 
     private boolean trySwitchToBase(BaseChoice choice) {
+        if (choice == null || mc.world == null) return false;
+
         BlockState state = mc.world.getBlockState(choice.pos());
         if (state.isOf(Blocks.OBSIDIAN)) {
             startCycle(choice);
@@ -487,12 +508,15 @@ public class AutoCev extends Module {
     }
 
     private boolean isBlockedObsidianBase(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null || mc.world == null) return false;
+
         return mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)
             && isUsableBase(pos, player, false)
             && getBlockerType(pos) != BlockerType.Other;
     }
 
     private boolean isUsableBase(BlockPos pos, PlayerEntity player, boolean requireCrystalSpace) {
+        if (pos == null || player == null || mc.player == null || mc.world == null) return false;
         if (mc.world.isOutOfHeightLimit(pos.getY()) || mc.world.isOutOfHeightLimit(pos.getY() + 2)) return false;
 
         BlockState state = mc.world.getBlockState(pos);
@@ -512,6 +536,7 @@ public class AutoCev extends Module {
     }
 
     private boolean hasCrystalSpace(BlockPos base) {
+        if (base == null || mc.world == null) return false;
         if (!mc.world.getBlockState(base.up()).isAir()) return false;
         if (!mc.world.getBlockState(base.up(2)).isAir()) return false;
 
@@ -534,6 +559,8 @@ public class AutoCev extends Module {
     }
 
     private boolean placeObsidian(BaseChoice choice) {
+        if (choice == null || mc.player == null || mc.world == null) return false;
+
         FindItemResult obsidian = InvUtils.findInHotbar(Items.OBSIDIAN);
         if (!obsidian.found()) {
             error("No obsidian in hotbar.");
@@ -556,6 +583,7 @@ public class AutoCev extends Module {
     }
 
     private void startCycle(BaseChoice choice) {
+        if (choice == null) return;
         activeBase = choice.pos().toImmutable();
         activeFallback = choice.fallback();
         preferredBase = activeBase;
@@ -567,16 +595,19 @@ public class AutoCev extends Module {
     }
 
     private void mineObsidian(BlockPos pos) {
+        if (pos == null || mc.world == null) return;
         if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return;
         mineBlock(pos);
     }
 
     private boolean mineCrystalBlocker(BlockPos base) {
+        if (base == null) return false;
         if (mineBlockingBlock(base.up())) return true;
         return mineBlockingBlock(base.up(2));
     }
 
     private boolean mineBlockingBlock(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
         BlockState state = mc.world.getBlockState(pos);
         if (state.isAir() || state.isReplaceable()) return false;
         if (!state.isOf(Blocks.OBSIDIAN)) return false;
@@ -601,11 +632,13 @@ public class AutoCev extends Module {
     }
 
     private void tickInstaMine(BlockPos pos) {
+        if (pos == null || mc.world == null) return;
         if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return;
         instaMineOnce(pos);
     }
 
     private boolean instaMineOnce(BlockPos pos) {
+        if (pos == null) return false;
         BlockPos immutable = pos.toImmutable();
         if (instaMinedBlocks.contains(immutable)) return false;
 
@@ -615,6 +648,7 @@ public class AutoCev extends Module {
     }
 
     private void syncInstaMarks(BlockPos base) {
+        if (base == null) return;
         if (mineMode.get() != MineMode.Insta) return;
 
         BlockPos immutable = base.toImmutable();
@@ -625,6 +659,8 @@ public class AutoCev extends Module {
     }
 
     private boolean placeCrystal(BlockPos base) {
+        if (base == null || mc.player == null || mc.world == null) return false;
+
         FindItemResult crystal = InvUtils.findInHotbar(Items.END_CRYSTAL);
         if (!crystal.found()) {
             error("No end crystals in hotbar.");
@@ -637,6 +673,8 @@ public class AutoCev extends Module {
         boolean[] success = { false };
 
         Runnable place = () -> {
+            if (mc.player == null || mc.world == null) return;
+
             Hand hand = crystal.getHand();
             boolean switched = false;
 
@@ -677,7 +715,10 @@ public class AutoCev extends Module {
     }
 
     private void attackCrystal(EndCrystalEntity crystal) {
+        if (crystal == null || mc.player == null || mc.world == null) return;
+
         Runnable attack = () -> {
+            if (mc.player == null) return;
             if (mc.getNetworkHandler() != null) {
                 mc.getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(crystal, mc.player.isSneaking()));
             } else if (mc.interactionManager != null) {
@@ -694,6 +735,8 @@ public class AutoCev extends Module {
     }
 
     private EndCrystalEntity findCrystalAt(BlockPos base) {
+        if (base == null || mc.world == null) return null;
+
         BlockPos exact = base.up();
         for (Entity entity : mc.world.getEntities()) {
             if (!(entity instanceof EndCrystalEntity crystal)) continue;
@@ -729,6 +772,7 @@ public class AutoCev extends Module {
     }
 
     private boolean canPlaceCrystalAt(BlockPos base) {
+        if (base == null || mc.world == null) return false;
         BlockState baseState = mc.world.getBlockState(base);
         if (!(baseState.isOf(Blocks.OBSIDIAN) || baseState.isOf(Blocks.BEDROCK))) return false;
         if (findCrystalAt(base) != null) return false;
@@ -736,6 +780,7 @@ public class AutoCev extends Module {
     }
 
     private BlockerType getBlockerType(BlockPos base) {
+        if (base == null || mc.world == null) return BlockerType.Other;
         BlockState up1 = mc.world.getBlockState(base.up());
         BlockState up2 = mc.world.getBlockState(base.up(2));
 
@@ -755,16 +800,19 @@ public class AutoCev extends Module {
     }
 
     private Vec3d crystalCenter(BlockPos base) {
+        if (base == null) return Vec3d.ZERO;
         return new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
     }
 
     private boolean antiSuicide(Vec3d crystalPos) {
+        if (crystalPos == null || mc.player == null) return false;
         double hp = mc.player.getHealth() + mc.player.getAbsorptionAmount();
         float selfDamage = DamageUtils.crystalDamage(mc.player, crystalPos);
         return hp - selfDamage > safe.get();
     }
 
     private void swing(Hand hand) {
+        if (mc.player == null) return;
         if (swingHand.get()) {
             mc.player.swingHand(hand);
         } else if (mc.getNetworkHandler() != null) {

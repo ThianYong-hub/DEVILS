@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IVec3d;
@@ -301,6 +302,10 @@ public class AntiWasp extends Module {
 
     @EventHandler(priority = EventPriority.HIGH)
     private void onTickPre(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", () -> onTickPreSafe(event));
+    }
+
+    private void onTickPreSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
         applyAutoWalkState();
@@ -341,12 +346,20 @@ public class AntiWasp extends Module {
 
     @EventHandler(priority = EventPriority.LOW)
     private void onTickPost(TickEvent.Post event) {
+        CrashGuard.run(this, "onTickPost", () -> onTickPostSafe(event));
+    }
+
+    private void onTickPostSafe(TickEvent.Post event) {
         if (mc.player == null || mc.world == null) return;
         applyAutoWalkState();
     }
 
     @EventHandler
     private void onMove(PlayerMoveEvent event) {
+        CrashGuard.run(this, "onMove", () -> onMoveSafe(event));
+    }
+
+    private void onMoveSafe(PlayerMoveEvent event) {
         if (mc.player == null || mc.world == null) return;
         if (!mc.player.isGliding()) return;
         if (!isWearingElytra()) return;

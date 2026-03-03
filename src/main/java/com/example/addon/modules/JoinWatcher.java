@@ -5,6 +5,7 @@ import com.example.addon.audio.JoinSoundPlayer;
 import com.example.addon.settings.TrackEventMode;
 import com.example.addon.settings.TrackerPlayerRule;
 import com.example.addon.settings.TrackerPlayersSetting;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
@@ -92,6 +93,10 @@ public class JoinWatcher extends Module {
 
     @EventHandler
     private void onGameJoined(GameJoinedEvent event) {
+        CrashGuard.run(this, "onGameJoined", () -> onGameJoinedSafe(event));
+    }
+
+    private void onGameJoinedSafe(GameJoinedEvent event) {
         waitingInitialJoinPacket = true;
         knownPlayers.clear();
         cancelPendingDelayedSends();
@@ -99,6 +104,10 @@ public class JoinWatcher extends Module {
 
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
+        CrashGuard.run(this, "onGameLeft", () -> onGameLeftSafe(event));
+    }
+
+    private void onGameLeftSafe(GameLeftEvent event) {
         waitingInitialJoinPacket = true;
         knownPlayers.clear();
         cancelPendingDelayedSends();
@@ -106,6 +115,10 @@ public class JoinWatcher extends Module {
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
+        CrashGuard.run(this, "onPacketReceive", () -> onPacketReceiveSafe(event));
+    }
+
+    private void onPacketReceiveSafe(PacketEvent.Receive event) {
         if (event.packet instanceof PlayerListS2CPacket packet) {
             handleJoinPacket(packet);
             return;

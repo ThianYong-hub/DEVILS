@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -235,6 +236,10 @@ public class AutoPearl extends Module {
      */
     @EventHandler
     private void onChatMessage(ReceiveMessageEvent event) {
+        CrashGuard.run(this, "onChatMessage", () -> onChatMessageSafe(event));
+    }
+
+    private void onChatMessageSafe(ReceiveMessageEvent event) {
         if (mc.player == null) return;
 
         String msg    = event.getMessage().getString();
@@ -287,6 +292,10 @@ public class AutoPearl extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
+        CrashGuard.run(this, "onTickPre", () -> onTickSafe(event));
+    }
+
+    private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
         // ── Priority: if inside a solid block, break free with pickaxe ────────
@@ -391,6 +400,10 @@ public class AutoPearl extends Module {
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
+        CrashGuard.run(this, "onRender3D", () -> onRender3DSafe(event));
+    }
+
+    private void onRender3DSafe(Render3DEvent event) {
         if (mc.player == null) return;
 
         if (showRange.get()) {
