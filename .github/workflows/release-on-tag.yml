@@ -63,11 +63,27 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
 
+      - name: Prepare release artifact name
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jar_path="$(find build/libs -maxdepth 1 -type f -name '*.jar' | head -n1)"
+          if [[ -z "${jar_path}" ]]; then
+            echo "::error::No .jar artifact found in build/libs."
+            exit 1
+          fi
+
+          release_asset="build/libs/devils-addon-${RELEASE_TAG}.jar"
+          cp "${jar_path}" "${release_asset}"
+
+          echo "RELEASE_ASSET=${release_asset}" >> "${GITHUB_ENV}"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-build-${{ env.RELEASE_TAG }}
-          path: build/libs/*.jar
+          path: ${{ env.RELEASE_ASSET }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -78,7 +94,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: build/libs/*.jar
+          files: ${{ env.RELEASE_ASSET }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
