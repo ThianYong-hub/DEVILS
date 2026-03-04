@@ -8,10 +8,12 @@ import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public class TaskExecutor {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
 
     private final HighwayBuilder module;
 
@@ -53,6 +55,7 @@ public class TaskExecutor {
 
     private void doBreaking(BlockTask blockTask, boolean updateOnly) {
         if (mc.world == null) return;
+        boolean containerBreakTask = isContainerBreakTask(blockTask);
         Block block = mc.world.getBlockState(blockTask.blockPos).getBlock();
 
         if (block == Blocks.AIR) {
@@ -67,7 +70,11 @@ public class TaskExecutor {
             return;
         }
 
-        if (!module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos)) {
+        if (shouldSkipBreakForRange(blockTask)) {
+            if (containerBreakTask) {
+                blockTask.resetStuck();
+                return;
+            }
             if (blockTask.taskState == TaskState.BREAKING) {
                 blockTask.updateState(TaskState.BREAK);
             }
@@ -75,10 +82,18 @@ public class TaskExecutor {
         }
 
         if (!updateOnly) {
-            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
-            if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
+            if (containerBreakTask) {
+                if (!module.inventoryHandler.swapOrMoveContainerBreakTool()) return;
+            } else {
+                if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
+            }
+            if (!containerBreakTask
+                && module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
                 module.inventoryHandler.restoreSilentSwap();
                 return;
+            }
+            if (containerBreakTask && mc.player != null) {
+                mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
             }
             module.blockBreaker.mineBlock(blockTask);
         }
@@ -92,17 +107,14 @@ public class TaskExecutor {
             return;
         }
 
+        // Finalize any silent tool swap after successful break completion.
+        module.inventoryHandler.restoreSilentSwap();
+
         module.statistics.totalBlocksBroken++;
 
         // Reset stuck on all break tasks
         for (BlockTask task : module.taskManager.getTasks().values()) {
             if (task.taskState == TaskState.BREAK) task.resetStuck();
-        }
-
-        // Instant break priming
-        if (blockTask.blockPos.equals(module.blockBreaker.prePrimedPos)) {
-            module.blockBreaker.primedPos = module.blockBreaker.prePrimedPos;
-            module.blockBreaker.prePrimedPos = BlockPos.ORIGIN;
         }
 
         module.statistics.simpleMovingAverageBreaks.add(System.currentTimeMillis());
@@ -129,24 +141,27 @@ public class TaskExecutor {
         if (mc.world == null) return;
         BlockState currentState = mc.world.getBlockState(blockTask.blockPos);
         Block currentBlock = currentState.getBlock();
+        BlockTask containerTask = module.containerHandler.containerTask;
+        boolean isContainerTask = blockTask == containerTask;
 
         if ((blockTask.targetBlock == currentBlock || blockTask.isFiller)
             && !currentState.isReplaceable()) {
             // Successfully placed
             module.statistics.totalBlocksPlaced++;
-            module.blockBreaker.prePrimedPos = blockTask.blockPos;
             module.statistics.simpleMovingAveragePlaces.add(System.currentTimeMillis());
 
             if (module.dynamicDelay.get() && module.blockPlacer.extraPlaceDelay > 0) {
                 module.blockPlacer.extraPlaceDelay /= 2;
             }
 
-            BlockTask containerTask = module.containerHandler.containerTask;
             if (blockTask == containerTask) {
                 if (containerTask.destroy) {
                     containerTask.updateState(TaskState.BREAK);
                 } else {
                     containerTask.updateState(TaskState.OPEN_CONTAINER);
+                    // Give the server a few ticks to fully register the placed block
+                    // before attempting to interact/open it.
+                    module.containerHandler.setOpenDelay(4);
                 }
             } else {
                 blockTask.updateState(TaskState.DONE);
@@ -165,6 +180,19 @@ public class TaskExecutor {
 
     private void doBreak(BlockTask blockTask, boolean updateOnly) {
         if (mc.world == null || mc.player == null) return;
+        boolean containerBreakTask = isContainerBreakTask(blockTask);
+        if (containerBreakTask
+            && mc.player.currentScreenHandler != null
+            && mc.player.currentScreenHandler.syncId != 0) {
+            // BREAK stage is terminal for this restock cycle: never reopen container here.
+            mc.player.closeHandledScreen();
+            if (module.containerHandler != null) {
+                module.containerHandler.containerTask.isOpen = false;
+                module.containerHandler.containerTask.isLoaded = false;
+            }
+            blockTask.resetStuck();
+            return;
+        }
 
         Block currentBlock = mc.world.getBlockState(blockTask.blockPos).getBlock();
         String regName = Registries.BLOCK.getId(currentBlock).toString();
@@ -194,7 +222,9 @@ public class TaskExecutor {
 
         // Block is already air
         if (currentBlock == Blocks.AIR) {
-            if (blockTask.targetBlock == Blocks.AIR) {
+            if (containerBreakTask) {
+                blockTask.updateState(TaskState.BROKEN);
+            } else if (blockTask.targetBlock == Blocks.AIR) {
                 blockTask.updateState(TaskState.BROKEN);
             } else {
                 blockTask.updateState(TaskState.PLACE);
@@ -208,19 +238,27 @@ public class TaskExecutor {
             return;
         }
 
-        if (!module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos)) {
+        if (shouldSkipBreakForRange(blockTask)) {
             return;
         }
 
         if (!updateOnly) {
-            if (module.liquidHandler.handleLiquid(blockTask)) {
+            if (!containerBreakTask && module.liquidHandler.handleLiquid(blockTask)) {
                 module.inventoryHandler.restoreSilentSwap();
                 return;
             }
-            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
-            if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
+            if (containerBreakTask) {
+                if (!module.inventoryHandler.swapOrMoveContainerBreakTool()) return;
+            } else {
+                if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
+            }
+            if (!containerBreakTask
+                && module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
                 module.inventoryHandler.restoreSilentSwap();
                 return;
+            }
+            if (containerBreakTask) {
+                mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
             }
             module.blockBreaker.mineBlock(blockTask);
         }
@@ -305,6 +343,11 @@ public class TaskExecutor {
 
         if (blockTask == containerTask
             && module.pathfinder.moveState == MovementState.RESTOCK) {
+            if (!module.containerHandler.ensureContainerPlacementItemReady()) {
+                blockTask.onStuck();
+                return;
+            }
+
             if (!module.pathfinder.isCenteredForRestock()
                 && !module.containerHandler.canInteractWithContainerFromCurrentPos()) {
                 blockTask.resetStuck();
@@ -336,9 +379,16 @@ public class TaskExecutor {
             return;
         }
 
-        if (!module.inventoryHandler.swapOrMoveBlock(blockTask)) {
-            blockTask.onStuck();
-            return;
+        if (blockTask == containerTask) {
+            if (!module.containerHandler.ensureContainerPlacementItemReady()) {
+                blockTask.onStuck();
+                return;
+            }
+        } else {
+            if (!module.inventoryHandler.swapOrMoveBlock(blockTask)) {
+                blockTask.onStuck();
+                return;
+            }
         }
 
         module.blockPlacer.placeBlock(blockTask);
@@ -382,5 +432,31 @@ public class TaskExecutor {
             && mc.player.getPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos)) < 1) {
             module.pathfinder.moveState = MovementState.BRIDGE;
         }
+    }
+
+    private boolean shouldSkipBreakForRange(BlockTask blockTask) {
+        if (isContainerBreakTask(blockTask)) return !isContainerBreakInRange(blockTask.blockPos);
+        return !module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos);
+    }
+
+    private boolean isContainerBreakTask(BlockTask blockTask) {
+        BlockTask containerTask = module.containerHandler.containerTask;
+        return blockTask == containerTask
+            || (containerTask != null
+            && containerTask.taskState != TaskState.DONE
+            && blockTask.blockPos.equals(containerTask.blockPos));
+    }
+
+    private boolean isContainerBreakInRange(BlockPos pos) {
+        if (mc.player == null) return false;
+
+        Vec3d eyePos = mc.player.getEyePos();
+        double best = eyePos.distanceTo(Vec3d.ofCenter(pos));
+        for (Direction side : Direction.values()) {
+            double dist = eyePos.distanceTo(HWUtils.getHitVec(pos, side));
+            if (dist < best) best = dist;
+        }
+
+        return best <= module.maxReach.get() + CONTAINER_BREAK_EXTRA_REACH + 0.15;
     }
 }

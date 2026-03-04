@@ -14,10 +14,9 @@ public class BlockBreaker {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final int BREAK_ROTATE_PRIORITY = 50;
     private static final double MINING_REACH_EPSILON = 0.05;
+    private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
 
     private final HighwayBuilder module;
-    public BlockPos prePrimedPos = BlockPos.ORIGIN;
-    public BlockPos primedPos = BlockPos.ORIGIN;
 
     public BlockBreaker(HighwayBuilder module) {
         this.module = module;
@@ -39,17 +38,16 @@ public class BlockBreaker {
         float hardness = blockState.calcBlockBreakingDelta(mc.player, mc.world, blockTask.blockPos);
         int ticksNeeded = (int) Math.ceil((1.0 / hardness) * module.miningSpeedFactor.get());
 
-        Direction side = HWUtils.getMiningSide(blockTask.blockPos);
+        double reachLimit = getReachLimit(blockTask);
+        Direction side = resolveMiningSide(blockTask, reachLimit);
         if (side == null) {
-            side = HWUtils.getMiningSideFallback(blockTask.blockPos);
-        }
-
-        if (blockTask.blockPos.equals(primedPos) && module.instantMine.get()) {
-            side = side.getOpposite();
+            blockTask.onStuck();
+            module.inventoryHandler.restoreSilentSwap();
+            return;
         }
 
         Vec3d hitVec = HWUtils.getHitVec(blockTask.blockPos, side);
-        if (mc.player.getEyePos().distanceTo(hitVec) > module.miningReach.get() + MINING_REACH_EPSILON) {
+        if (mc.player.getEyePos().distanceTo(hitVec) > reachLimit + MINING_REACH_EPSILON) {
             blockTask.onStuck();
             module.inventoryHandler.restoreSilentSwap();
             return;
@@ -57,86 +55,34 @@ public class BlockBreaker {
 
         module.inventoryHandler.lastHitVec = hitVec;
 
+        // Temporary container (shulker) breaks are latency-sensitive.
+        // Force vanilla continuous breaking to avoid packet-mode desync.
+        if (isContainerBreakTask(blockTask)
+            && mc.interactionManager != null
+            && isWithinBreakReach(blockTask, blockTask.blockPos, side)) {
+            mineBlockVanilla(blockTask, side);
+            blockTask.ticksMined += 1;
+            return;
+        }
+
         if (blockTask.ticksMined > ticksNeeded * 1.1 && blockTask.taskState == TaskState.BREAKING) {
             blockTask.updateState(TaskState.BREAK);
             blockTask.ticksMined = 0;
         }
 
-        boolean instantByHardness = ticksNeeded == 1 || mc.player.getAbilities().creativeMode;
-        boolean instantByPrimedExploit = module.instantMine.get() && blockTask.blockPos.equals(primedPos);
-
-        if (instantByHardness || instantByPrimedExploit) {
-            mineBlockInstant(blockTask, side);
-        } else {
-            mineBlockNormal(blockTask, side, ticksNeeded);
-        }
+        mineBlockNormal(blockTask, side, ticksNeeded);
 
         blockTask.ticksMined += 1;
     }
 
-    private void mineBlockInstant(BlockTask blockTask, Direction side) {
-        module.inventoryHandler.waitTicks = module.breakDelay.get();
-        blockTask.updateState(TaskState.PENDING_BREAK);
-
-        sendMiningPackets(blockTask.blockPos, side, true, false, false);
-
-        if (module.multiBreak.get() && module.blocksPerTick.get() > 1) {
-            tryMultiBreak(blockTask);
-        }
-
-        // Timeout handled in TaskExecutor via stuckTicks
-    }
-
-    private void tryMultiBreak(BlockTask blockTask) {
-        if (mc.player == null || mc.world == null) return;
-        int remainingExtraBreaks = Math.max(0, module.blocksPerTick.get() - 1);
-        if (remainingExtraBreaks == 0) return;
-
-        Vec3d eyePos = mc.player.getEyePos();
-        Vec3d viewVec = module.inventoryHandler.lastHitVec.subtract(eyePos).normalize();
-
-        for (BlockTask task : module.taskManager.getTasks().values()) {
-            if (remainingExtraBreaks <= 0) break;
-            if (task.taskState != TaskState.BREAK || task == blockTask) continue;
-
-            BlockState state = mc.world.getBlockState(task.blockPos);
-            float hardness = state.calcBlockBreakingDelta(mc.player, mc.world, task.blockPos);
-            int ticksNeeded = (int) Math.ceil((1.0 / hardness) * module.miningSpeedFactor.get());
-            if (ticksNeeded > 1) continue;
-
-            if (module.inventoryHandler.packetLimiter.size() > module.interactionLimit.get()) return;
-
-            // Check if block is in line of sight along view vector
-            Vec3d blockCenter = Vec3d.ofCenter(task.blockPos);
-            Vec3d toBlock = blockCenter.subtract(eyePos);
-            double dot = toBlock.normalize().dotProduct(viewVec);
-            if (dot < 0.95) continue; // Not aligned enough
-
-            double dist = eyePos.distanceTo(blockCenter);
-            if (dist > module.miningReach.get() + MINING_REACH_EPSILON) continue;
-
-            task.updateState(TaskState.PENDING_BREAK);
-            Direction miningSide = HWUtils.getMiningSide(task.blockPos);
-            if (miningSide == null) miningSide = HWUtils.getMiningSideFallback(task.blockPos);
-            if (miningSide == null) continue;
-            sendMiningPackets(task.blockPos, miningSide, true, false, false);
-            remainingExtraBreaks--;
-        }
-    }
-
     private void mineBlockNormal(BlockTask blockTask, Direction side, int ticks) {
-        if (!module.instantMine.get()
-            && mc.player != null && mc.interactionManager != null
-            && isWithinBreakReach(blockTask.blockPos, side)) {
-            mineBlockVanilla(blockTask, side);
-            return;
-        }
-
         if (blockTask.taskState == TaskState.BREAK) {
             blockTask.updateState(TaskState.BREAKING);
             sendMiningPackets(blockTask.blockPos, side, true, false, false);
         } else {
             if (blockTask.ticksMined >= ticks) {
+                module.inventoryHandler.waitTicks = module.breakDelay.get();
+                blockTask.updateState(TaskState.PENDING_BREAK);
                 sendMiningPackets(blockTask.blockPos, side, false, true, false);
             } else {
                 sendMiningPackets(blockTask.blockPos, side, false, false, false);
@@ -149,21 +95,103 @@ public class BlockBreaker {
             if (mc.player == null || mc.interactionManager == null) return;
 
             if (blockTask.taskState == TaskState.BREAK) {
+                boolean started = mc.interactionManager.attackBlock(blockTask.blockPos, side);
+                if (!started) {
+                    // Keep current side for container break and retry vanilla next tick.
+                    blockTask.onStuck();
+                    if (!isContainerBreakTask(blockTask)) restoreSilentSwapSlot();
+                    return;
+                }
                 blockTask.updateState(TaskState.BREAKING);
-                mc.interactionManager.attackBlock(blockTask.blockPos, side);
             } else {
-                mc.interactionManager.updateBlockBreakingProgress(blockTask.blockPos, side);
+                boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockTask.blockPos, side);
+                if (!progressed) {
+                    if (isContainerBreakTask(blockTask)) {
+                        // For shulker break keep the same side and restart vanilla hold immediately.
+                        boolean restarted = mc.interactionManager.attackBlock(blockTask.blockPos, side);
+                        if (!restarted) blockTask.onStuck();
+                    } else {
+                        // Lost break context (rotation/lag/face invalid), restart cleanly.
+                        blockTask.miningSide = null;
+                        blockTask.updateState(TaskState.BREAK);
+                        blockTask.onStuck();
+                    }
+                    if (!isContainerBreakTask(blockTask)) restoreSilentSwapSlot();
+                    return;
+                }
             }
 
             mc.player.swingHand(Hand.MAIN_HAND);
-            restoreSilentSwapSlot();
+            if (!isContainerBreakTask(blockTask)) restoreSilentSwapSlot();
         });
     }
 
-    private boolean isWithinBreakReach(BlockPos pos, Direction side) {
+    private boolean isWithinBreakReach(BlockTask blockTask, BlockPos pos, Direction side) {
         if (mc.player == null) return false;
         return mc.player.getEyePos().distanceTo(HWUtils.getHitVec(pos, side))
-            <= module.miningReach.get() + MINING_REACH_EPSILON;
+            <= getReachLimit(blockTask) + MINING_REACH_EPSILON;
+    }
+
+    private Direction resolveMiningSide(BlockTask blockTask, double reachLimit) {
+        Direction side = blockTask.miningSide;
+
+        if (isContainerBreakTask(blockTask)) {
+            // Keep a deterministic side for the whole shulker break cycle.
+            if (side == null || blockTask.taskState == TaskState.BREAK) {
+                Direction best = findClosestSideWithinReach(blockTask.blockPos, reachLimit + MINING_REACH_EPSILON);
+                if (best != null) side = best;
+                else side = Direction.UP;
+            }
+            blockTask.miningSide = side;
+            return side;
+        }
+
+        // Re-evaluate side at BREAK start; keep it stable while BREAKING/PENDING.
+        if (side == null || blockTask.taskState == TaskState.BREAK) {
+            side = HWUtils.getMiningSide(blockTask.blockPos);
+            if (side == null) side = HWUtils.getMiningSideFallback(blockTask.blockPos);
+        }
+
+        double currentDist = mc.player.getEyePos().distanceTo(HWUtils.getHitVec(blockTask.blockPos, side));
+        if (currentDist > reachLimit + MINING_REACH_EPSILON) {
+            Direction bestSide = findClosestSideWithinReach(blockTask.blockPos, reachLimit + MINING_REACH_EPSILON);
+            if (bestSide != null) side = bestSide;
+        }
+
+        blockTask.miningSide = side;
+        return side;
+    }
+
+    private boolean isContainerBreakTask(BlockTask blockTask) {
+        return module.containerHandler != null && blockTask == module.containerHandler.containerTask;
+    }
+
+    private double getReachLimit(BlockTask blockTask) {
+        if (module.containerHandler == null) return Math.min(module.miningReach.get(), module.maxReach.get());
+        return blockTask == module.containerHandler.containerTask
+            ? module.maxReach.get() + CONTAINER_BREAK_EXTRA_REACH
+            : (module.taskManager != null
+                ? module.taskManager.getEffectiveMiningReach()
+                : Math.min(module.miningReach.get(), module.maxReach.get()));
+    }
+
+    private Direction findClosestSideWithinReach(BlockPos pos, double reachLimit) {
+        if (mc.player == null) return null;
+
+        Vec3d eyePos = mc.player.getEyePos();
+        Direction best = null;
+        double bestDist = Double.MAX_VALUE;
+
+        for (Direction candidate : Direction.values()) {
+            double dist = eyePos.distanceTo(HWUtils.getHitVec(pos, candidate));
+            if (dist > reachLimit) continue;
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = candidate;
+            }
+        }
+
+        return best;
     }
 
     private void handleFire(BlockTask blockTask) {

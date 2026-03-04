@@ -53,8 +53,22 @@ public class BlueprintGenerator {
         HWDirection zDirection = startingDirection;
         HWDirection xDirection = zDirection.clockwise(zDirection.isDiagonal ? 1 : 2);
 
-        int minX = (int) Math.floor(-maxReach) * 5;
-        int maxX = (int) Math.ceil(maxReach) * 5;
+        double dx = startingDirection.directionVec.getX();
+        double dz = startingDirection.directionVec.getZ();
+        double directionStepLen = Math.max(1.0, Math.sqrt(dx * dx + dz * dz));
+
+        double effectiveBreakReach = module.taskManager != null
+            ? module.taskManager.getEffectiveMiningReach()
+            : Math.min(module.miningReach.get(), module.maxReach.get());
+        double generationReach = Math.max(effectiveBreakReach, maxReach);
+
+        int forwardSpan = Math.max(
+            (int) Math.ceil((generationReach + 1.0) / directionStepLen),
+            4
+        );
+        int backwardSpan = mode == Structure.TUNNEL && backfill ? 1 : 0;
+        int minX = -backwardSpan;
+        int maxX = forwardSpan;
 
         for (int x = minX; x <= maxX; x++) {
             BlockPos thisPos = basePos.add(

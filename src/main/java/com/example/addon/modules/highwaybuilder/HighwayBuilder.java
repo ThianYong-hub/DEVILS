@@ -270,13 +270,6 @@ public class HighwayBuilder extends Module {
         .build()
     );
 
-    public final Setting<Boolean> instantMine = sgMining.add(new BoolSetting.Builder()
-        .name("instant-mine")
-        .description("Use instant mine exploit when possible.")
-        .defaultValue(true)
-        .build()
-    );
-
     public final Setting<Boolean> multiBreak = sgMining.add(new BoolSetting.Builder()
         .name("multi-break")
         .description("Break multiple blocks in the same direction at once.")
@@ -298,16 +291,6 @@ public class HighwayBuilder extends Module {
         .min(0.1)
         .max(2.0)
         .sliderRange(0.1, 2.0)
-        .build()
-    );
-
-    public final Setting<Integer> saveTools = sgMining.add(new IntSetting.Builder()
-        .name("save-tools")
-        .description("Save tools at this durability (0 to disable).")
-        .defaultValue(5)
-        .min(0)
-        .max(100)
-        .sliderRange(0, 100)
         .build()
     );
 
@@ -404,6 +387,23 @@ public class HighwayBuilder extends Module {
         .name("echest-swap-mode")
         .description("Normal: visible hotbar swap. Silent: swap via packet, swap back after action.")
         .defaultValue(EChestSwapMode.Silent)
+        .build()
+    );
+
+    public final Setting<Boolean> autoJunkCleanup = sgStorage.add(new BoolSetting.Builder()
+        .name("auto-junk-cleanup")
+        .description("Automatically throw configured Nether junk items from inventory.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Integer> keepNetherrack = sgStorage.add(new IntSetting.Builder()
+        .name("keep-netherrack")
+        .description("How many netherrack items to keep for lava plugging.")
+        .defaultValue(64)
+        .min(0)
+        .max(2304)
+        .sliderRange(0, 256)
         .build()
     );
 
@@ -508,6 +508,7 @@ public class HighwayBuilder extends Module {
     public HighwayStatistics statistics;
     public EChestMiner echestMiner;
     private int repopulateTimer = 0;
+    private boolean containerBusyLastTick = false;
 
     // ── Constructor ─────────────────────────────────────────────────────
 
@@ -552,6 +553,7 @@ public class HighwayBuilder extends Module {
         pathfinder.setupPathing();
         pathfinder.setupBaritone();
         taskManager.populateTasks();
+        containerBusyLastTick = false;
 
         info("Highway Builder enabled. Direction: " + pathfinder.startingDirection.name());
     }
@@ -577,6 +579,7 @@ public class HighwayBuilder extends Module {
         renderer = null;
         statistics = null;
         echestMiner = null;
+        containerBusyLastTick = false;
     }
 
     // ── Events ──────────────────────────────────────────────────────────
@@ -589,6 +592,8 @@ public class HighwayBuilder extends Module {
     private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
         if (taskManager == null || pathfinder == null) return;
+        boolean containerBusy = containerHandler != null
+            && containerHandler.containerTask.taskState != TaskState.DONE;
 
         // Update statistics sliding windows
         statistics.update();
@@ -601,6 +606,20 @@ public class HighwayBuilder extends Module {
         while (!inventoryHandler.packetLimiter.isEmpty()
             && now - inventoryHandler.packetLimiter.peekFirst() > 1000L) {
             inventoryHandler.packetLimiter.pollFirst();
+        }
+
+        if (containerBusy) {
+            // Hard-isolate shulker interaction cycle: no miner/no junk cleanup/no
+            // extra processing while container task is active.
+            if (echestMiner != null && echestMiner.isActive()) {
+                echestMiner.reset();
+            }
+
+            repopulateTimer = 0;
+            containerBusyLastTick = true;
+            pathfinder.updatePathing();
+            taskManager.runTasks();
+            return;
         }
 
         // EChest miner cycle — run BEFORE task repopulation to avoid blueprint conflicts
@@ -623,14 +642,28 @@ public class HighwayBuilder extends Module {
             }
         }
 
-        // Re-populate tasks periodically to detect external block changes
-        // (Only when miner is NOT active — miner places/breaks ECs which would
-        // create phantom tasks and cause black blocks)
-        repopulateTimer++;
-        if (repopulateTimer >= 2) {
-            repopulateTimer = 0;
-            taskManager.populateTasks();
+        if (inventoryHandler != null) {
+            inventoryHandler.cleanupJunkInventory();
         }
+
+        // Re-populate tasks periodically to detect external block changes.
+        // Freeze this while temporary shulker workflow is active to keep the
+        // build-front render stable when the player turns to restock.
+        if (!containerBusy) {
+            if (containerBusyLastTick) {
+                repopulateTimer = 0;
+                taskManager.populateTasks();
+            } else {
+                repopulateTimer++;
+                if (repopulateTimer >= 2) {
+                    repopulateTimer = 0;
+                    taskManager.populateTasks();
+                }
+            }
+        } else {
+            repopulateTimer = 0;
+        }
+        containerBusyLastTick = containerBusy;
 
         // Update pathfinding and movement
         pathfinder.updatePathing();

@@ -31,7 +31,11 @@ public class PacketHandler {
             handleOpenScreen(openScreen);
         } else if (packet instanceof InventoryS2CPacket) {
             BlockTask containerTask = module.containerHandler.containerTask;
-            if (containerTask.isOpen) {
+            // Mark loaded only while a non-player container screen is open.
+            if (containerTask.isOpen
+                && mc.player != null
+                && mc.player.currentScreenHandler != null
+                && mc.player.currentScreenHandler.syncId != 0) {
                 containerTask.isLoaded = true;
             }
         } else if (packet instanceof ScreenHandlerSlotUpdateS2CPacket slotUpdate) {
@@ -97,6 +101,13 @@ public class PacketHandler {
 
     private void handleSlotUpdate(ScreenHandlerSlotUpdateS2CPacket packet) {
         if (mc.player == null) return;
+
+        BlockTask containerTask = module.containerHandler.containerTask;
+        if (containerTask.isOpen
+            && mc.player.currentScreenHandler != null
+            && mc.player.currentScreenHandler.syncId != 0) {
+            containerTask.isLoaded = true;
+        }
 
         int currentSlot = mc.player.getInventory().getSelectedSlot();
         if (packet.getSlot() == currentSlot + 36) {

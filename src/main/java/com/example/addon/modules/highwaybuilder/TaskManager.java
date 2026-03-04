@@ -2,6 +2,7 @@ package com.example.addon.modules.highwaybuilder;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.fluid.FluidState;
@@ -20,6 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TaskManager {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final double MINING_REACH_EPSILON = 0.05;
+    private static final double VANILLA_STRICT_BREAK_REACH = 4.0;
+    private static final double BACKWARD_TASK_PADDING = 0.10;
 
     private final HighwayBuilder module;
     private final ConcurrentHashMap<BlockPos, BlockTask> tasks = new ConcurrentHashMap<>();
@@ -48,11 +51,12 @@ public class TaskManager {
 
         // Drop stale tasks that are no longer part of the active blueprint window.
         BlockTask containerTask = module.containerHandler.containerTask;
-        tasks.entrySet().removeIf(entry ->
-            !blueprint.containsKey(entry.getKey())
-                && !(entry.getKey().equals(containerTask.blockPos)
-                && containerTask.taskState != TaskState.DONE)
-        );
+        tasks.entrySet().removeIf(entry -> {
+            boolean isActiveContainerPos = entry.getKey().equals(containerTask.blockPos)
+                && containerTask.taskState != TaskState.DONE;
+            if (isActiveContainerPos) return false;
+            return !blueprint.containsKey(entry.getKey()) || startPadding(entry.getKey());
+        });
 
         // Remove old done tasks that are far away
         double maxReach = module.maxReach.get();
@@ -83,9 +87,6 @@ public class TaskManager {
 
         // Start padding - don't break behind player
         if (startPadding(blockPos)) return;
-
-        // Out of reach
-        if (eyePos.distanceTo(Vec3d.ofCenter(blockPos)) >= maxReach + 1) return;
 
         // Don't override container task
         if (blockPos.equals(module.containerHandler.containerTask.blockPos)) return;
@@ -151,13 +152,14 @@ public class TaskManager {
             return;
         }
 
-        if (!isWithinMiningHeight(blockPos) || !isWithinMiningReach(blockPos)) {
-            // Mining-limited cells are intentionally deferred until they enter active bounds.
+        if (!isWithinMiningHeight(blockPos)) {
+            // Mining-up limit: intentionally ignored.
             BlockTask ignored = new BlockTask(blockPos, TaskState.DONE, currentState.getBlock());
             addTask(ignored, blueprintTask);
             return;
         }
 
+        // Always keep break tasks in the graph; out-of-range ones are deferred by execution bounds.
         BlockTask blockTask = new BlockTask(blockPos, TaskState.BREAK, blueprintTask.targetBlock);
         updateTaskData(blockTask);
         addTask(blockTask, blueprintTask);
@@ -175,7 +177,7 @@ public class TaskManager {
     }
 
     private boolean isWithinMiningReach(BlockPos pos) {
-        return getBreakReachDistance(pos) <= module.miningReach.get() + MINING_REACH_EPSILON;
+        return getBreakReachDistance(pos) <= getEffectiveMiningReach() + MINING_REACH_EPSILON;
     }
 
     private boolean isWithinMiningHeight(BlockPos pos) {
@@ -191,6 +193,12 @@ public class TaskManager {
 
     public boolean isWithinActiveMiningBounds(BlockPos pos) {
         return isWithinMiningBounds(pos);
+    }
+
+    public double getEffectiveMiningReach() {
+        double configured = module.miningReach.get();
+        double placeReach = module.maxReach.get();
+        return Math.min(configured, Math.min(placeReach, VANILLA_STRICT_BREAK_REACH));
     }
 
     public void addTask(BlockTask blockTask, BlueprintTask blueprintTask) {
@@ -265,10 +273,8 @@ public class TaskManager {
         if (containerTask.taskState != TaskState.DONE) {
             updateTaskData(containerTask);
             if (containerTask.getStuckTicks() > containerTask.taskState.stuckTimeout) {
-                module.pathfinder.moveState = MovementState.RUNNING;
-                containerTask.updateState(TaskState.DONE);
+                recoverContainerTask(containerTask);
             } else {
-                tasks.values().forEach(t -> module.taskExecutor.doTask(t, true));
                 module.taskExecutor.doTask(containerTask, false);
             }
             return;
@@ -280,7 +286,7 @@ public class TaskManager {
         }
 
         // Run normal tasks
-        module.inventoryHandler.waitTicks--;
+        if (module.inventoryHandler.waitTicks > 0) module.inventoryHandler.waitTicks--;
 
         List<BlockTask> sorted = new ArrayList<>(tasks.values());
         for (BlockTask task : sorted) {
@@ -427,10 +433,48 @@ public class TaskManager {
         return null;
     }
 
+    private void recoverContainerTask(BlockTask containerTask) {
+        if (mc.world == null) return;
+
+        containerTask.resetStuck();
+        BlockState state = mc.world.getBlockState(containerTask.blockPos);
+        boolean isAirLike = state.isAir() || state.isReplaceable();
+        boolean isShulker = state.getBlock() instanceof ShulkerBoxBlock;
+
+        switch (containerTask.taskState) {
+            case BREAK, BREAKING, PENDING_BREAK -> {
+                if (isAirLike) {
+                    containerTask.updateState(TaskState.PICKUP);
+                    module.pathfinder.moveState = MovementState.PICKUP;
+                } else {
+                    containerTask.updateState(TaskState.BREAK);
+                    module.pathfinder.moveState = MovementState.RESTOCK;
+                }
+            }
+            case PICKUP -> module.pathfinder.moveState = MovementState.PICKUP;
+            case OPEN_CONTAINER, RESTOCK -> {
+                if (isShulker) {
+                    containerTask.updateState(TaskState.OPEN_CONTAINER);
+                    module.pathfinder.moveState = MovementState.RESTOCK;
+                } else {
+                    containerTask.updateState(TaskState.PICKUP);
+                    module.pathfinder.moveState = MovementState.PICKUP;
+                }
+            }
+            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE, PLACED -> {
+                containerTask.updateState(TaskState.PLACE);
+                module.pathfinder.moveState = MovementState.RESTOCK;
+            }
+            default -> {
+                // Intentionally no transition to DONE: never skip unfinished container cycle.
+            }
+        }
+    }
+
     private boolean startPadding(BlockPos c) {
-        BlockPos padStart = module.pathfinder.startingBlockPos.add(
-            module.pathfinder.startingDirection.directionVec);
-        return isBehindPos(padStart, c);
+        HWDirection dir = module.pathfinder.startingDirection;
+        BlockPos origin = module.pathfinder.currentBlockPos;
+        return dir.forwardProgress(origin, c) < -BACKWARD_TASK_PADDING;
     }
 
     public boolean isBehindPos(BlockPos origin, BlockPos check) {
@@ -488,7 +532,9 @@ public class TaskManager {
     private double getForwardPriority(BlockPos pos) {
         HWDirection dir = module.pathfinder.startingDirection;
         BlockPos origin = module.pathfinder.currentBlockPos;
-        return Math.abs(dir.forwardProgress(origin, pos));
+        double progress = dir.forwardProgress(origin, pos);
+        if (progress < 0.0) return 10_000.0 + Math.abs(progress);
+        return progress;
     }
 
     private double getLateralPriority(BlockPos pos) {

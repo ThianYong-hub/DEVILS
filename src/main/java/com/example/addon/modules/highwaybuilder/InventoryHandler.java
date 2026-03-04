@@ -1,28 +1,68 @@
 package com.example.addon.modules.highwaybuilder;
 
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.enchantment.Enchantments;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Vec3d;
 
-import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class InventoryHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final Set<Item> JUNK_ITEMS = Set.of(
+        Items.ANCIENT_DEBRIS,
+        Items.NETHER_GOLD_ORE,
+        Items.NETHER_QUARTZ_ORE,
+        Items.QUARTZ,
+        Items.GLOWSTONE,
+        Items.BLACKSTONE,
+        Items.BASALT,
+        Items.SOUL_SAND,
+        Items.SOUL_SOIL,
+        Items.NETHER_WART,
+        Items.SHROOMLIGHT,
+        Items.BLAZE_ROD,
+        Items.BLAZE_POWDER,
+        Items.WITHER_SKELETON_SKULL,
+        Items.BONE,
+        Items.COAL,
+        Items.GHAST_TEAR,
+        Items.MAGMA_CREAM,
+        Items.GOLD_NUGGET,
+        Items.GOLDEN_SWORD,
+        Items.ROTTEN_FLESH,
+        Items.PORKCHOP,
+        Items.LEATHER,
+        Items.CRYING_OBSIDIAN,
+        Items.SPECTRAL_ARROW,
+        Items.STRING,
+        Items.GRAVEL,
+        Items.DIAMOND,
+        Items.GOLD_INGOT,
+        Items.GOLD_BLOCK,
+        Items.SADDLE,
+        Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE
+    );
 
     private final HighwayBuilder module;
     public Vec3d lastHitVec = Vec3d.ZERO;
     public int waitTicks = 0;
     public final ConcurrentLinkedDeque<Long> packetLimiter = new ConcurrentLinkedDeque<>();
     public int swapBackSlot = -1;
+    private int junkCleanupDelay = 0;
 
     public InventoryHandler(HighwayBuilder module) {
         this.module = module;
@@ -35,6 +75,45 @@ public class InventoryHandler {
         }
     }
 
+    public void cleanupJunkInventory() {
+        if (mc.player == null || mc.interactionManager == null) return;
+        if (!module.autoJunkCleanup.get()) return;
+        if (module.containerHandler != null
+            && module.containerHandler.containerTask.taskState != TaskState.DONE) return;
+        if (mc.player.currentScreenHandler == null || mc.player.currentScreenHandler.syncId != 0) return;
+
+        if (junkCleanupDelay > 0) {
+            junkCleanupDelay--;
+            return;
+        }
+
+        int netherrackKeep = Math.max(0, module.keepNetherrack.get());
+        int netherrackCount = countItem(Items.NETHERRACK);
+
+        // Drop listed junk first.
+        for (int slot : getCleanupScanOrder()) {
+            ItemStack stack = mc.player.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+            if (!shouldDropJunkStack(stack)) continue;
+            if (isFortuneThreePickaxeNoSilk(stack)) continue;
+
+            dropInventorySlot(slot, true);
+            junkCleanupDelay = 1;
+            return;
+        }
+
+        // Keep exactly requested amount of netherrack for lava plugs.
+        if (netherrackCount <= netherrackKeep) return;
+
+        int excess = netherrackCount - netherrackKeep;
+        int slot = findNetherrackCleanupSlot(excess);
+        if (slot == -1) return;
+
+        boolean dropWholeStack = mc.player.getInventory().getStack(slot).getCount() <= excess;
+        dropInventorySlot(slot, dropWholeStack);
+        junkCleanupDelay = dropWholeStack ? 1 : 0;
+    }
+
     /**
      * Find and swap to the best tool for breaking the given block task.
      * Returns true if a suitable tool was equipped.
@@ -42,54 +121,118 @@ public class InventoryHandler {
     public boolean swapOrMoveBestTool(BlockTask blockTask) {
         if (mc.player == null || mc.world == null) return false;
 
-        // If no pickaxes at all, try restock from shulker
-        if (countPickaxes() == 0 && module.storageManagement.get()) {
-            if (module.containerHandler.containerTask.taskState == TaskState.DONE) {
-                Item pickaxeType = findBestPickaxeType();
-                if (pickaxeType != null) {
-                    module.containerHandler.handleRestock(pickaxeType);
-                }
+        // Never mine by hand: Fortune III non-silk pickaxe is required for break logic.
+        if (shouldRestockFortunePickaxe()) {
+            if (module.storageManagement.get()
+                && module.containerHandler.containerTask.taskState == TaskState.DONE
+                && module.containerHandler.findShulkerWithFortunePickaxe() != -1) {
+                module.containerHandler.handleFortunePickaxeRestock();
                 return false;
             }
+
+            module.disableWithError("No Fortune III pickaxe available. Mining by hand is blocked.");
+            return false;
         }
 
         return swapToBestTool(blockTask);
+    }
+
+    public boolean swapOrMoveContainerBreakTool() {
+        if (mc.player == null) return false;
+
+        // For temporary shulker break use any pickaxe; if none exists, keep current hand.
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isIn(ItemTags.PICKAXES)) continue;
+            captureSwapBackSlotIfSilent();
+            InvUtils.swap(i, false);
+            return true;
+        }
+
+        for (int i = 9; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isIn(ItemTags.PICKAXES)) continue;
+            captureSwapBackSlotIfSilent();
+            int hotbar = findPreferredBuildHotbarSlot();
+            if (hotbar == -1) hotbar = mc.player.getInventory().getSelectedSlot();
+            InvUtils.move().from(i).toHotbar(hotbar);
+            InvUtils.swap(hotbar, false);
+            return true;
+        }
+
+        return true;
     }
 
     private boolean swapToBestTool(BlockTask blockTask) {
         if (mc.player == null || mc.world == null) return false;
 
         int bestSlot = -1;
-        float bestSpeed = 0;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        var targetState = mc.world.getBlockState(blockTask.blockPos);
 
         for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
+            if (!isFortuneThreePickaxeNoSilk(stack)) continue;
 
-            float speed = stack.getMiningSpeedMultiplier(mc.world.getBlockState(blockTask.blockPos));
-            if (speed > bestSpeed) {
-                bestSpeed = speed;
-                bestSlot = i;
-            }
+            float speed = stack.getMiningSpeedMultiplier(targetState);
+            boolean suitable = stack.isSuitableFor(targetState);
+
+            // Strongly prefer tools that are actually suitable for the target block.
+            double score = speed + (suitable ? 1000.0 : 0.0);
+
+            boolean isBetter = score > bestScore;
+
+            if (!isBetter) continue;
+
+            bestScore = score;
+            bestSlot = i;
         }
 
         if (bestSlot == -1) return false;
 
         blockTask.toolToUse = mc.player.getInventory().getStack(bestSlot);
-
         captureSwapBackSlotIfSilent();
 
         if (bestSlot < 9) {
             InvUtils.swap(bestSlot, false);
-        } else {
-            FindItemResult result = InvUtils.find(blockTask.toolToUse.getItem());
-            if (result.found()) {
-                InvUtils.move().from(result.slot()).toHotbar(0);
-                InvUtils.swap(0, false);
-            }
+            return true;
         }
 
+        int targetHotbar = findPreferredToolHotbarSlot(module.swapMode.get() == EChestSwapMode.Silent);
+        if (targetHotbar == -1) return false;
+
+        InvUtils.move().from(bestSlot).toHotbar(targetHotbar);
+        InvUtils.swap(targetHotbar, false);
         return true;
+    }
+
+    private int findPreferredToolHotbarSlot(boolean avoidSelectedInSilent) {
+        if (mc.player == null) return -1;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+
+        for (int i = 0; i < 9; i++) {
+            if (avoidSelectedInSilent && i == selected) continue;
+            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (avoidSelectedInSilent && i == selected) continue;
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isDisposableBuildStack(stack)) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (avoidSelectedInSilent && i == selected) continue;
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isPickaxeStack(stack)) return i;
+        }
+
+        if (!avoidSelectedInSilent) return selected;
+
+        // Last resort in silent: only if absolutely no other target slot exists.
+        return selected;
     }
 
     /**
@@ -117,8 +260,10 @@ public class InventoryHandler {
             itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == useMat);
 
         if (invResult.found()) {
-            InvUtils.move().from(invResult.slot()).toHotbar(0);
-            InvUtils.swap(0, false);
+            int targetHotbar = findPreferredBuildHotbarSlot();
+            if (targetHotbar == -1) return false;
+            InvUtils.move().from(invResult.slot()).toHotbar(targetHotbar);
+            InvUtils.swap(targetHotbar, false);
             return true;
         }
 
@@ -226,6 +371,162 @@ public class InventoryHandler {
         return false;
     }
 
+    private int[] getCleanupScanOrder() {
+        // Main inventory first, then hotbar.
+        int[] order = new int[36];
+        int p = 0;
+        for (int i = 9; i < 36; i++) order[p++] = i;
+        for (int i = 0; i < 9; i++) order[p++] = i;
+        return order;
+    }
+
+    private int findNetherrackCleanupSlot(int excess) {
+        if (mc.player == null || excess <= 0) return -1;
+
+        int bestSlot = -1;
+        int bestCount = Integer.MAX_VALUE;
+
+        for (int slot : getCleanupScanOrder()) {
+            ItemStack stack = mc.player.getInventory().getStack(slot);
+            if (stack.getItem() != Items.NETHERRACK) continue;
+
+            int count = stack.getCount();
+            if (count <= excess) {
+                if (count < bestCount) {
+                    bestCount = count;
+                    bestSlot = slot;
+                }
+            } else if (bestSlot == -1) {
+                // fallback: if all stacks are bigger than excess, drop single items from this one
+                bestSlot = slot;
+            }
+        }
+
+        return bestSlot;
+    }
+
+    private void dropInventorySlot(int inventorySlot, boolean fullStack) {
+        if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
+        int screenSlot = inventorySlotToScreenSlot(inventorySlot);
+        if (screenSlot < 0) return;
+        mc.interactionManager.clickSlot(
+            mc.player.currentScreenHandler.syncId,
+            screenSlot,
+            fullStack ? 1 : 0,
+            SlotActionType.THROW,
+            mc.player
+        );
+    }
+
+    private int inventorySlotToScreenSlot(int inventorySlot) {
+        if (inventorySlot < 0 || inventorySlot >= 36) return -1;
+        return inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
+    }
+
+    private boolean shouldDropJunkStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        Item item = stack.getItem();
+
+        if (item == Items.NETHERRACK) return false;
+        if (JUNK_ITEMS.contains(item)) {
+            // Keep Fortune III pickaxe, even if enchanted.
+            return !isFortuneThreePickaxeNoSilk(stack);
+        }
+
+        if (isFireResistancePotion(stack)) return true;
+
+        // Extra rule from request: throw enchanted armor/tools as junk,
+        // except the valid Fortune III pickaxe used by the builder.
+        if (hasAnyEnchantments(stack) && !isFortuneThreePickaxeNoSilk(stack)) {
+            if (stack.isDamageable()) return true;
+            if (stack.isIn(ItemTags.SWORDS)) return true;
+            if (stack.isIn(ItemTags.AXES)) return true;
+            if (stack.isIn(ItemTags.SHOVELS)) return true;
+            if (stack.isIn(ItemTags.HOES)) return true;
+            if (stack.isIn(ItemTags.PICKAXES)) return true;
+        }
+
+        // Soul Speed enchanted book is junk by request.
+        return item == Items.ENCHANTED_BOOK
+            && Utils.getEnchantmentLevel(stack, Enchantments.SOUL_SPEED) > 0;
+    }
+
+    private boolean isFireResistancePotion(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (stack.getItem() != Items.POTION
+            && stack.getItem() != Items.SPLASH_POTION
+            && stack.getItem() != Items.LINGERING_POTION) return false;
+
+        var contents = stack.get(DataComponentTypes.POTION_CONTENTS);
+        if (contents == null || contents.potion().isEmpty()) return false;
+        var potion = contents.potion().get().value();
+        var id = Registries.POTION.getId(potion);
+        return id != null && id.getPath().contains("fire_resistance");
+    }
+
+    private boolean hasAnyEnchantments(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return stack.contains(DataComponentTypes.ENCHANTMENTS)
+            || stack.contains(DataComponentTypes.STORED_ENCHANTMENTS);
+    }
+
+    private int findPreferredBuildHotbarSlot() {
+        if (mc.player == null) return -1;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        ItemStack selectedStack = mc.player.getInventory().getStack(selected);
+        if (!isPickaxeStack(selectedStack)) return selected;
+
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isDisposableBuildStack(stack)) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isPickaxeStack(stack)) return i;
+        }
+
+        // Last resort: allow replacing a pick slot only if at least one pickaxe
+        // remains in hotbar afterwards.
+        int pickCount = countHotbarPickaxes();
+        if (pickCount > 1) {
+            for (int i = 0; i < 9; i++) {
+                if (i == selected) continue;
+                if (isPickaxeStack(mc.player.getInventory().getStack(i))) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private int countHotbarPickaxes() {
+        if (mc.player == null) return 0;
+        int count = 0;
+        for (int i = 0; i < 9; i++) {
+            if (isPickaxeStack(mc.player.getInventory().getStack(i))) count++;
+        }
+        return count;
+    }
+
+    private boolean isPickaxeStack(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.isIn(ItemTags.PICKAXES);
+    }
+
+    private boolean isDisposableBuildStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!(stack.getItem() instanceof BlockItem bi)) return false;
+        Block block = bi.getBlock();
+        return block == Blocks.OBSIDIAN
+            || block == Blocks.NETHERRACK
+            || block == module.getMaterial()
+            || block == module.getFillerMat();
+    }
+
     private int countBlock(Block block) {
         if (mc.player == null) return 0;
         int count = 0;
@@ -238,38 +539,39 @@ public class InventoryHandler {
         return count;
     }
 
-    private int countPickaxes() {
+    private boolean shouldRestockFortunePickaxe() {
+        if (mc.player == null) return false;
+
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isFortuneThreePickaxeNoSilk(stack)) return false;
+        }
+
+        return true;
+    }
+
+    private boolean isFortuneThreePickaxeNoSilk(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!stack.isIn(ItemTags.PICKAXES)) return false;
+        if (Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH)) return false;
+        return Utils.getEnchantmentLevel(stack, Enchantments.FORTUNE) == 3;
+    }
+
+    private boolean isSilkTouchPickaxe(ItemStack stack) {
+        return stack != null
+            && !stack.isEmpty()
+            && stack.isIn(ItemTags.PICKAXES)
+            && Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH);
+    }
+
+    private int countItem(Item item) {
         if (mc.player == null) return 0;
         int count = 0;
         for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.isIn(ItemTags.PICKAXES)) {
-                count++;
-            }
+            if (stack.getItem() == item) count += stack.getCount();
         }
         return count;
     }
 
-    private Item findBestPickaxeType() {
-        if (mc.player == null) return Items.DIAMOND_PICKAXE;
-        Item best = null;
-        float bestSpeed = 0;
-        for (int i = 0; i < 36; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isIn(ItemTags.PICKAXES)) continue;
-            float speed = stack.getMiningSpeedMultiplier(
-                net.minecraft.block.Blocks.OBSIDIAN.getDefaultState());
-            if (speed > bestSpeed) {
-                bestSpeed = speed;
-                best = stack.getItem();
-            }
-        }
-        // Fallback: search shulkers for any pickaxe type
-        if (best == null) {
-            for (Item candidate : List.of(Items.NETHERITE_PICKAXE, Items.DIAMOND_PICKAXE, Items.IRON_PICKAXE)) {
-                if (module.containerHandler.findShulkerWithItem(candidate) != -1) return candidate;
-            }
-        }
-        return best;
-    }
 }

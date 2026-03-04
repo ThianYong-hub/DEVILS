@@ -1,19 +1,22 @@
 package com.example.addon.modules.highwaybuilder;
 
+import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
-import net.minecraft.entity.ItemEntity;
 import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.SlotActionType;
@@ -36,8 +39,8 @@ public class ContainerHandler {
     private static final double RESTOCK_EDGE_PADDING = 0.04;
     private static final double RESTOCK_BIAS_AWAY_FROM_CONTAINER = 0.08;
     private static final int HAND_SWAP_OPEN_DELAY_TICKS = 2;
-    private static final double SHULKER_PICKUP_SEARCH_RADIUS = 14.0;
-    private static final int PICKUP_MISS_GRACE_TICKS = 8;
+    private static final double SHULKER_PICKUP_SEARCH_RADIUS = 32.0;
+    private static final int PICKUP_MISS_GRACE_TICKS = 20;
 
     private final HighwayBuilder module;
     public BlockTask containerTask;
@@ -50,9 +53,18 @@ public class ContainerHandler {
     private int handSwapDelay = 0;
     private int pickupMissTicks = 0;
     private boolean waitingForScreenClose = false;
+    private int waitingForScreenCloseTicks = 0;
+    private int openLoadedWaitTicks = 0;
+    private int openSideIndex = 0;
     private BlockPos lastContainerPos = null;
     private BlockPos restockStandBlock = null;
     private Vec3d restockStandPos = null;
+    private boolean restockingFortunePickaxe = false;
+    private boolean tookReplacementPickaxe = false;
+    private int pickaxeConfirmWaitTicks = 0;
+    private Item activeContainerItem = null;
+    private int activeContainerCountBeforePlace = -1;
+    private int activeContainerHotbarSlot = -1;
 
     public ContainerHandler(HighwayBuilder module) {
         this.module = module;
@@ -75,7 +87,7 @@ public class ContainerHandler {
         clearRestockStandTarget();
 
         // Reserve at least one slot for the shulker item after breaking it.
-        if (!hasSpaceForContainerDrop()) {
+        if (!hasSpaceForContainerDrop() && !ensureReservedPickupSlot()) {
             module.disableWithError("Need at least one free inventory slot for shulker pickup.");
             return;
         }
@@ -86,49 +98,105 @@ public class ContainerHandler {
             module.disableWithError("No shulker box found containing " + item.getName().getString());
             return;
         }
+        resetPickaxeRestockState();
+        targetItem = item;
+        if (!startRestockCycle(shulkerSlot, item)) return;
+    }
 
-        // Get the shulker block type from the item
-        ItemStack shulkerStack = mc.player.getInventory().getStack(shulkerSlot);
-        Block shulkerBlock = ((BlockItem) shulkerStack.getItem()).getBlock();
-
-        // Move shulker to hotbar slot 0 if it's in main inventory
-        if (shulkerSlot >= 9) {
-            InvUtils.move().from(shulkerSlot).toHotbar(0);
+    public void handleFortunePickaxeRestock() {
+        if (!module.storageManagement.get()) {
+            module.disableWithError("No usable material/tool found and storage management is disabled.");
+            return;
         }
 
-        // Find a valid position to place the shulker
+        if (containerTask.taskState != TaskState.DONE) return;
+        if (mc.player == null) return;
+
+        clearRestockStandTarget();
+
+        if (!hasSpaceForContainerDrop() && !ensureReservedPickupSlot()) {
+            module.disableWithError("Need at least one free inventory slot for shulker pickup.");
+            return;
+        }
+
+        int shulkerSlot = findShulkerWithFortunePickaxe();
+        if (shulkerSlot == -1) {
+            module.disableWithError("No shulker box found with Fortune III pickaxe (Silk Touch is not allowed).");
+            return;
+        }
+
+        restockingFortunePickaxe = true;
+        tookReplacementPickaxe = false;
+        pickaxeConfirmWaitTicks = 0;
+        targetItem = Items.DIAMOND_PICKAXE;
+
+        if (!startRestockCycle(shulkerSlot, targetItem)) {
+            resetPickaxeRestockState();
+        }
+    }
+
+    private boolean startRestockCycle(int shulkerSlot, Item item) {
+        if (mc.player == null) return false;
+
+        ItemStack shulkerStack = mc.player.getInventory().getStack(shulkerSlot);
+        if (!(shulkerStack.getItem() instanceof BlockItem shulkerItem)) {
+            module.disableWithError("Selected restock container is not a shulker box.");
+            return false;
+        }
+        Block shulkerBlock = shulkerItem.getBlock();
+        activeContainerItem = shulkerStack.getItem();
+        activeContainerCountBeforePlace = countInventoryItem(activeContainerItem);
+        activeContainerHotbarSlot = prepareContainerItemOnHotbar(shulkerSlot);
+        if (activeContainerHotbarSlot == -1) {
+            module.disableWithError("Failed to prepare shulker in hotbar for placement.");
+            return false;
+        }
+
         BlockPos containerPos = getRemotePos();
         if (containerPos == null) {
             module.disableWithError("No valid position found for container placement.");
-            return;
+            return false;
         }
         lastContainerPos = containerPos;
 
         restockStandBlock = selectRestockStandBlock(containerPos);
         if (restockStandBlock == null) {
             module.disableWithError("No safe standing position found for container restock.");
-            return;
+            return false;
         }
         restockStandPos = getSafeRestockPoint(restockStandBlock, containerPos);
         if (restockStandPos == null) {
             module.disableWithError("Failed to compute safe restock center.");
-            return;
+            return false;
         }
 
         containerTask = new BlockTask(containerPos, TaskState.PLACE, shulkerBlock);
         containerTask.item = item;
         containerTask.collect = true;
-        containerTask.destroy = false; // open first, then destroy after taking items
+        containerTask.destroy = false;
 
-        targetItem = item;
         transferDelay = 0;
         openAttempts = 0;
         openDelay = 0;
         handSwapDelay = 0;
         pickupMissTicks = 0;
+        waitingForScreenCloseTicks = 0;
+        openLoadedWaitTicks = 0;
+        openSideIndex = 0;
         waitingForScreenClose = false;
 
         module.pathfinder.moveState = MovementState.RESTOCK;
+        return true;
+    }
+
+    private void resetPickaxeRestockState() {
+        restockingFortunePickaxe = false;
+        tookReplacementPickaxe = false;
+        pickaxeConfirmWaitTicks = 0;
+        openLoadedWaitTicks = 0;
+        activeContainerItem = null;
+        activeContainerCountBeforePlace = -1;
+        activeContainerHotbarSlot = -1;
     }
 
     /**
@@ -140,15 +208,31 @@ public class ContainerHandler {
         module.pathfinder.moveState = MovementState.RESTOCK;
 
         // If screen already opened but packet flag was missed, continue to restock.
+        // Do NOT set isLoaded here — wait for InventoryS2CPacket via PacketHandler
+        // to ensure container slot data has actually arrived from the server.
         if (!containerTask.isOpen && mc.player.currentScreenHandler != null
             && mc.player.currentScreenHandler.syncId != 0) {
             containerTask.isOpen = true;
-            containerTask.isLoaded = true;
         }
 
-        // If already open, transition to RESTOCK to take items
+        // If already open, wait for slot data to arrive, then transition to RESTOCK.
         if (containerTask.isOpen) {
+            if (!containerTask.isLoaded) {
+                // Slot data not yet received from server — wait.
+                openLoadedWaitTicks++;
+                if (mc.player.currentScreenHandler != null
+                    && mc.player.currentScreenHandler.syncId != 0
+                    && openLoadedWaitTicks > 8) {
+                    // Fallback for servers/modpacks that delay or filter
+                    // normal container slot sync packets.
+                    containerTask.isLoaded = true;
+                }
+                containerTask.resetStuck();
+                return;
+            }
             openAttempts = 0;
+            openLoadedWaitTicks = 0;
+            openSideIndex = 0;
             containerTask.updateState(TaskState.RESTOCK);
             return;
         }
@@ -171,9 +255,8 @@ public class ContainerHandler {
             return;
         }
 
-        // Check reach distance
-        double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(containerTask.blockPos));
-        if (dist > module.maxReach.get() + 0.2) {
+        // Check reach distance using closest interact face, not center.
+        if (getBestContainerInteractDistance(containerTask.blockPos) > module.maxReach.get() + 0.35) {
             // Wait for pathfinder to bring us closer
             return;
         }
@@ -186,8 +269,14 @@ public class ContainerHandler {
             openAttempts++;
             if (openAttempts > 30) {
                 clearRestockStandTarget();
-                containerTask.updateState(TaskState.DONE);
-                module.pathfinder.moveState = MovementState.RUNNING;
+                BlockPos probePos = lastContainerPos != null ? lastContainerPos : containerTask.blockPos;
+                if (mc.world.getBlockState(probePos).getBlock() instanceof ShulkerBoxBlock) {
+                    beginContainerBreak();
+                    module.pathfinder.moveState = MovementState.RESTOCK;
+                } else {
+                    containerTask.updateState(TaskState.PICKUP);
+                    module.pathfinder.moveState = MovementState.PICKUP;
+                }
                 openAttempts = 0;
             }
             return;
@@ -212,7 +301,10 @@ public class ContainerHandler {
             mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
 
             if (mc.interactionManager != null) {
-                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+                var result = mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+                if (!result.isAccepted() && mc.getNetworkHandler() != null) {
+                    mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
+                }
             } else if (mc.getNetworkHandler() != null) {
                 mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, 0));
             }
@@ -227,30 +319,57 @@ public class ContainerHandler {
 
         openDelay = 6; // wait before retrying (server needs time to respond)
         openAttempts++;
+        if (openAttempts % 8 == 0) {
+            // Force stand target re-evaluation if we keep missing interacts.
+            invalidateRestockStandTarget();
+        }
         if (openAttempts > 25) {
             // Stuck trying to open — break and abort
-            containerTask.destroy = true;
-            containerTask.collect = true;
-            containerTask.updateState(TaskState.BREAK);
+            beginContainerBreak();
             openAttempts = 0;
         }
     }
 
     private Direction getContainerInteractSide(BlockPos pos) {
-        Direction side = HWUtils.getMiningSide(pos);
-        if (side != null) return side;
-        if (mc.player == null) return Direction.UP;
+        if (mc.player == null || mc.world == null) return Direction.UP;
 
         Vec3d eye = mc.player.getEyePos();
-        Vec3d center = Vec3d.ofCenter(pos);
-        double dx = eye.x - center.x;
-        double dy = eye.y - center.y;
-        double dz = eye.z - center.z;
+        double maxReach = module.maxReach.get() + 0.45;
+        List<Direction> visible = new ArrayList<>();
 
-        if (Math.abs(dy) > Math.abs(dx) + Math.abs(dz)) {
-            return dy > 0 ? Direction.UP : Direction.DOWN;
+        for (Direction side : Direction.values()) {
+            Vec3d hit = HWUtils.getHitVec(pos, side);
+            if (eye.distanceTo(hit) > maxReach) continue;
+
+            BlockPos adjacent = pos.offset(side);
+            BlockState adjacentState = mc.world.getBlockState(adjacent);
+            boolean faceExposed = adjacentState.isAir()
+                || adjacentState.isReplaceable()
+                || !adjacentState.isOpaque();
+            if (faceExposed) visible.add(side);
         }
-        return Direction.getFacing(dx, 0.0, dz);
+
+        if (visible.isEmpty()) {
+            Direction best = null;
+            double bestDist = Double.MAX_VALUE;
+            for (Direction side : Direction.values()) {
+                double dist = eye.distanceTo(HWUtils.getHitVec(pos, side));
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = side;
+                }
+            }
+            return best != null ? best : Direction.UP;
+        }
+
+        visible.sort((a, b) -> Double.compare(
+            eye.distanceTo(HWUtils.getHitVec(pos, a)),
+            eye.distanceTo(HWUtils.getHitVec(pos, b))
+        ));
+
+        Direction side = visible.get(openSideIndex % visible.size());
+        openSideIndex++;
+        return side;
     }
 
     private enum HandSafetyResult {
@@ -360,11 +479,14 @@ public class ContainerHandler {
         if (waitingForScreenClose) {
             if (mc.player.currentScreenHandler == null || mc.player.currentScreenHandler.syncId == 0) {
                 waitingForScreenClose = false;
-                containerTask.isOpen = false;
-                containerTask.isLoaded = false;
-                containerTask.destroy = true;
-                containerTask.collect = true;
-                containerTask.updateState(TaskState.BREAK);
+                waitingForScreenCloseTicks = 0;
+                beginContainerBreak();
+                return;
+            }
+
+            waitingForScreenCloseTicks++;
+            if (waitingForScreenCloseTicks % 6 == 0) {
+                mc.player.closeHandledScreen();
             }
             return;
         }
@@ -392,6 +514,10 @@ public class ContainerHandler {
 
         if (targetItem == Items.ENDER_CHEST) {
             doEnderChestRestock(handler);
+            return;
+        }
+        if (restockingFortunePickaxe) {
+            doFortunePickaxeRestock(handler);
             return;
         }
 
@@ -426,6 +552,19 @@ public class ContainerHandler {
     public void doPickup() {
         if (mc.world == null) return;
 
+        BlockState atContainerPos = mc.world.getBlockState(containerTask.blockPos);
+        if (atContainerPos.getBlock() instanceof ShulkerBoxBlock) {
+            // Container still exists at the placement position: re-enter break flow.
+            beginContainerBreak();
+            module.pathfinder.moveState = MovementState.RESTOCK;
+            return;
+        }
+
+        if (hasRecoveredContainerItem()) {
+            finishPickupSuccess();
+            return;
+        }
+
         ItemEntity shulkerDrop = findClosestShulkerDrop();
         if (shulkerDrop != null) {
             pickupMissTicks = 0;
@@ -436,76 +575,118 @@ public class ContainerHandler {
                     return;
                 }
             }
-            containerTask.onStuck();
+            containerTask.resetStuck();
             return;
         }
 
         pickupMissTicks++;
         if (pickupMissTicks < PICKUP_MISS_GRACE_TICKS) {
-            containerTask.onStuck();
+            containerTask.resetStuck();
             return;
         }
 
-        // No drop entity found within grace window — treat as collected.
+        // Shulker wasn't confirmed as recovered yet: keep searching and don't
+        // switch back to normal build loop prematurely.
+        containerTask.resetStuck();
+    }
+
+    private void finishPickupSuccess() {
+        if (restockingFortunePickaxe) {
+            normalizePostPickaxeRestockHotbar();
+        }
         clearRestockStandTarget();
+        resetPickaxeRestockState();
         containerTask.updateState(TaskState.DONE);
         module.pathfinder.moveState = MovementState.RUNNING;
         grindCycles++;
+    }
+
+    private boolean hasRecoveredContainerItem() {
+        if (activeContainerItem == null || activeContainerCountBeforePlace < 0) return false;
+        return countInventoryItem(activeContainerItem) >= activeContainerCountBeforePlace;
+    }
+
+    private void normalizePostPickaxeRestockHotbar() {
+        if (mc.player == null) return;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        int fortunePickSlot = findBestFortunePickaxeSlotInInventory();
+        if (fortunePickSlot == -1) return;
+
+        if (fortunePickSlot < 9) {
+            if (fortunePickSlot != selected) InvUtils.swap(fortunePickSlot, false);
+            return;
+        }
+
+        InvUtils.move().from(fortunePickSlot).toHotbar(selected);
+    }
+
+    private int findBestFortunePickaxeSlotInInventory() {
+        if (mc.player == null) return -1;
+
+        int bestSlot = -1;
+        int bestRemaining = -1;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!isFortuneThreePickaxeNoSilk(stack)) continue;
+
+            int remaining = stack.isDamageable()
+                ? stack.getMaxDamage() - stack.getDamage()
+                : Integer.MAX_VALUE;
+            if (remaining > bestRemaining) {
+                bestRemaining = remaining;
+                bestSlot = i;
+            }
+        }
+
+        return bestSlot;
     }
 
     /**
      * Close the shulker screen and transition to BREAK state.
      */
     private void closeAndBreak() {
-        if (!ensureReservedPickupSlot()) {
-            containerTask.onStuck();
-            return;
-        }
-
         if (mc.player != null
             && mc.player.currentScreenHandler != null
             && mc.player.currentScreenHandler.syncId != 0) {
             mc.player.closeHandledScreen();
             waitingForScreenClose = true;
+            waitingForScreenCloseTicks = 0;
             transferDelay = 2;
             return;
         }
 
         waitingForScreenClose = false;
+        waitingForScreenCloseTicks = 0;
+        beginContainerBreak();
+    }
+
+    private void beginContainerBreak() {
         containerTask.isOpen = false;
         containerTask.isLoaded = false;
         containerTask.destroy = true;
         containerTask.collect = true;
+        containerTask.miningSide = null;
+        openSideIndex = 0;
+        openLoadedWaitTicks = 0;
         pickupMissTicks = 0;
         containerTask.updateState(TaskState.BREAK);
     }
 
     private boolean ensureReservedPickupSlot() {
         if (hasSpaceForContainerDrop()) return true;
-        if (!dropSmallestObsidianStack()) return false;
+        if (tryStoreDisposableStackInOpenContainer()) return hasSpaceForContainerDrop();
+        if (!dropSmallestDisposableStack()) return false;
         return hasSpaceForContainerDrop();
     }
 
-    private boolean dropSmallestObsidianStack() {
+    private boolean dropSmallestDisposableStack() {
         if (mc.player == null || mc.interactionManager == null) return false;
 
         ScreenHandler handler = mc.player.currentScreenHandler;
         if (handler == null) return false;
 
-        int playerStart = Math.max(0, handler.slots.size() - 36);
-        int playerEnd = handler.slots.size();
-        int smallestSlot = -1;
-        int smallestCount = Integer.MAX_VALUE;
-
-        for (int i = playerStart; i < playerEnd; i++) {
-            ItemStack stack = handler.getSlot(i).getStack();
-            if (stack.isEmpty() || stack.getItem() != Items.OBSIDIAN) continue;
-            if (stack.getCount() < smallestCount) {
-                smallestCount = stack.getCount();
-                smallestSlot = i;
-            }
-        }
-
+        int smallestSlot = findSmallestDisposablePlayerSlot(handler);
         if (smallestSlot == -1) return false;
 
         // Button=1 throws full stack; we choose the smallest stack to minimize loss.
@@ -615,6 +796,210 @@ public class ContainerHandler {
 
         // No more ender chests in this shulker.
         closeAndBreak();
+    }
+
+    private void doFortunePickaxeRestock(ScreenHandler handler) {
+        if (mc.player == null || mc.interactionManager == null) return;
+
+        // Keep cursor clean so move/quick-move logic stays deterministic.
+        if (!handler.getCursorStack().isEmpty()) {
+            containerTask.onStuck();
+            return;
+        }
+
+        if (!tookReplacementPickaxe) {
+            int replacementSlot = findBestFortunePickaxeSlotInContainer(handler);
+            if (replacementSlot == -1) {
+                closeAndBreak();
+                return;
+            }
+
+            // Prefer deterministic hotbar swap: this avoids inventory-drop logic
+            // while interacting with shulker and works even with full inventory.
+            if (swapContainerSlotToHotbar(handler, replacementSlot)) {
+                tookReplacementPickaxe = true;
+                pickaxeConfirmWaitTicks = 8;
+                transferDelay = 2;
+            } else if (hasSpaceForContainerDrop() && quickMoveSlot(handler, replacementSlot)) {
+                tookReplacementPickaxe = true;
+                pickaxeConfirmWaitTicks = 8;
+                transferDelay = 2;
+            } else if (tryStoreDisposableStackInOpenContainer()) {
+                transferDelay = 2;
+            } else if (dropSmallestDisposableStack()) {
+                transferDelay = 2;
+            } else {
+                containerTask.onStuck();
+            }
+            return;
+        }
+
+        // Don't close immediately: wait for server inventory sync and confirm
+        // that a valid Fortune III non-silk pickaxe is now in inventory.
+        if (findBestFortunePickaxeSlotInInventory() == -1) {
+            if (pickaxeConfirmWaitTicks > 0) {
+                pickaxeConfirmWaitTicks--;
+                containerTask.resetStuck();
+                return;
+            }
+
+            // No confirmation after grace period — retry taking once more.
+            tookReplacementPickaxe = false;
+            transferDelay = 1;
+            return;
+        }
+
+        closeAndBreak();
+    }
+
+    private boolean swapContainerSlotToHotbar(ScreenHandler handler, int containerSlot) {
+        if (mc.player == null || mc.interactionManager == null) return false;
+        if (containerSlot < 0 || containerSlot >= 27) return false;
+
+        int hotbarSlot = findFortunePickaxeReceiveHotbarSlot();
+        if (hotbarSlot == -1) return false;
+
+        mc.interactionManager.clickSlot(handler.syncId, containerSlot, hotbarSlot, SlotActionType.SWAP, mc.player);
+
+        if (mc.player.getInventory().getSelectedSlot() != hotbarSlot) {
+            InvUtils.swap(hotbarSlot, false);
+        }
+
+        return true;
+    }
+
+    private int findFortunePickaxeReceiveHotbarSlot() {
+        if (mc.player == null) return -1;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        ItemStack selectedStack = mc.player.getInventory().getStack(selected);
+        if (isSafeFortuneSwapTarget(selectedStack)) return selected;
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isDisposableForSlotReserve(stack) && isSafeFortuneSwapTarget(stack)) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isSafeFortuneSwapTarget(stack) && !stack.isIn(ItemTags.PICKAXES)) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (isSafeFortuneSwapTarget(stack)) return i;
+        }
+
+        return -1;
+    }
+
+    private boolean isSafeFortuneSwapTarget(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return true;
+
+        // Never swap an active/restock shulker item into opened container:
+        // it can desync recovery accounting and break pickup flow.
+        if (activeContainerItem != null && stack.getItem() == activeContainerItem) return false;
+        if (stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock) return false;
+
+        return true;
+    }
+
+    private int findBestFortunePickaxeSlotInContainer(ScreenHandler handler) {
+        int bestSlot = -1;
+        int bestRemaining = -1;
+        for (int i = 0; i < 27; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (!isFortuneThreePickaxeNoSilk(stack)) continue;
+
+            int remaining = stack.isDamageable()
+                ? stack.getMaxDamage() - stack.getDamage()
+                : Integer.MAX_VALUE;
+            if (remaining > bestRemaining) {
+                bestRemaining = remaining;
+                bestSlot = i;
+            }
+        }
+        return bestSlot;
+    }
+
+    private boolean quickMoveSlot(ScreenHandler handler, int slot) {
+        if (mc.player == null || mc.interactionManager == null) return false;
+        if (slot < 0 || slot >= handler.slots.size()) return false;
+
+        ItemStack before = handler.getSlot(slot).getStack();
+        if (before.isEmpty()) return false;
+
+        mc.interactionManager.clickSlot(handler.syncId, slot, 0, SlotActionType.QUICK_MOVE, mc.player);
+
+        // Trust the click packet — on laggy servers the slot may not update until
+        // the next tick, so checking count immediately is unreliable.
+        // The transferDelay set by callers gives the server time to sync.
+        return true;
+    }
+
+    private boolean tryStoreDisposableStackInOpenContainer() {
+        if (mc.player == null || mc.interactionManager == null) return false;
+        ScreenHandler handler = mc.player.currentScreenHandler;
+        if (handler == null || handler.syncId == 0) return false;
+        if (hasSpaceForContainerDrop()) return true;
+
+        int playerSlot = findSmallestDisposablePlayerSlot(handler);
+        if (playerSlot == -1) return false;
+        ItemStack stackToMove = handler.getSlot(playerSlot).getStack();
+        if (stackToMove.isEmpty()) return false;
+        if (!hasContainerRoomForStack(handler, stackToMove)) return false;
+
+        return quickMoveSlot(handler, playerSlot);
+    }
+
+    private boolean hasContainerRoomForStack(ScreenHandler handler, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+
+        for (int i = 0; i < 27; i++) {
+            ItemStack slotStack = handler.getSlot(i).getStack();
+            if (slotStack.isEmpty()) return true;
+            if (ItemStack.areItemsAndComponentsEqual(slotStack, stack)
+                && slotStack.getCount() < slotStack.getMaxCount()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private int findSmallestDisposablePlayerSlot(ScreenHandler handler) {
+        int playerStart = Math.max(0, handler.slots.size() - 36);
+        int playerEnd = handler.slots.size();
+
+        int smallestSlot = -1;
+        int smallestCount = Integer.MAX_VALUE;
+
+        for (int i = playerStart; i < playerEnd; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (!isDisposableForSlotReserve(stack)) continue;
+            if (stack.getCount() < smallestCount) {
+                smallestCount = stack.getCount();
+                smallestSlot = i;
+            }
+        }
+
+        return smallestSlot;
+    }
+
+    private boolean isDisposableForSlotReserve(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!(stack.getItem() instanceof BlockItem bi)) return false;
+
+        Block block = bi.getBlock();
+        return block == Blocks.OBSIDIAN
+            || block == Blocks.NETHERRACK
+            || block == module.getMaterial()
+            || block == module.getFillerMat();
     }
 
     private boolean tryMoveObsidianFromContainer(ScreenHandler handler) {
@@ -781,60 +1166,126 @@ public class ContainerHandler {
         return -1;
     }
 
+    public int findShulkerWithFortunePickaxe() {
+        if (mc.player == null) return -1;
+
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (!(stack.getItem() instanceof BlockItem bi)) continue;
+            if (!(bi.getBlock() instanceof ShulkerBoxBlock)) continue;
+
+            ContainerComponent container = stack.get(DataComponentTypes.CONTAINER);
+            if (container == null) continue;
+
+            for (ItemStack contained : container.iterateNonEmpty()) {
+                if (isFortuneThreePickaxeNoSilk(contained)) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private boolean isFortuneThreePickaxeNoSilk(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!stack.isIn(ItemTags.PICKAXES)) return false;
+        if (Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH)) return false;
+        return Utils.getEnchantmentLevel(stack, Enchantments.FORTUNE) == 3;
+    }
+
     // ── Position helpers ─────────────────────────────────────────────────
 
     /**
      * Find a valid position adjacent to the player to place a container.
-     * Prioritises the position behind the player (relative to highway direction),
-     * then falls back to all four cardinal directions.
-     * Does NOT exclude blueprint positions — the shulker is temporary.
+     * Prioritises behind and back-diagonal positions, then sides.
+     * Never picks positions in front of the player relative to highway direction.
+     * Keeps placement within one horizontal block (adjacent/diagonal), never two blocks away.
      */
     private BlockPos getRemotePos() {
         if (mc.player == null || mc.world == null) return null;
 
         BlockPos playerPos = mc.player.getBlockPos();
-        BlockPos anchorPos = module.pathfinder != null ? module.pathfinder.currentBlockPos : playerPos;
         double maxReach = module.maxReach.get();
+        HWDirection hwDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
 
         // Reuse previous successful container position if still valid.
-        if (lastContainerPos != null && isValidContainerPos(lastContainerPos, maxReach)) {
+        if (lastContainerPos != null
+            && isPreferredContainerPos(lastContainerPos, playerPos, hwDir)
+            && isValidContainerPos(lastContainerPos, maxReach)) {
             return lastContainerPos;
         }
 
-        // 1) Try behind anchor block (already-built highway — guaranteed solid floor)
-        HWDirection hwDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
+        List<BlockPos> candidates = new ArrayList<>();
+        Set<BlockPos> unique = new HashSet<>();
+
+        // Preferred order: behind -> behind diagonals -> sides.
         if (hwDir != null) {
-            BlockPos behind = anchorPos.add(
-                -hwDir.directionVec.getX(), 0, -hwDir.directionVec.getZ());
-            if (isValidContainerPos(behind, maxReach)) return behind;
-        }
+            int fx = Integer.signum(hwDir.directionVec.getX());
+            int fz = Integer.signum(hwDir.directionVec.getZ());
+            int bx = -fx;
+            int bz = -fz;
 
-        // 2) Try all four cardinal directions around anchor
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos pos = anchorPos.offset(dir);
-            if (isValidContainerPos(pos, maxReach)) return pos;
-        }
+            HWDirection lateral = hwDir.lateralDirection();
+            int sx = Integer.signum(lateral.directionVec.getX());
+            int sz = Integer.signum(lateral.directionVec.getZ());
 
-        // 3) Try one block above in the same directions (in case floor is uneven)
-        if (hwDir != null) {
-            BlockPos behindUp = anchorPos.add(
-                -hwDir.directionVec.getX(), 1, -hwDir.directionVec.getZ());
-            if (isValidContainerPos(behindUp, maxReach)) return behindUp;
-        }
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos pos = anchorPos.offset(dir).up();
-            if (isValidContainerPos(pos, maxReach)) return pos;
-        }
+            // Directly behind.
+            if (bx != 0 || bz != 0) addCandidate(candidates, unique, playerPos.add(bx, 0, bz));
 
-        // 4) Fallback around actual player block (edge cases on uneven terrain)
-        if (!anchorPos.equals(playerPos)) {
-            for (Direction dir : Direction.Type.HORIZONTAL) {
-                BlockPos pos = playerPos.offset(dir);
-                if (isValidContainerPos(pos, maxReach)) return pos;
+            // Behind diagonals.
+            if (sx != 0 || sz != 0) {
+                addCandidate(candidates, unique, playerPos.add(bx + sx, 0, bz + sz));
+                addCandidate(candidates, unique, playerPos.add(bx - sx, 0, bz - sz));
+            }
+
+            // Side blocks.
+            if (sx != 0 || sz != 0) {
+                addCandidate(candidates, unique, playerPos.add(sx, 0, sz));
+                addCandidate(candidates, unique, playerPos.add(-sx, 0, -sz));
+            }
+
+            // Diagonal-forward directions can miss one of close back-adjacent cells.
+            if (bx != 0 && bz != 0) {
+                addCandidate(candidates, unique, playerPos.add(bx, 0, 0));
+                addCandidate(candidates, unique, playerPos.add(0, 0, bz));
             }
         }
 
+        // Fallback around player (still adjacent only).
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            addCandidate(candidates, unique, playerPos.offset(dir));
+        }
+        addCandidate(candidates, unique, playerPos.add(1, 0, 1));
+        addCandidate(candidates, unique, playerPos.add(1, 0, -1));
+        addCandidate(candidates, unique, playerPos.add(-1, 0, 1));
+        addCandidate(candidates, unique, playerPos.add(-1, 0, -1));
+
+        // Validate with strict preference first.
+        for (BlockPos pos : candidates) {
+            if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
+            if (isValidContainerPos(pos, maxReach)) return pos;
+        }
+
+        // Last chance: same horizontal candidates one block higher (uneven floor).
+        for (BlockPos base : candidates) {
+            BlockPos pos = base.up();
+            if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
+            if (isValidContainerPos(pos, maxReach)) return pos;
+        }
+
         return null;
+    }
+
+    private boolean isPreferredContainerPos(BlockPos pos, BlockPos playerPos, HWDirection hwDir) {
+        if (pos == null || playerPos == null) return false;
+
+        int dx = pos.getX() - playerPos.getX();
+        int dz = pos.getZ() - playerPos.getZ();
+        if (dx == 0 && dz == 0) return false;
+        if (Math.max(Math.abs(dx), Math.abs(dz)) > 1) return false; // never 2+ blocks away
+
+        if (hwDir != null && hwDir.forwardProgress(playerPos, pos) > 0.0) return false; // never forward
+        return true;
     }
 
     private boolean isValidContainerPos(BlockPos pos, double maxReach) {
@@ -842,6 +1293,9 @@ public class ContainerHandler {
         // Position must be air or replaceable
         if (!mc.world.getBlockState(pos).isAir()
             && !mc.world.getBlockState(pos).isReplaceable()) return false;
+        // Shulker placed on ground opens upward — block above must be clear.
+        BlockState aboveState = mc.world.getBlockState(pos.up());
+        if (!aboveState.isAir() && !aboveState.isReplaceable() && aboveState.isOpaque()) return false;
         // Never place container where player (or another blocking entity) is standing.
         Box targetBox = new Box(pos);
         if (mc.player.getBoundingBox().intersects(targetBox)) return false;
@@ -896,6 +1350,10 @@ public class ContainerHandler {
 
     public void invalidateRestockStandTarget() {
         clearRestockStandTarget();
+    }
+
+    public void setOpenDelay(int ticks) {
+        openDelay = ticks;
     }
 
     private BlockPos selectRestockStandBlock(BlockPos containerPos) {
@@ -1047,13 +1505,119 @@ public class ContainerHandler {
 
     public boolean canInteractWithContainerFromCurrentPos() {
         if (mc.player == null || containerTask.taskState == TaskState.DONE) return false;
-
-        Vec3d containerCenter = Vec3d.ofCenter(containerTask.blockPos);
-        if (mc.player.getEyePos().distanceTo(containerCenter) > module.maxReach.get() + 0.2) {
+        if (getBestContainerInteractDistance(containerTask.blockPos) > module.maxReach.get() + 0.35) {
             return false;
         }
 
         return !mc.player.getBoundingBox().intersects(new Box(containerTask.blockPos));
+    }
+
+    private double getBestContainerInteractDistance(BlockPos pos) {
+        if (mc.player == null) return Double.MAX_VALUE;
+        Vec3d eye = mc.player.getEyePos();
+        double best = eye.distanceTo(Vec3d.ofCenter(pos));
+        for (Direction side : Direction.values()) {
+            double dist = eye.distanceTo(HWUtils.getHitVec(pos, side));
+            if (dist < best) best = dist;
+        }
+        return best;
+    }
+
+    public boolean ensureContainerPlacementItemReady() {
+        if (mc.player == null) return false;
+        if (activeContainerItem == null) return true;
+
+        if (mc.player.getMainHandStack().getItem() == activeContainerItem) return true;
+
+        if (activeContainerHotbarSlot >= 0 && activeContainerHotbarSlot < 9
+            && mc.player.getInventory().getStack(activeContainerHotbarSlot).getItem() == activeContainerItem) {
+            InvUtils.swap(activeContainerHotbarSlot, false);
+            return mc.player.getMainHandStack().getItem() == activeContainerItem;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).getItem() == activeContainerItem) {
+                activeContainerHotbarSlot = i;
+                InvUtils.swap(i, false);
+                return mc.player.getMainHandStack().getItem() == activeContainerItem;
+            }
+        }
+
+        int targetHotbar = activeContainerHotbarSlot >= 0 && activeContainerHotbarSlot < 9
+            ? activeContainerHotbarSlot
+            : findPreferredContainerHotbarSlot();
+        if (targetHotbar == -1) targetHotbar = mc.player.getInventory().getSelectedSlot();
+
+        for (int i = 9; i < 36; i++) {
+            if (mc.player.getInventory().getStack(i).getItem() != activeContainerItem) continue;
+            InvUtils.move().from(i).toHotbar(targetHotbar);
+            activeContainerHotbarSlot = targetHotbar;
+            InvUtils.swap(targetHotbar, false);
+            return mc.player.getMainHandStack().getItem() == activeContainerItem;
+        }
+
+        return false;
+    }
+
+    private int prepareContainerItemOnHotbar(int sourceSlot) {
+        if (mc.player == null) return -1;
+
+        if (sourceSlot < 9) {
+            InvUtils.swap(sourceSlot, false);
+            return sourceSlot;
+        }
+
+        int targetHotbar = findPreferredContainerHotbarSlot();
+        if (targetHotbar == -1) return -1;
+
+        InvUtils.move().from(sourceSlot).toHotbar(targetHotbar);
+        InvUtils.swap(targetHotbar, false);
+        return targetHotbar;
+    }
+
+    private int findPreferredContainerHotbarSlot() {
+        if (mc.player == null) return -1;
+
+        // 1) Empty slot first.
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+        }
+
+        // 2) Prefer replacing disposable building blocks, not tools.
+        for (int i = 0; i < 9; i++) {
+            if (isDisposableForSlotReserve(mc.player.getInventory().getStack(i))) return i;
+        }
+
+        // 3) Avoid replacing pickaxe if possible.
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isEmpty()) return i;
+            if (!stack.isIn(ItemTags.PICKAXES)) return i;
+        }
+
+        // 4) Last resort: replace a pick only if at least one pickaxe stays in hotbar.
+        int pickCount = countHotbarPickaxes();
+        if (pickCount > 1) {
+            int selected = mc.player.getInventory().getSelectedSlot();
+            for (int i = 0; i < 9; i++) {
+                if (i == selected) continue;
+                ItemStack stack = mc.player.getInventory().getStack(i);
+                if (stack.isIn(ItemTags.PICKAXES)) return i;
+            }
+            return selected;
+        }
+
+        return -1;
+    }
+
+    private int countHotbarPickaxes() {
+        if (mc.player == null) return 0;
+        int count = 0;
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isIn(ItemTags.PICKAXES)) count++;
+        }
+        return count;
     }
 
     private double clamp(double value, double min, double max) {

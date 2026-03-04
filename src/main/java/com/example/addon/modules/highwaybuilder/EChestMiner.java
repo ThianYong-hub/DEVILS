@@ -877,9 +877,11 @@ public class EChestMiner {
         collectionCenter = null;
         lastEnsurePos = null;
         ensureNoMoveTicks = 0;
-        module.pathfinder.clearMinerGoal();
-        if (module.pathfinder.isPickupActive()) {
-            module.pathfinder.stopPickup();
+        if (module.pathfinder != null) {
+            module.pathfinder.clearMinerGoal();
+            if (module.pathfinder.isPickupActive()) {
+                module.pathfinder.stopPickup();
+            }
         }
     }
 }
