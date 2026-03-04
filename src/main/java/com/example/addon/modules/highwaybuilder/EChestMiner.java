@@ -48,10 +48,21 @@ public class EChestMiner {
     private int stuckTicks = 0;
 
     private boolean hitSent = false;
+    private boolean echestPlaced = false;
     private boolean sneakingForPlace = false;
     private int pickSlot = -1; // cached pickaxe slot for the cycle
     private BlockPos collectionCenter = null;
+    private BlockPos standPos = null;
     private static final double COLLECTION_RADIUS = 6.0;
+    private static final double ACTION_TOLERANCE = 0.18;
+    private static final double STAND_EDGE_PADDING = 0.04;
+    private static final double STAND_BIAS_AWAY = 0.08;
+    private static final double MANUAL_CENTER_RANGE = 3.5;
+    private static final int POSITION_STUCK_TICKS = 60;
+    private static final double MOVE_EPSILON_SQ = 1.0e-4;
+
+    private Vec3d lastEnsurePos = null;
+    private int ensureNoMoveTicks = 0;
 
     public EChestMiner(HighwayBuilder module) {
         this.module = module;
@@ -158,12 +169,14 @@ public class EChestMiner {
 
         actionPos = findAdjacentPlacePos();
         if (actionPos == null) return;
+        standPos = findStandPos(actionPos);
 
         // Cache pickaxe slot for the whole cycle
         pickSlot = findBestPickSlot();
         if (pickSlot == -1) return;
 
         stuckTicks = 0;
+        echestPlaced = false;
 
         if (isSilent()) {
             // Silent: skip SWAP_TO_ECHEST, go directly to PLACE_ECHEST
@@ -177,10 +190,13 @@ public class EChestMiner {
 
     private void doSwapToEchest() {
         if (mc.player == null) { reset(); return; }
+        if (!ensureActionPosition()) return;
 
         if (mc.world != null && mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
-            stuckTicks++;
-            if (stuckTicks > 40) { goToCollecting(); return; }
+            echestPlaced = true;
+            stuckTicks = 0;
+            if (isSilent()) state = State.MINE_HIT;
+            else state = State.SWAP_TO_PICK;
             return;
         }
 
@@ -202,9 +218,11 @@ public class EChestMiner {
 
     private void doPlaceEchest() {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) { reset(); return; }
+        if (!ensureActionPosition()) return;
 
         // Already placed?
         if (mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
+            echestPlaced = true;
             if (isSilent()) {
                 // Go directly to mining, no separate swap state
                 state = State.MINE_HIT;
@@ -218,7 +236,12 @@ public class EChestMiner {
         if (!mc.world.getBlockState(actionPos).isAir()
             && !mc.world.getBlockState(actionPos).isReplaceable()) {
             stuckTicks++;
-            if (stuckTicks > 20) { goToCollecting(); return; }
+            if (stuckTicks > 20) {
+                actionPos = findAdjacentPlacePos();
+                standPos = actionPos != null ? findStandPos(actionPos) : null;
+                stuckTicks = 0;
+                if (actionPos == null) { goToCollecting(); return; }
+            }
             return;
         }
 
@@ -271,29 +294,42 @@ public class EChestMiner {
         mc.player.setSneaking(false);
         sneakingForPlace = false;
 
-        if (isSilent()) {
-            // Silent: skip SWAP_TO_PICK, go directly to MINE_HIT
-            state = State.MINE_HIT;
-        } else {
-            state = State.SWAP_TO_PICK;
+        // Do not advance until placement is actually confirmed.
+        if (mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
+            echestPlaced = true;
+            if (isSilent()) {
+                // Silent: skip SWAP_TO_PICK, go directly to MINE_HIT
+                state = State.MINE_HIT;
+            } else {
+                state = State.SWAP_TO_PICK;
+            }
+            stuckTicks = 0;
+            return;
         }
-        stuckTicks = 0;
+
+        stuckTicks++;
+        if (stuckTicks > 40) {
+            actionPos = findAdjacentPlacePos();
+            standPos = actionPos != null ? findStandPos(actionPos) : null;
+            stuckTicks = 0;
+            if (actionPos == null) { goToCollecting(); return; }
+        }
+        tickDelay = 1;
     }
 
     // ── SWAP_TO_PICK (Normal mode only) ──────────────────────────────────
 
     private void doSwapToPick() {
         if (mc.player == null) { reset(); return; }
+        if (!ensureActionPosition()) return;
 
         // Wait for EC to be placed
         if (mc.world != null && mc.world.getBlockState(actionPos).getBlock() != Blocks.ENDER_CHEST) {
             stuckTicks++;
-            if (stuckTicks > 20) {
-                state = State.SWAP_TO_ECHEST;
-                stuckTicks = 0;
-            }
+            if (stuckTicks > 20) state = State.PLACE_ECHEST;
             return;
         }
+        echestPlaced = true;
 
         if (pickSlot == -1) {
             pickSlot = findBestPickSlot();
@@ -318,10 +354,22 @@ public class EChestMiner {
 
     private void doMineHit() {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) { reset(); return; }
+        if (!ensureActionPosition()) return;
 
         Block currentBlock = mc.world.getBlockState(actionPos).getBlock();
 
         if (currentBlock != Blocks.ENDER_CHEST) {
+            if (!echestPlaced) {
+                state = State.PLACE_ECHEST;
+                stuckTicks++;
+                if (stuckTicks > 30) {
+                    actionPos = findAdjacentPlacePos();
+                    standPos = actionPos != null ? findStandPos(actionPos) : null;
+                    stuckTicks = 0;
+                    if (actionPos == null) goToCollecting();
+                }
+                return;
+            }
             onEchestBroken();
             return;
         }
@@ -393,7 +441,8 @@ public class EChestMiner {
     // ── Called when EC is confirmed broken ───────────────────────────────
 
     private void onEchestBroken() {
-        chestsRemaining--;
+        if (echestPlaced && chestsRemaining > 0) chestsRemaining--;
+        echestPlaced = false;
         if (!isInsta()) hitSent = false;
         stuckTicks = 0;
         collectionCenter = actionPos;
@@ -529,17 +578,38 @@ public class EChestMiner {
     private BlockPos findAdjacentPlacePos() {
         if (mc.player == null || mc.world == null) return null;
         BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos currentPos = module.pathfinder.currentBlockPos;
         double maxReach = module.maxReach.get();
+
+        // Reuse current action position if still valid.
+        if (actionPos != null && isValidPlacePos(actionPos, maxReach)) return actionPos;
+
         HWDirection hwDir = module.pathfinder.startingDirection;
         if (hwDir != null) {
             BlockPos behind = playerPos.add(
                 -hwDir.directionVec.getX(), 0, -hwDir.directionVec.getZ());
             if (isValidPlacePos(behind, maxReach)) return behind;
+
+            BlockPos behindCurrent = currentPos.add(
+                -hwDir.directionVec.getX(), 0, -hwDir.directionVec.getZ());
+            if (isValidPlacePos(behindCurrent, maxReach)) return behindCurrent;
         }
         for (Direction dir : Direction.Type.HORIZONTAL) {
             BlockPos pos = playerPos.offset(dir);
             if (isValidPlacePos(pos, maxReach)) return pos;
+
+            BlockPos posCurrent = currentPos.offset(dir);
+            if (isValidPlacePos(posCurrent, maxReach)) return posCurrent;
         }
+
+        // Fallback one block above (uneven floor cases).
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos pos = playerPos.offset(dir).up();
+            if (isValidPlacePos(pos, maxReach)) return pos;
+            BlockPos posCurrent = currentPos.offset(dir).up();
+            if (isValidPlacePos(posCurrent, maxReach)) return posCurrent;
+        }
+
         return null;
     }
 
@@ -551,9 +621,196 @@ public class EChestMiner {
         if (mc.world.getBlockState(below).isAir()
             || mc.world.getBlockState(below).isReplaceable()
             || !mc.world.getFluidState(below).isEmpty()) return false;
+        // Never select a place position intersecting player hitbox.
+        if (mc.player.getBoundingBox().intersects(new Box(pos))) return false;
         if (findSupportSide(pos) == null) return false;
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
         return dist <= maxReach;
+    }
+
+    private BlockPos findStandPos(BlockPos placePos) {
+        if (mc.world == null || mc.player == null || placePos == null) return null;
+
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos candidate = placePos.offset(dir);
+            if (!isValidStandPos(candidate, placePos)) continue;
+
+            double d = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(candidate));
+            if (d < bestDist) {
+                bestDist = d;
+                best = candidate;
+            }
+        }
+
+        if (best != null) return best;
+        BlockPos playerPos = mc.player.getBlockPos();
+        return isValidStandPos(playerPos, placePos) ? playerPos : null;
+    }
+
+    private boolean isValidStandPos(BlockPos standPos, BlockPos placePos) {
+        if (mc.world == null || mc.player == null || standPos == null || placePos == null) return false;
+        if (standPos.equals(placePos)) return false;
+
+        if (!mc.world.getBlockState(standPos).isAir()
+            && !mc.world.getBlockState(standPos).isReplaceable()) return false;
+        if (!mc.world.getBlockState(standPos.up()).isAir()
+            && !mc.world.getBlockState(standPos.up()).isReplaceable()) return false;
+
+        BlockPos below = standPos.down();
+        if (mc.world.getBlockState(below).isAir()
+            || mc.world.getBlockState(below).isReplaceable()
+            || !mc.world.getFluidState(below).isEmpty()) return false;
+
+        Vec3d center = Vec3d.ofCenter(standPos);
+        double eyeOffset = mc.player.getEyeY() - mc.player.getY();
+        Vec3d standEye = new Vec3d(center.x, standPos.getY() + eyeOffset, center.z);
+        if (standEye.distanceTo(Vec3d.ofCenter(placePos)) > module.maxReach.get() + 0.25) return false;
+
+        double halfWidth = mc.player.getWidth() / 2.0;
+        Box playerBox = new Box(
+            center.x - halfWidth,
+            standPos.getY(),
+            center.z - halfWidth,
+            center.x + halfWidth,
+            standPos.getY() + mc.player.getHeight(),
+            center.z + halfWidth
+        );
+        return !playerBox.intersects(new Box(placePos));
+    }
+
+    private boolean canOperateFromCurrentPos(BlockPos placePos) {
+        if (mc.player == null || placePos == null) return false;
+        if (mc.player.getBoundingBox().intersects(new Box(placePos))) return false;
+        if (mc.player.getEyePos().distanceTo(Vec3d.ofCenter(placePos)) > module.maxReach.get() + 0.25) return false;
+        return findSupportSide(placePos) != null;
+    }
+
+    private boolean ensureActionPosition() {
+        if (mc.player == null || mc.world == null) return false;
+        if (actionPos == null || !isUsableActionPos(actionPos)) {
+            reselectActionPosition();
+            if (actionPos == null) {
+                module.pathfinder.clearMinerGoal();
+                return false;
+            }
+        }
+
+        if (standPos == null || !isValidStandPos(standPos, actionPos)) {
+            standPos = findStandPos(actionPos);
+        }
+
+        if (canOperateFromCurrentPos(actionPos)) {
+            module.pathfinder.clearMinerGoal();
+            ensureNoMoveTicks = 0;
+            lastEnsurePos = mc.player.getPos();
+            return true;
+        }
+
+        if (standPos == null) {
+            ensureNoMoveTicks++;
+            if (ensureNoMoveTicks > POSITION_STUCK_TICKS) {
+                reselectActionPosition();
+                ensureNoMoveTicks = 0;
+            }
+            return false;
+        }
+
+        Vec3d standTarget = getSafeStandPoint(standPos, actionPos);
+        double distSq = horizontalDistanceSq(mc.player.getPos(), standTarget);
+
+        if (distSq <= MANUAL_CENTER_RANGE * MANUAL_CENTER_RANGE) {
+            module.pathfinder.clearMinerGoal();
+            moveTowardStandPoint(standTarget);
+        } else {
+            module.pathfinder.setMinerGoal(standPos);
+        }
+
+        Vec3d currentPos = mc.player.getPos();
+        if (lastEnsurePos != null && currentPos.squaredDistanceTo(lastEnsurePos) <= MOVE_EPSILON_SQ) {
+            ensureNoMoveTicks++;
+        } else {
+            ensureNoMoveTicks = 0;
+        }
+        lastEnsurePos = currentPos;
+
+        if (ensureNoMoveTicks > POSITION_STUCK_TICKS) {
+            reselectActionPosition();
+            ensureNoMoveTicks = 0;
+        }
+
+        return false;
+    }
+
+    private boolean isUsableActionPos(BlockPos pos) {
+        if (mc.world == null || pos == null) return false;
+        Block current = mc.world.getBlockState(pos).getBlock();
+        if (current != Blocks.ENDER_CHEST
+            && !mc.world.getBlockState(pos).isAir()
+            && !mc.world.getBlockState(pos).isReplaceable()) return false;
+        return findSupportSide(pos) != null;
+    }
+
+    private void reselectActionPosition() {
+        actionPos = findAdjacentPlacePos();
+        standPos = actionPos != null ? findStandPos(actionPos) : null;
+        lastEnsurePos = null;
+    }
+
+    private Vec3d getSafeStandPoint(BlockPos standBlock, BlockPos placePos) {
+        if (mc.player == null || standBlock == null) return Vec3d.ZERO;
+
+        Vec3d center = Vec3d.ofCenter(standBlock);
+        double halfWidth = mc.player.getWidth() / 2.0;
+        double margin = halfWidth + STAND_EDGE_PADDING;
+        double minX = standBlock.getX() + margin;
+        double maxX = standBlock.getX() + 1.0 - margin;
+        double minZ = standBlock.getZ() + margin;
+        double maxZ = standBlock.getZ() + 1.0 - margin;
+
+        if (minX > maxX || minZ > maxZ) return center;
+
+        double tx = center.x;
+        double tz = center.z;
+        if (placePos != null) {
+            int dx = placePos.getX() - standBlock.getX();
+            int dz = placePos.getZ() - standBlock.getZ();
+            tx -= Math.signum(dx) * STAND_BIAS_AWAY;
+            tz -= Math.signum(dz) * STAND_BIAS_AWAY;
+        }
+
+        tx = clamp(tx, minX, maxX);
+        tz = clamp(tz, minZ, maxZ);
+        return new Vec3d(tx, center.y, tz);
+    }
+
+    private void moveTowardStandPoint(Vec3d target) {
+        if (mc.player == null || target == null) return;
+
+        double dx = target.x - mc.player.getX();
+        double dz = target.z - mc.player.getZ();
+        if (dx * dx + dz * dz <= ACTION_TOLERANCE * ACTION_TOLERANCE) {
+            mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
+            return;
+        }
+
+        double speed = Math.min(0.20, module.moveSpeed.get());
+        mc.player.setVelocity(
+            clamp(dx, -speed, speed),
+            mc.player.getVelocity().y,
+            clamp(dz, -speed, speed)
+        );
+    }
+
+    private double horizontalDistanceSq(Vec3d a, Vec3d b) {
+        double dx = a.x - b.x;
+        double dz = a.z - b.z;
+        return dx * dx + dz * dz;
+    }
+
+    private double clamp(double value, double min, double max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private Direction findSupportSide(BlockPos pos) {
@@ -609,13 +866,17 @@ public class EChestMiner {
     public void reset() {
         state = State.IDLE;
         actionPos = null;
+        standPos = null;
         chestsRemaining = 0;
         tickDelay = 0;
         stuckTicks = 0;
         hitSent = false;
+        echestPlaced = false;
         sneakingForPlace = false;
         pickSlot = -1;
         collectionCenter = null;
+        lastEnsurePos = null;
+        ensureNoMoveTicks = 0;
         module.pathfinder.clearMinerGoal();
         if (module.pathfinder.isPickupActive()) {
             module.pathfinder.stopPickup();

@@ -238,6 +238,28 @@ public class HighwayBuilder extends Module {
 
     // ── Mining Settings ─────────────────────────────────────────────────
 
+    public final Setting<Double> miningReach = sgMining.add(new DoubleSetting.Builder()
+        .name("mining-reach")
+        .description("Maximum reach distance used for block breaking.")
+        .defaultValue(4.5)
+        .min(1.0)
+        .max(7.0)
+        .sliderRange(1.0, 7.0)
+        .onChanged(v -> rebuildBlueprint())
+        .build()
+    );
+
+    public final Setting<Integer> miningRangeUp = sgMining.add(new IntSetting.Builder()
+        .name("mining-up")
+        .description("How many blocks above the player can be mined.")
+        .defaultValue(3)
+        .min(0)
+        .max(10)
+        .sliderRange(0, 10)
+        .onChanged(v -> rebuildBlueprint())
+        .build()
+    );
+
     public final Setting<Integer> breakDelay = sgMining.add(new IntSetting.Builder()
         .name("break-delay")
         .description("Ticks between block breaks.")
@@ -612,6 +634,11 @@ public class HighwayBuilder extends Module {
 
         // Update pathfinding and movement
         pathfinder.updatePathing();
+
+        // Pre-scan for nearby/forward lava so mitigation starts before exposure.
+        if (liquidHandler != null) {
+            liquidHandler.preScanAheadLiquids();
+        }
 
         // Run task processing
         if (inventoryHandler == null) return;

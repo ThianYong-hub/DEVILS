@@ -67,6 +67,13 @@ public class TaskExecutor {
             return;
         }
 
+        if (!module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos)) {
+            if (blockTask.taskState == TaskState.BREAKING) {
+                blockTask.updateState(TaskState.BREAK);
+            }
+            return;
+        }
+
         if (!updateOnly) {
             if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
             if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
@@ -201,12 +208,16 @@ public class TaskExecutor {
             return;
         }
 
+        if (!module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos)) {
+            return;
+        }
+
         if (!updateOnly) {
-            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
             if (module.liquidHandler.handleLiquid(blockTask)) {
                 module.inventoryHandler.restoreSilentSwap();
                 return;
             }
+            if (!module.inventoryHandler.swapOrMoveBestTool(blockTask)) return;
             if (module.inventoryHandler.packetLimiter.size() >= module.interactionLimit.get()) {
                 module.inventoryHandler.restoreSilentSwap();
                 return;

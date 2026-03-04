@@ -36,6 +36,8 @@ public class ContainerHandler {
     private static final double RESTOCK_EDGE_PADDING = 0.04;
     private static final double RESTOCK_BIAS_AWAY_FROM_CONTAINER = 0.08;
     private static final int HAND_SWAP_OPEN_DELAY_TICKS = 2;
+    private static final double SHULKER_PICKUP_SEARCH_RADIUS = 14.0;
+    private static final int PICKUP_MISS_GRACE_TICKS = 8;
 
     private final HighwayBuilder module;
     public BlockTask containerTask;
@@ -46,6 +48,7 @@ public class ContainerHandler {
     private int openAttempts = 0;
     private int openDelay = 0;
     private int handSwapDelay = 0;
+    private int pickupMissTicks = 0;
     private boolean waitingForScreenClose = false;
     private BlockPos lastContainerPos = null;
     private BlockPos restockStandBlock = null;
@@ -122,6 +125,7 @@ public class ContainerHandler {
         openAttempts = 0;
         openDelay = 0;
         handSwapDelay = 0;
+        pickupMissTicks = 0;
         waitingForScreenClose = false;
 
         module.pathfinder.moveState = MovementState.RESTOCK;
@@ -422,36 +426,42 @@ public class ContainerHandler {
     public void doPickup() {
         if (mc.world == null) return;
 
-        if (getCollectingPosition() == null) {
-            clearRestockStandTarget();
-            containerTask.updateState(TaskState.DONE);
-            module.pathfinder.moveState = MovementState.RUNNING;
-            grindCycles++;
+        ItemEntity shulkerDrop = findClosestShulkerDrop();
+        if (shulkerDrop != null) {
+            pickupMissTicks = 0;
+            if (!hasSpaceForContainerDrop()) {
+                // Last-resort safety: free one slot for shulker pickup.
+                if (!ensureReservedPickupSlot()) {
+                    containerTask.onStuck();
+                    return;
+                }
+            }
+            containerTask.onStuck();
             return;
         }
 
-        // Wait until the dropped shulker item is gone (picked up), then resume.
-        boolean hasShulkerDrop = mc.world.getEntitiesByClass(
-            ItemEntity.class,
-            new Box(containerTask.blockPos).expand(1.5),
-            itemEntity -> itemEntity.getStack().getItem() == containerTask.targetBlock.asItem()
-        ).stream().findAny().isPresent();
-
-        if (!hasShulkerDrop) {
-            clearRestockStandTarget();
-            containerTask.updateState(TaskState.DONE);
-            module.pathfinder.moveState = MovementState.RUNNING;
-            grindCycles++;
+        pickupMissTicks++;
+        if (pickupMissTicks < PICKUP_MISS_GRACE_TICKS) {
+            containerTask.onStuck();
             return;
         }
 
-        containerTask.onStuck();
+        // No drop entity found within grace window — treat as collected.
+        clearRestockStandTarget();
+        containerTask.updateState(TaskState.DONE);
+        module.pathfinder.moveState = MovementState.RUNNING;
+        grindCycles++;
     }
 
     /**
      * Close the shulker screen and transition to BREAK state.
      */
     private void closeAndBreak() {
+        if (!ensureReservedPickupSlot()) {
+            containerTask.onStuck();
+            return;
+        }
+
         if (mc.player != null
             && mc.player.currentScreenHandler != null
             && mc.player.currentScreenHandler.syncId != 0) {
@@ -466,7 +476,65 @@ public class ContainerHandler {
         containerTask.isLoaded = false;
         containerTask.destroy = true;
         containerTask.collect = true;
+        pickupMissTicks = 0;
         containerTask.updateState(TaskState.BREAK);
+    }
+
+    private boolean ensureReservedPickupSlot() {
+        if (hasSpaceForContainerDrop()) return true;
+        if (!dropSmallestObsidianStack()) return false;
+        return hasSpaceForContainerDrop();
+    }
+
+    private boolean dropSmallestObsidianStack() {
+        if (mc.player == null || mc.interactionManager == null) return false;
+
+        ScreenHandler handler = mc.player.currentScreenHandler;
+        if (handler == null) return false;
+
+        int playerStart = Math.max(0, handler.slots.size() - 36);
+        int playerEnd = handler.slots.size();
+        int smallestSlot = -1;
+        int smallestCount = Integer.MAX_VALUE;
+
+        for (int i = playerStart; i < playerEnd; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (stack.isEmpty() || stack.getItem() != Items.OBSIDIAN) continue;
+            if (stack.getCount() < smallestCount) {
+                smallestCount = stack.getCount();
+                smallestSlot = i;
+            }
+        }
+
+        if (smallestSlot == -1) return false;
+
+        // Button=1 throws full stack; we choose the smallest stack to minimize loss.
+        mc.interactionManager.clickSlot(handler.syncId, smallestSlot, 1, SlotActionType.THROW, mc.player);
+        return true;
+    }
+
+    private ItemEntity findClosestShulkerDrop() {
+        if (mc.world == null) return null;
+
+        Item shulkerItem = containerTask.targetBlock.asItem();
+        BlockPos centerPos = lastContainerPos != null ? lastContainerPos : containerTask.blockPos;
+        Vec3d center = Vec3d.ofCenter(centerPos);
+        Box searchBox = new Box(centerPos).expand(SHULKER_PICKUP_SEARCH_RADIUS);
+
+        ItemEntity closest = null;
+        double bestDist = Double.MAX_VALUE;
+        for (ItemEntity itemEntity : mc.world.getEntitiesByClass(
+            ItemEntity.class,
+            searchBox,
+            entity -> entity.getStack().getItem() == shulkerItem
+        )) {
+            double dist = itemEntity.getPos().squaredDistanceTo(center);
+            if (dist < bestDist) {
+                bestDist = dist;
+                closest = itemEntity;
+            }
+        }
+        return closest;
     }
 
     private boolean canTakeAnotherStack(Item item) {
@@ -995,6 +1063,9 @@ public class ContainerHandler {
     public BlockPos getCollectingPosition() {
         if (mc.world == null) return null;
         if (containerTask.taskState == TaskState.PICKUP) {
+            ItemEntity shulkerDrop = findClosestShulkerDrop();
+            if (shulkerDrop != null) return shulkerDrop.getBlockPos();
+            if (lastContainerPos != null) return lastContainerPos;
             return containerTask.blockPos;
         }
         return null;

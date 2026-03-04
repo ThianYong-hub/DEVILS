@@ -29,6 +29,9 @@ public class BlueprintGenerator {
         Structure mode = module.mode.get();
         int width = module.width.get();
         int height = module.height.get();
+        int clearHeight = mode == Structure.HIGHWAY
+            ? Math.max(height, module.miningRangeUp.get() + 2)
+            : height;
         boolean clearSpace = module.clearSpace.get();
         boolean backfill = module.backfill.get();
         boolean cleanFloor = module.cleanFloor.get();
@@ -61,7 +64,7 @@ public class BlueprintGenerator {
             );
 
             if (clearSpace) {
-                generateClear(thisPos, xDirection, width, height, mode, railing, cornerBlock, material, fillerMat);
+                generateClear(thisPos, xDirection, width, clearHeight, mode, railing, cornerBlock, material, fillerMat);
             }
 
             if (mode == Structure.TUNNEL) {

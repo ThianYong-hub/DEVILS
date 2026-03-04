@@ -1,5 +1,6 @@
 package com.example.addon.modules.highwaybuilder;
 
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -11,6 +12,8 @@ import net.minecraft.util.math.Vec3d;
 
 public class BlockBreaker {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final int BREAK_ROTATE_PRIORITY = 50;
+    private static final double MINING_REACH_EPSILON = 0.05;
 
     private final HighwayBuilder module;
     public BlockPos prePrimedPos = BlockPos.ORIGIN;
@@ -46,7 +49,7 @@ public class BlockBreaker {
         }
 
         Vec3d hitVec = HWUtils.getHitVec(blockTask.blockPos, side);
-        if (mc.player.getEyePos().distanceTo(hitVec) > module.maxReach.get() + 0.35) {
+        if (mc.player.getEyePos().distanceTo(hitVec) > module.miningReach.get() + MINING_REACH_EPSILON) {
             blockTask.onStuck();
             module.inventoryHandler.restoreSilentSwap();
             return;
@@ -59,7 +62,10 @@ public class BlockBreaker {
             blockTask.ticksMined = 0;
         }
 
-        if (ticksNeeded == 1 || (mc.player.getAbilities().creativeMode)) {
+        boolean instantByHardness = ticksNeeded == 1 || mc.player.getAbilities().creativeMode;
+        boolean instantByPrimedExploit = module.instantMine.get() && blockTask.blockPos.equals(primedPos);
+
+        if (instantByHardness || instantByPrimedExploit) {
             mineBlockInstant(blockTask, side);
         } else {
             mineBlockNormal(blockTask, side, ticksNeeded);
@@ -74,7 +80,7 @@ public class BlockBreaker {
 
         sendMiningPackets(blockTask.blockPos, side, true, false, false);
 
-        if (module.multiBreak.get()) {
+        if (module.multiBreak.get() && module.blocksPerTick.get() > 1) {
             tryMultiBreak(blockTask);
         }
 
@@ -83,11 +89,14 @@ public class BlockBreaker {
 
     private void tryMultiBreak(BlockTask blockTask) {
         if (mc.player == null || mc.world == null) return;
+        int remainingExtraBreaks = Math.max(0, module.blocksPerTick.get() - 1);
+        if (remainingExtraBreaks == 0) return;
 
         Vec3d eyePos = mc.player.getEyePos();
         Vec3d viewVec = module.inventoryHandler.lastHitVec.subtract(eyePos).normalize();
 
         for (BlockTask task : module.taskManager.getTasks().values()) {
+            if (remainingExtraBreaks <= 0) break;
             if (task.taskState != TaskState.BREAK || task == blockTask) continue;
 
             BlockState state = mc.world.getBlockState(task.blockPos);
@@ -104,18 +113,20 @@ public class BlockBreaker {
             if (dot < 0.95) continue; // Not aligned enough
 
             double dist = eyePos.distanceTo(blockCenter);
-            if (dist > module.maxReach.get()) continue;
+            if (dist > module.miningReach.get() + MINING_REACH_EPSILON) continue;
 
             task.updateState(TaskState.PENDING_BREAK);
             Direction miningSide = HWUtils.getMiningSide(task.blockPos);
-            if (miningSide != null) {
-                sendMiningPackets(task.blockPos, miningSide, true, false, false);
-            }
+            if (miningSide == null) miningSide = HWUtils.getMiningSideFallback(task.blockPos);
+            if (miningSide == null) continue;
+            sendMiningPackets(task.blockPos, miningSide, true, false, false);
+            remainingExtraBreaks--;
         }
     }
 
     private void mineBlockNormal(BlockTask blockTask, Direction side, int ticks) {
-        if (mc.player != null && mc.interactionManager != null
+        if (!module.instantMine.get()
+            && mc.player != null && mc.interactionManager != null
             && isWithinBreakReach(blockTask.blockPos, side)) {
             mineBlockVanilla(blockTask, side);
             return;
@@ -134,22 +145,25 @@ public class BlockBreaker {
     }
 
     private void mineBlockVanilla(BlockTask blockTask, Direction side) {
-        if (mc.player == null || mc.interactionManager == null) return;
+        runWithRotation(blockTask.blockPos, side, () -> {
+            if (mc.player == null || mc.interactionManager == null) return;
 
-        if (blockTask.taskState == TaskState.BREAK) {
-            blockTask.updateState(TaskState.BREAKING);
-            mc.interactionManager.attackBlock(blockTask.blockPos, side);
-        } else {
-            mc.interactionManager.updateBlockBreakingProgress(blockTask.blockPos, side);
-        }
+            if (blockTask.taskState == TaskState.BREAK) {
+                blockTask.updateState(TaskState.BREAKING);
+                mc.interactionManager.attackBlock(blockTask.blockPos, side);
+            } else {
+                mc.interactionManager.updateBlockBreakingProgress(blockTask.blockPos, side);
+            }
 
-        mc.player.swingHand(Hand.MAIN_HAND);
-        restoreSilentSwapSlot();
+            mc.player.swingHand(Hand.MAIN_HAND);
+            restoreSilentSwapSlot();
+        });
     }
 
     private boolean isWithinBreakReach(BlockPos pos, Direction side) {
         if (mc.player == null) return false;
-        return mc.player.getEyePos().distanceTo(HWUtils.getHitVec(pos, side)) <= module.maxReach.get() + 0.35;
+        return mc.player.getEyePos().distanceTo(HWUtils.getHitVec(pos, side))
+            <= module.miningReach.get() + MINING_REACH_EPSILON;
     }
 
     private void handleFire(BlockTask blockTask) {
@@ -165,24 +179,42 @@ public class BlockBreaker {
     }
 
     public void sendMiningPackets(BlockPos pos, Direction side, boolean start, boolean stop, boolean abort) {
-        if (mc.getNetworkHandler() == null || mc.player == null) return;
+        runWithRotation(pos, side, () -> {
+            if (mc.getNetworkHandler() == null || mc.player == null) return;
 
-        module.inventoryHandler.packetLimiter.add(System.currentTimeMillis());
+            module.inventoryHandler.packetLimiter.add(System.currentTimeMillis());
 
-        if (start || module.packetFlood.get()) {
-            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, side));
+            if (start || module.packetFlood.get()) {
+                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                    PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, side));
+            }
+            if (abort) {
+                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                    PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, side));
+            }
+            if (stop || module.packetFlood.get()) {
+                mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
+                    PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side));
+            }
+            mc.player.swingHand(Hand.MAIN_HAND);
+            restoreSilentSwapSlot();
+        });
+    }
+
+    private void runWithRotation(BlockPos pos, Direction side, Runnable action) {
+        if (mc.player == null) return;
+        Vec3d hitVec = HWUtils.getHitVec(pos, side);
+        module.inventoryHandler.lastHitVec = hitVec;
+        if (module.rotate.get()) {
+            Rotations.rotate(
+                Rotations.getYaw(hitVec),
+                Rotations.getPitch(hitVec),
+                BREAK_ROTATE_PRIORITY,
+                action
+            );
+        } else {
+            action.run();
         }
-        if (abort) {
-            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, pos, side));
-        }
-        if (stop || module.packetFlood.get()) {
-            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(
-                PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side));
-        }
-        mc.player.swingHand(Hand.MAIN_HAND);
-        restoreSilentSwapSlot();
     }
 
     private void restoreSilentSwapSlot() {

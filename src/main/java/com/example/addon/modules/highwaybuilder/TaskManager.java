@@ -3,6 +3,7 @@ package com.example.addon.modules.highwaybuilder;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
@@ -18,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TaskManager {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final double MINING_REACH_EPSILON = 0.05;
 
     private final HighwayBuilder module;
     private final ConcurrentHashMap<BlockPos, BlockTask> tasks = new ConcurrentHashMap<>();
@@ -123,7 +125,7 @@ public class TaskManager {
             }
 
             // Entity collision check
-            if (!mc.world.getOtherEntities(null, new Box(blockPos)).isEmpty()) {
+            if (!mc.world.getOtherEntities(null, new Box(blockPos), entity -> !(entity instanceof ItemEntity)).isEmpty()) {
                 BlockTask blockTask = new BlockTask(blockPos, TaskState.DONE, currentState.getBlock());
                 addTask(blockTask, blueprintTask);
                 return;
@@ -149,11 +151,16 @@ public class TaskManager {
             return;
         }
 
+        if (!isWithinMiningHeight(blockPos) || !isWithinMiningReach(blockPos)) {
+            // Mining-limited cells are intentionally deferred until they enter active bounds.
+            BlockTask ignored = new BlockTask(blockPos, TaskState.DONE, currentState.getBlock());
+            addTask(ignored, blueprintTask);
+            return;
+        }
+
         BlockTask blockTask = new BlockTask(blockPos, TaskState.BREAK, blueprintTask.targetBlock);
         updateTaskData(blockTask);
-        if (getBreakReachDistance(blockPos) <= maxReach + 0.35) {
-            addTask(blockTask, blueprintTask);
-        }
+        addTask(blockTask, blueprintTask);
     }
 
     private double getBreakReachDistance(BlockPos pos) {
@@ -165,6 +172,25 @@ public class TaskManager {
             if (dist < best) best = dist;
         }
         return best;
+    }
+
+    private boolean isWithinMiningReach(BlockPos pos) {
+        return getBreakReachDistance(pos) <= module.miningReach.get() + MINING_REACH_EPSILON;
+    }
+
+    private boolean isWithinMiningHeight(BlockPos pos) {
+        if (mc.player == null) return false;
+        int playerY = mc.player.getBlockY();
+        return pos.getY() <= playerY + module.miningRangeUp.get()
+            && pos.getY() >= playerY - 1;
+    }
+
+    private boolean isWithinMiningBounds(BlockPos pos) {
+        return isWithinMiningReach(pos) && isWithinMiningHeight(pos);
+    }
+
+    public boolean isWithinActiveMiningBounds(BlockPos pos) {
+        return isWithinMiningBounds(pos);
     }
 
     public void addTask(BlockTask blockTask, BlueprintTask blueprintTask) {
@@ -258,6 +284,7 @@ public class TaskManager {
 
         List<BlockTask> sorted = new ArrayList<>(tasks.values());
         for (BlockTask task : sorted) {
+            sanitizeBreakTaskState(task);
             module.taskExecutor.doTask(task, true);
             if (task.taskState != TaskState.DONE) {
                 updateTaskData(task);
@@ -266,10 +293,28 @@ public class TaskManager {
 
         sorted.sort(blockTaskComparator());
 
+        BlockTask liquidTask = findTopPriorityLiquidTask(sorted);
+        if (liquidTask != null) {
+            if (checkStuckTimeout(liquidTask)) {
+                if (liquidTask.taskState != TaskState.DONE && module.inventoryHandler.waitTicks > 0) return;
+                module.taskExecutor.doTask(liquidTask, false);
+            }
+            return;
+        }
+
         int actionsThisTick = 0;
         int maxActions = module.blocksPerTick.get();
+        boolean hasBreakPhaseTasks = sorted.stream().anyMatch(task ->
+            isBreakPhaseState(task)
+                && isWithinActiveMiningBounds(task.blockPos));
 
         for (BlockTask task : sorted) {
+            if (hasBreakPhaseTasks) {
+                if (!isBreakPhaseState(task)) continue;
+                if (!isWithinActiveMiningBounds(task.blockPos)) continue;
+            } else if (!isPlacePhaseState(task)) {
+                continue;
+            }
             if (!checkStuckTimeout(task)) continue;
             if (task.taskState != TaskState.DONE && module.inventoryHandler.waitTicks > 0) return;
 
@@ -324,6 +369,62 @@ public class TaskManager {
             case PLACE, LIQUID, IMPOSSIBLE_PLACE -> true;
             default -> false;
         };
+    }
+
+    private boolean isBreakPhaseState(BlockTask task) {
+        return switch (task.taskState) {
+            case BREAK, BREAKING, PENDING_BREAK -> true;
+            // Liquid tasks targeting AIR are effectively "clear this cell" and should
+            // be processed before normal placement to avoid break/place thrashing.
+            case LIQUID -> task.targetBlock == Blocks.AIR;
+            default -> false;
+        };
+    }
+
+    private boolean isPlacePhaseState(BlockTask task) {
+        return switch (task.taskState) {
+            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
+            case LIQUID -> task.targetBlock != Blocks.AIR;
+            default -> false;
+        };
+    }
+
+    private void sanitizeBreakTaskState(BlockTask task) {
+        if (mc.world == null || task == null || !isBreakPhaseState(task)) return;
+
+        BlockState state = mc.world.getBlockState(task.blockPos);
+        boolean isAirLike = state.isAir() || state.isReplaceable();
+        boolean hasFluid = !mc.world.getFluidState(task.blockPos).isEmpty();
+
+        if (task.taskState == TaskState.LIQUID && task.targetBlock == Blocks.AIR) {
+            if (!hasFluid) {
+                if (isAirLike) task.updateState(TaskState.DONE);
+                else task.updateState(TaskState.BREAK);
+            }
+            return;
+        }
+
+        if (isAirLike) {
+            if (task.targetBlock == Blocks.AIR) task.updateState(TaskState.DONE);
+            else task.updateState(TaskState.PLACE);
+        }
+    }
+
+    private BlockTask findTopPriorityLiquidTask(List<BlockTask> sorted) {
+        if (mc.player == null) return null;
+
+        Vec3d eyePos = mc.player.getEyePos();
+        double maxReach = module.maxReach.get() + 0.6;
+        double maxForward = module.miningReach.get() + 1.5;
+
+        for (BlockTask task : sorted) {
+            if (task.taskState != TaskState.LIQUID) continue;
+            if (eyePos.distanceTo(Vec3d.ofCenter(task.blockPos)) > maxReach) continue;
+            if (getForwardPriority(task.blockPos) > maxForward) continue;
+            return task;
+        }
+
+        return null;
     }
 
     private boolean startPadding(BlockPos c) {
@@ -387,18 +488,13 @@ public class TaskManager {
     private double getForwardPriority(BlockPos pos) {
         HWDirection dir = module.pathfinder.startingDirection;
         BlockPos origin = module.pathfinder.currentBlockPos;
-        int dx = pos.getX() - origin.getX();
-        int dz = pos.getZ() - origin.getZ();
-        return Math.abs(dx * dir.directionVec.getX() + dz * dir.directionVec.getZ());
+        return Math.abs(dir.forwardProgress(origin, pos));
     }
 
     private double getLateralPriority(BlockPos pos) {
         HWDirection dir = module.pathfinder.startingDirection;
-        HWDirection lateral = dir.clockwise(dir.isDiagonal ? 1 : 2);
         BlockPos origin = module.pathfinder.currentBlockPos;
-        int dx = pos.getX() - origin.getX();
-        int dz = pos.getZ() - origin.getZ();
-        return Math.abs(dx * lateral.directionVec.getX() + dz * lateral.directionVec.getZ());
+        return Math.abs(dir.lateralOffset(origin, pos));
     }
 
     public void clearTasks() {

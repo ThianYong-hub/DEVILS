@@ -1,6 +1,7 @@
 package com.example.addon.modules.highwaybuilder;
 
 import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
@@ -199,29 +200,57 @@ public class PathfinderHandler {
     private void updateRunning() {
         goal = currentBlockPos;
 
-        BlockPos possiblePos = currentBlockPos.add(
-            startingDirection.directionVec.getX(),
-            startingDirection.directionVec.getY(),
-            startingDirection.directionVec.getZ()
-        );
+        // Don't advance while there is still reachable work (break/place/liquid) to do.
+        // This forces the bot to finish ALL tasks within mining reach before moving,
+        // instead of inching forward one slice at a time.
+        if (hasActionableWork()) return;
 
-        if (!isTaskDone(possiblePos.up())
-            || !isTaskDone(possiblePos)
-            || !isTaskDone(possiblePos.down())) return;
+        // All work done — find the farthest contiguous completed position
+        BlockPos farthest = currentBlockPos;
+        BlockPos candidate = currentBlockPos;
+        for (int i = 0; i < 20; i++) {
+            BlockPos next = candidate.add(
+                startingDirection.directionVec.getX(),
+                startingDirection.directionVec.getY(),
+                startingDirection.directionVec.getZ()
+            );
 
-        if (!checkForResidue(possiblePos.up())) return;
-        if (hasPendingTasksBefore(possiblePos)) return;
+            if (!isTaskDone(next.up())
+                || !isTaskDone(next)
+                || !isTaskDone(next.down())) break;
 
-        BlockState downState = mc.world.getBlockState(possiblePos.down());
-        if (downState.isAir() || downState.isReplaceable()) return;
+            BlockState downState = mc.world.getBlockState(next.down());
+            if (downState.isAir() || downState.isReplaceable()) break;
 
-        if (!currentBlockPos.equals(possiblePos)
+            farthest = next;
+            candidate = next;
+        }
+
+        if (!currentBlockPos.equals(farthest)
             && mc.player.getPos().distanceTo(Vec3d.ofCenter(currentBlockPos)) < 2) {
-            module.statistics.simpleMovingAverageDistance.add(System.currentTimeMillis());
+            // Count each block advanced for distance/h statistics
+            BlockPos temp = currentBlockPos;
+            while (!temp.equals(farthest)) {
+                temp = temp.add(startingDirection.directionVec);
+                module.statistics.simpleMovingAverageDistance.add(System.currentTimeMillis());
+            }
             module.inventoryHandler.lastHitVec = Vec3d.ZERO;
-            currentBlockPos = possiblePos;
+            currentBlockPos = farthest;
             module.taskManager.populateTasks();
         }
+    }
+
+    /**
+     * Returns true if there are non-deferred, movement-blocking tasks still pending.
+     * While this returns true the player stays put and works, instead of advancing.
+     */
+    private boolean hasActionableWork() {
+        for (BlockTask task : module.taskManager.getTasks().values()) {
+            if (!isMovementBlockingState(task.taskState)) continue;
+            if (isDeferredBreakTask(task)) continue;
+            return true;
+        }
+        return false;
     }
 
     private void updateBridge() {
@@ -258,7 +287,10 @@ public class PathfinderHandler {
         BlockTask task = module.taskManager.getTasks().get(pos);
         if (task == null) return false;
 
-        if (task.taskState != TaskState.DONE) return false;
+        if (task.taskState != TaskState.DONE) {
+            if (isDeferredBreakTask(task)) return true;
+            return false;
+        }
         if (HWUtils.isLiquid(pos)) return false;
 
         // Verify the block still matches what we expect
@@ -279,6 +311,7 @@ public class PathfinderHandler {
         for (BlockTask task : module.taskManager.getTasks().values()) {
             // Block on any unfinished build-critical tasks behind the move plane.
             if (isMovementBlockingState(task.taskState)
+                && !isDeferredBreakTask(task)
                 && module.taskManager.isBehindPos(pos, task.blockPos)) {
                 return false;
             }
@@ -291,6 +324,7 @@ public class PathfinderHandler {
 
         for (BlockTask task : module.taskManager.getTasks().values()) {
             if (!isMovementBlockingState(task.taskState)) continue;
+            if (isDeferredBreakTask(task)) continue;
             if (getForwardProgressFromStart(task.blockPos) <= nextProgress) return true;
         }
 
@@ -298,15 +332,26 @@ public class PathfinderHandler {
     }
 
     private double getForwardProgressFromStart(BlockPos pos) {
-        int dx = pos.getX() - startingBlockPos.getX();
-        int dz = pos.getZ() - startingBlockPos.getZ();
-        return dx * startingDirection.directionVec.getX()
-            + dz * startingDirection.directionVec.getZ();
+        return startingDirection.forwardProgress(startingBlockPos, pos);
     }
 
     private boolean isMovementBlockingState(TaskState state) {
         return switch (state) {
             case BREAK, BREAKING, PLACE, LIQUID, PENDING_BREAK, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isDeferredBreakTask(BlockTask task) {
+        if (task == null) return false;
+        if (!isDeferredBreakState(task)) return false;
+        return !module.taskManager.isWithinActiveMiningBounds(task.blockPos);
+    }
+
+    private boolean isDeferredBreakState(BlockTask task) {
+        return switch (task.taskState) {
+            case BREAK, BREAKING, PENDING_BREAK -> true;
+            case LIQUID -> task.targetBlock == Blocks.AIR;
             default -> false;
         };
     }
