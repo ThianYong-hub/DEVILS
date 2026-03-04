@@ -42,6 +42,7 @@ public class ContainerHandler {
     private static final double SHULKER_PICKUP_SEARCH_RADIUS = 32.0;
     private static final int PICKUP_MISS_GRACE_TICKS = 20;
     private static final double RESTOCK_CONTAINER_CLEARANCE = 0.03;
+    private static final int CONTAINER_FAR_DISTANCE = 2;
 
     private final HighwayBuilder module;
     public BlockTask containerTask;
@@ -85,6 +86,18 @@ public class ContainerHandler {
         if (containerTask.taskState != TaskState.DONE) return;
 
         if (mc.player == null) return;
+
+        // Do not switch to other restock targets while Fortune-pick workflow
+        // is unresolved. This avoids dropping/abandoning pickaxe shulker cycle.
+        if (item != Items.DIAMOND_PICKAXE && restockingFortunePickaxe) {
+            if (!hasFortunePickaxeInInventory()) {
+                if (restartFortunePickaxeRestockCycle()) return;
+                module.disableWithError("No Fortune III pickaxe available for restock workflow.");
+                return;
+            }
+            // Stale flag protection: pickaxe already secured, unlock normal restocks.
+            resetPickaxeRestockState();
+        }
 
         // Don't switch to other restock targets while Fortune-pick cycle isn't finished.
         if (item != Items.DIAMOND_PICKAXE && restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
@@ -1084,6 +1097,7 @@ public class ContainerHandler {
     private boolean isDisposableForSlotReserve(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         if (!(stack.getItem() instanceof BlockItem bi)) return false;
+        if (bi.getBlock() instanceof ShulkerBoxBlock) return false;
 
         Block block = bi.getBlock();
         return block == Blocks.OBSIDIAN
@@ -1289,7 +1303,7 @@ public class ContainerHandler {
      * Find a valid position adjacent to the player to place a container.
      * Prioritises behind and back-diagonal positions, then sides.
      * Avoids forward positions unless no other safe adjacent candidate exists.
-     * Keeps placement within one horizontal block (adjacent/diagonal), never two blocks away.
+     * Falls back to two blocks away only if nearby options are blocked.
      */
     private BlockPos getRemotePos() {
         return getRemotePos(null);
@@ -1315,9 +1329,9 @@ public class ContainerHandler {
         List<BlockPos> candidates = new ArrayList<>();
         Set<BlockPos> unique = new HashSet<>();
 
-        addContainerCandidates(candidates, unique, playerPos, hwDir);
+        addContainerCandidates(candidates, unique, playerPos, hwDir, 1);
         if (!currentPos.equals(playerPos)) {
-            addContainerCandidates(candidates, unique, currentPos, hwDir);
+            addContainerCandidates(candidates, unique, currentPos, hwDir, 1);
         }
 
         // Pass 1: strict preference and no self-overlap.
@@ -1373,6 +1387,49 @@ public class ContainerHandler {
             if (isValidContainerPos(pos, maxReach, true)) return pos;
         }
 
+        // Far fallback (2 blocks): helps when seam/corner hitbox blocks every adjacent spot.
+        List<BlockPos> farCandidates = new ArrayList<>();
+        Set<BlockPos> farUnique = new HashSet<>();
+        addContainerCandidates(farCandidates, farUnique, playerPos, hwDir, CONTAINER_FAR_DISTANCE);
+        if (!currentPos.equals(playerPos)) {
+            addContainerCandidates(farCandidates, farUnique, currentPos, hwDir, CONTAINER_FAR_DISTANCE);
+        }
+
+        // Far pass A: still prefer non-forward positions if available.
+        for (BlockPos pos : farCandidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (!isPreferredContainerPos(pos, playerPos, hwDir, CONTAINER_FAR_DISTANCE)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+        for (BlockPos base : farCandidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (!isPreferredContainerPos(pos, playerPos, hwDir, CONTAINER_FAR_DISTANCE)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+
+        // Far pass B: any far position without overlap.
+        for (BlockPos pos : farCandidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+        for (BlockPos base : farCandidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+
+        // Far pass C: final far fallback allowing temporary self-overlap.
+        for (BlockPos pos : farCandidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+        for (BlockPos base : farCandidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+
         // Last fallback: keep previous valid position even if not preferred.
         if (lastContainerPos != null
             && (avoidPos == null || !lastContainerPos.equals(avoidPos))
@@ -1389,12 +1446,16 @@ public class ContainerHandler {
     }
 
     private boolean isPreferredContainerPos(BlockPos pos, BlockPos playerPos, HWDirection hwDir) {
+        return isPreferredContainerPos(pos, playerPos, hwDir, 1);
+    }
+
+    private boolean isPreferredContainerPos(BlockPos pos, BlockPos playerPos, HWDirection hwDir, int maxHorizontalDistance) {
         if (pos == null || playerPos == null) return false;
 
         int dx = pos.getX() - playerPos.getX();
         int dz = pos.getZ() - playerPos.getZ();
         if (dx == 0 && dz == 0) return false;
-        if (Math.max(Math.abs(dx), Math.abs(dz)) > 1) return false; // never 2+ blocks away
+        if (Math.max(Math.abs(dx), Math.abs(dz)) > Math.max(1, maxHorizontalDistance)) return false;
 
         if (hwDir != null && hwDir.forwardProgress(playerPos, pos) > 0.0) return false; // never forward
         return true;
@@ -1402,6 +1463,9 @@ public class ContainerHandler {
 
     private boolean isValidContainerPos(BlockPos pos, double maxReach, boolean allowSelfOverlap) {
         if (mc.world == null || mc.player == null) return false;
+        // Forward placement is allowed only on the same Y level as the current
+        // highway walk plane. Lower/higher forward cells are treated as unsafe.
+        if (isForwardPlacement(pos) && !isForwardPlacementLevelSafe(pos)) return false;
         // Never choose the exact block the player currently occupies.
         // Movement recovery handles near-overlap, but same-block placement is always invalid.
         if (pos.equals(mc.player.getBlockPos())) return false;
@@ -1431,6 +1495,16 @@ public class ContainerHandler {
         // Allow small tolerance: selection can happen while player is not centered yet.
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
         return dist <= maxReach + 1.0;
+    }
+
+    private boolean isForwardPlacement(BlockPos pos) {
+        if (pos == null || mc.player == null || module.pathfinder == null) return false;
+        return module.pathfinder.startingDirection.forwardProgress(mc.player.getBlockPos(), pos) > 0.0;
+    }
+
+    private boolean isForwardPlacementLevelSafe(BlockPos pos) {
+        if (pos == null || module.pathfinder == null || module.pathfinder.currentBlockPos == null) return false;
+        return pos.getY() == module.pathfinder.currentBlockPos.getY();
     }
 
     public Vec3d getRestockStandPos() {
@@ -1546,17 +1620,21 @@ public class ContainerHandler {
 
         // Tier 3: around current/player.
         List<BlockPos> around = new ArrayList<>();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(around, unique, current.offset(dir));
-            addCandidate(around, unique, playerPos.offset(dir));
+        for (int dist = 1; dist <= CONTAINER_FAR_DISTANCE; dist++) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                addCandidate(around, unique, current.offset(dir, dist));
+                addCandidate(around, unique, playerPos.offset(dir, dist));
+            }
         }
         hit = findNearestSafeCandidate(around, containerPos);
         if (hit != null) return hit;
 
         // Tier 4: uneven floor around container.
         List<BlockPos> raised = new ArrayList<>();
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(raised, unique, containerPos.offset(dir).up());
+        for (int dist = 1; dist <= CONTAINER_FAR_DISTANCE; dist++) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                addCandidate(raised, unique, containerPos.offset(dir, dist).up());
+            }
         }
         return findNearestSafeCandidate(raised, containerPos);
     }
@@ -1566,30 +1644,32 @@ public class ContainerHandler {
         if (unique.add(pos)) list.add(pos);
     }
 
-    private void addContainerCandidates(List<BlockPos> candidates, Set<BlockPos> unique, BlockPos anchor, HWDirection hwDir) {
-        if (anchor == null) return;
+    private void addContainerCandidates(List<BlockPos> candidates, Set<BlockPos> unique, BlockPos anchor, HWDirection hwDir, int distance) {
+        if (anchor == null || distance < 1) return;
 
         // Preferred order: behind -> behind diagonals -> sides.
         if (hwDir != null) {
             int fx = Integer.signum(hwDir.directionVec.getX());
             int fz = Integer.signum(hwDir.directionVec.getZ());
-            int bx = -fx;
-            int bz = -fz;
+            int bx = -fx * distance;
+            int bz = -fz * distance;
 
             HWDirection lateral = hwDir.lateralDirection();
             int sx = Integer.signum(lateral.directionVec.getX());
             int sz = Integer.signum(lateral.directionVec.getZ());
+            int lx = sx * distance;
+            int lz = sz * distance;
 
             if (bx != 0 || bz != 0) addCandidate(candidates, unique, anchor.add(bx, 0, bz));
 
-            if (sx != 0 || sz != 0) {
-                addCandidate(candidates, unique, anchor.add(bx + sx, 0, bz + sz));
-                addCandidate(candidates, unique, anchor.add(bx - sx, 0, bz - sz));
+            if (lx != 0 || lz != 0) {
+                addCandidate(candidates, unique, anchor.add(bx + lx, 0, bz + lz));
+                addCandidate(candidates, unique, anchor.add(bx - lx, 0, bz - lz));
             }
 
-            if (sx != 0 || sz != 0) {
-                addCandidate(candidates, unique, anchor.add(sx, 0, sz));
-                addCandidate(candidates, unique, anchor.add(-sx, 0, -sz));
+            if (lx != 0 || lz != 0) {
+                addCandidate(candidates, unique, anchor.add(lx, 0, lz));
+                addCandidate(candidates, unique, anchor.add(-lx, 0, -lz));
             }
 
             if (bx != 0 && bz != 0) {
@@ -1600,12 +1680,12 @@ public class ContainerHandler {
 
         // General adjacent fallback around anchor.
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(candidates, unique, anchor.offset(dir));
+            addCandidate(candidates, unique, anchor.offset(dir, distance));
         }
-        addCandidate(candidates, unique, anchor.add(1, 0, 1));
-        addCandidate(candidates, unique, anchor.add(1, 0, -1));
-        addCandidate(candidates, unique, anchor.add(-1, 0, 1));
-        addCandidate(candidates, unique, anchor.add(-1, 0, -1));
+        addCandidate(candidates, unique, anchor.add(distance, 0, distance));
+        addCandidate(candidates, unique, anchor.add(distance, 0, -distance));
+        addCandidate(candidates, unique, anchor.add(-distance, 0, distance));
+        addCandidate(candidates, unique, anchor.add(-distance, 0, -distance));
     }
 
     private boolean isSafeRestockStandBlock(BlockPos standBlock, BlockPos containerPos) {
@@ -1651,30 +1731,18 @@ public class ContainerHandler {
     private BlockPos selectFallbackStandBlock(BlockPos containerPos) {
         if (mc.world == null || mc.player == null) return null;
 
-        BlockPos best = null;
-        double bestDist = Double.MAX_VALUE;
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            BlockPos candidate = containerPos.offset(dir);
-            if (candidate.equals(containerPos)) continue;
-
-            if (!mc.world.getBlockState(candidate).isAir()
-                && !mc.world.getBlockState(candidate).isReplaceable()) continue;
-            if (!mc.world.getBlockState(candidate.up()).isAir()
-                && !mc.world.getBlockState(candidate.up()).isReplaceable()) continue;
-
-            BlockPos below = candidate.down();
-            if (mc.world.getBlockState(below).isAir()
-                || mc.world.getBlockState(below).isReplaceable()
-                || !mc.world.getFluidState(below).isEmpty()) continue;
-
-            double d = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(candidate));
-            if (d < bestDist) {
-                bestDist = d;
-                best = candidate;
+        List<BlockPos> candidates = new ArrayList<>();
+        Set<BlockPos> unique = new HashSet<>();
+        for (int dist = 1; dist <= CONTAINER_FAR_DISTANCE; dist++) {
+            for (Direction dir : Direction.Type.HORIZONTAL) {
+                addCandidate(candidates, unique, containerPos.offset(dir, dist));
             }
+            addCandidate(candidates, unique, containerPos.add(dist, 0, dist));
+            addCandidate(candidates, unique, containerPos.add(dist, 0, -dist));
+            addCandidate(candidates, unique, containerPos.add(-dist, 0, dist));
+            addCandidate(candidates, unique, containerPos.add(-dist, 0, -dist));
         }
-
-        return best;
+        return findNearestSafeCandidate(candidates, containerPos);
     }
 
     private Vec3d getSafeRestockPoint(BlockPos standBlock, BlockPos containerPos) {

@@ -58,6 +58,7 @@ public class EChestMiner {
     private int pickSlot = -1; // cached pickaxe slot for the cycle
     private BlockPos collectionCenter = null;
     private BlockPos standPos = null;
+    private boolean refillToCapacity = false;
     private static final double COLLECTION_RADIUS = 6.0;
     private static final double ACTION_TOLERANCE = 0.10;
     private static final double STAND_EDGE_PADDING = 0.04;
@@ -66,6 +67,7 @@ public class EChestMiner {
     private static final double MANUAL_CENTER_RANGE = 3.5;
     private static final int POSITION_STUCK_TICKS = 20;
     private static final int SELF_BLOCK_RELOCATE_TICKS = 6;
+    private static final int FAR_PLACEMENT_DISTANCE = 2;
     private static final double MOVE_EPSILON_SQ = 1.0e-4;
     private static final int MINING_POSITION_RECOVER_TICKS = 12;
 
@@ -101,12 +103,12 @@ public class EChestMiner {
         if (module.containerHandler != null) {
             BlockTask containerTask = module.containerHandler.containerTask;
             if (containerTask != null && containerTask.taskState != TaskState.DONE) {
-                if (state != State.IDLE) reset();
+                if (state != State.IDLE) reset(false);
                 return;
             }
         }
         if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) {
-            if (state != State.IDLE) reset();
+            if (state != State.IDLE) reset(false);
             return;
         }
 
@@ -149,40 +151,41 @@ public class EChestMiner {
             Vec3d.ofCenter(module.pathfinder.currentBlockPos));
         if (distToBuild > 1.5) return;
 
-        FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
-        if (!echest.found()) {
-            if (module.storageManagement.get()
-                && module.containerHandler.containerTask.taskState == TaskState.DONE
-                && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
-                module.containerHandler.handleRestock(Items.ENDER_CHEST);
-            }
+        // Hard priority: never start or request ender-chest cycle without a pickaxe.
+        // If none is available, this call triggers Fortune pickaxe restock first.
+        if (!ensurePickaxeReadyForMining()) return;
+
+        int freeSpace = countFreeObsidianSpace();
+        if (freeSpace < 8) {
+            refillToCapacity = false;
             return;
         }
 
         int currentObsidian = countItem(Items.OBSIDIAN);
-        if (currentObsidian > module.saveMaterial.get()) return;
+        if (!refillToCapacity) {
+            if (currentObsidian > module.saveMaterial.get()) return;
+            refillToCapacity = true;
+        }
 
-        int freeSpace = countFreeObsidianSpace();
-        if (freeSpace < 8) return;
+        FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
+        if (!echest.found()) {
+            if (tryRequestEchestRestock()) return;
+            refillToCapacity = false;
+            return;
+        }
 
         int chestsNeeded = (int) Math.ceil(freeSpace / 8.0);
         int availableToMine = echest.count() - MIN_ECHEST_RESERVE;
         chestsRemaining = Math.min(chestsNeeded, Math.max(0, availableToMine));
         if (chestsRemaining <= 0) {
-            if (module.storageManagement.get()
-                && module.containerHandler.containerTask.taskState == TaskState.DONE
-                && module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) != -1) {
-                module.containerHandler.handleRestock(Items.ENDER_CHEST);
-            }
+            if (tryRequestEchestRestock()) return;
+            refillToCapacity = false;
             return;
         }
 
         actionPos = findAdjacentPlacePos();
         if (actionPos == null) return;
         standPos = findStandPos(actionPos);
-
-        // Ensure a valid pickaxe is available before starting the cycle.
-        if (!ensurePickaxeReadyForMining()) return;
 
         stuckTicks = 0;
         echestPlaced = false;
@@ -236,7 +239,7 @@ public class EChestMiner {
                 nudgeAwayFromActionPos();
                 stuckTicks++;
                 if (stuckTicks > SELF_BLOCK_RELOCATE_TICKS) {
-                    reselectActionPosition();
+                    reselectActionPosition(actionPos);
                     stuckTicks = 0;
                 }
                 tickDelay = 1;
@@ -494,7 +497,8 @@ public class EChestMiner {
     private void doCollecting() {
         if (mc.player == null || mc.world == null) { reset(); return; }
 
-        if (countFreeObsidianSpace() <= 0) {
+        int freeSpace = countFreeObsidianSpace();
+        if (freeSpace <= 0) {
             module.pathfinder.clearMinerGoal();
             reset();
             return;
@@ -505,6 +509,14 @@ public class EChestMiner {
         // No obsidian left on ground — done collecting
         if (closest == null) {
             module.pathfinder.clearMinerGoal();
+            if (refillToCapacity && freeSpace >= 8) {
+                // Keep refilling in the same session until all convertible space is filled.
+                if (countItem(Items.ENDER_CHEST) > MIN_ECHEST_RESERVE || tryRequestEchestRestock()) {
+                    reset(false);
+                    return;
+                }
+            }
+            refillToCapacity = false;
             reset();
             return;
         }
@@ -647,6 +659,21 @@ public class EChestMiner {
         return count;
     }
 
+    private boolean tryRequestEchestRestock() {
+        if (!module.storageManagement.get() || module.containerHandler == null) return false;
+        // Never request EChest shulker while pickaxe is missing: restock pick first.
+        if (findBestPickSlot() == -1) {
+            if (module.containerHandler.containerTask.taskState != TaskState.DONE) return true;
+            if (module.containerHandler.findShulkerWithFortunePickaxe() == -1) return false;
+            module.containerHandler.handleFortunePickaxeRestock();
+            return true;
+        }
+        if (module.containerHandler.containerTask.taskState != TaskState.DONE) return true;
+        if (module.containerHandler.findShulkerWithItem(Items.ENDER_CHEST) == -1) return false;
+        module.containerHandler.handleRestock(Items.ENDER_CHEST);
+        return true;
+    }
+
     private BlockPos findAdjacentPlacePos() {
         return findAdjacentPlacePos(null);
     }
@@ -663,19 +690,35 @@ public class EChestMiner {
             && isValidPlacePos(actionPos, maxReach)) return actionPos;
 
         HWDirection hwDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
-        List<BlockPos> candidates = new ArrayList<>();
-        Set<BlockPos> unique = new HashSet<>();
+        List<BlockPos> closeCandidates = new ArrayList<>();
+        Set<BlockPos> closeUnique = new HashSet<>();
+        addPlacementCandidates(closeCandidates, closeUnique, playerPos, hwDir, 1);
+        if (!currentPos.equals(playerPos)) addPlacementCandidates(closeCandidates, closeUnique, currentPos, hwDir, 1);
 
-        addPlacementCandidates(candidates, unique, playerPos, hwDir);
-        if (!currentPos.equals(playerPos)) addPlacementCandidates(candidates, unique, currentPos, hwDir);
-
-        for (BlockPos pos : candidates) {
+        for (BlockPos pos : closeCandidates) {
             if (avoidPos != null && pos.equals(avoidPos)) continue;
             if (isValidPlacePos(pos, maxReach)) return pos;
         }
 
-        // Fallback one block above (uneven floor cases).
-        for (BlockPos base : candidates) {
+        // Fallback one block above (uneven floor cases) for close positions.
+        for (BlockPos base : closeCandidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidPlacePos(pos, maxReach)) return pos;
+        }
+
+        // Secondary ring: try placement through one block gap if all close cells fail.
+        List<BlockPos> farCandidates = new ArrayList<>();
+        Set<BlockPos> farUnique = new HashSet<>();
+        addPlacementCandidates(farCandidates, farUnique, playerPos, hwDir, FAR_PLACEMENT_DISTANCE);
+        if (!currentPos.equals(playerPos)) addPlacementCandidates(farCandidates, farUnique, currentPos, hwDir, FAR_PLACEMENT_DISTANCE);
+
+        for (BlockPos pos : farCandidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidPlacePos(pos, maxReach)) return pos;
+        }
+
+        for (BlockPos base : farCandidates) {
             BlockPos pos = base.up();
             if (avoidPos != null && pos.equals(avoidPos)) continue;
             if (isValidPlacePos(pos, maxReach)) return pos;
@@ -684,37 +727,39 @@ public class EChestMiner {
         return null;
     }
 
-    private void addPlacementCandidates(List<BlockPos> candidates, Set<BlockPos> unique, BlockPos anchor, HWDirection hwDir) {
-        if (anchor == null) return;
+    private void addPlacementCandidates(List<BlockPos> candidates, Set<BlockPos> unique, BlockPos anchor, HWDirection hwDir, int distance) {
+        if (anchor == null || distance < 1) return;
 
         if (hwDir != null) {
             int fx = Integer.signum(hwDir.directionVec.getX());
             int fz = Integer.signum(hwDir.directionVec.getZ());
-            int bx = -fx;
-            int bz = -fz;
+            int bx = -fx * distance;
+            int bz = -fz * distance;
 
             HWDirection lateral = hwDir.lateralDirection();
             int sx = Integer.signum(lateral.directionVec.getX());
             int sz = Integer.signum(lateral.directionVec.getZ());
+            int lx = sx * distance;
+            int lz = sz * distance;
 
             if (bx != 0 || bz != 0) addPlacementCandidate(candidates, unique, anchor.add(bx, 0, bz));
-            if (sx != 0 || sz != 0) {
-                addPlacementCandidate(candidates, unique, anchor.add(sx, 0, sz));
-                addPlacementCandidate(candidates, unique, anchor.add(-sx, 0, -sz));
+            if (lx != 0 || lz != 0) {
+                addPlacementCandidate(candidates, unique, anchor.add(lx, 0, lz));
+                addPlacementCandidate(candidates, unique, anchor.add(-lx, 0, -lz));
             }
-            if (sx != 0 || sz != 0) {
-                addPlacementCandidate(candidates, unique, anchor.add(bx + sx, 0, bz + sz));
-                addPlacementCandidate(candidates, unique, anchor.add(bx - sx, 0, bz - sz));
+            if (lx != 0 || lz != 0) {
+                addPlacementCandidate(candidates, unique, anchor.add(bx + lx, 0, bz + lz));
+                addPlacementCandidate(candidates, unique, anchor.add(bx - lx, 0, bz - lz));
             }
         }
 
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            addPlacementCandidate(candidates, unique, anchor.offset(dir));
+            addPlacementCandidate(candidates, unique, anchor.offset(dir, distance));
         }
-        addPlacementCandidate(candidates, unique, anchor.add(1, 0, 1));
-        addPlacementCandidate(candidates, unique, anchor.add(1, 0, -1));
-        addPlacementCandidate(candidates, unique, anchor.add(-1, 0, 1));
-        addPlacementCandidate(candidates, unique, anchor.add(-1, 0, -1));
+        addPlacementCandidate(candidates, unique, anchor.add(distance, 0, distance));
+        addPlacementCandidate(candidates, unique, anchor.add(distance, 0, -distance));
+        addPlacementCandidate(candidates, unique, anchor.add(-distance, 0, distance));
+        addPlacementCandidate(candidates, unique, anchor.add(-distance, 0, -distance));
     }
 
     private void addPlacementCandidate(List<BlockPos> list, Set<BlockPos> unique, BlockPos pos) {
@@ -750,11 +795,23 @@ public class EChestMiner {
             dz = 0.0;
         }
 
+        // Pull back to center of the current stand block to avoid getting stuck
+        // on block seams where the hitbox clips multiple neighboring blocks.
+        Vec3d selfCenter = Vec3d.ofCenter(mc.player.getBlockPos());
+        dx += (selfCenter.x - player.x) * 0.90;
+        dz += (selfCenter.z - player.z) * 0.90;
+
+        if (standPos != null) {
+            Vec3d standTarget = getSafeStandPoint(standPos, actionPos);
+            dx += (standTarget.x - player.x) * 0.65;
+            dz += (standTarget.z - player.z) * 0.65;
+        }
+
         double len = Math.sqrt(dx * dx + dz * dz);
         dx /= len;
         dz /= len;
 
-        double speed = Math.max(0.22, Math.min(0.40, module.moveSpeed.get() + 0.10));
+        double speed = Math.max(0.26, Math.min(0.46, module.moveSpeed.get() + 0.14));
         mc.player.setVelocity(dx * speed, mc.player.getVelocity().y, dz * speed);
     }
 
@@ -776,7 +833,8 @@ public class EChestMiner {
         ).isEmpty()) return false;
         if (findSupportSide(pos) == null) return false;
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
-        return dist <= maxReach + 1.0;
+        if (dist > maxReach + 1.0) return false;
+        return canOperateFromCurrentPos(pos) || hasAnyValidStandPos(pos);
     }
 
     private BlockPos findStandPos(BlockPos placePos) {
@@ -798,6 +856,14 @@ public class EChestMiner {
         if (best != null) return best;
         BlockPos playerPos = mc.player.getBlockPos();
         return isValidStandPos(playerPos, placePos) ? playerPos : null;
+    }
+
+    private boolean hasAnyValidStandPos(BlockPos placePos) {
+        if (placePos == null || mc.player == null) return false;
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            if (isValidStandPos(placePos.offset(dir), placePos)) return true;
+        }
+        return isValidStandPos(mc.player.getBlockPos(), placePos);
     }
 
     private boolean isValidStandPos(BlockPos standPos, BlockPos placePos) {
@@ -841,7 +907,7 @@ public class EChestMiner {
     private boolean ensureActionPosition() {
         if (mc.player == null || mc.world == null) return false;
         if (actionPos == null || !isUsableActionPos(actionPos)) {
-            reselectActionPosition();
+            reselectActionPosition(actionPos);
             if (actionPos == null) {
                 module.pathfinder.clearMinerGoal();
                 return false;
@@ -856,9 +922,19 @@ public class EChestMiner {
         if (selfBlocking) {
             selfBlockTicks++;
             nudgeAwayFromActionPos();
+            if (standPos != null) {
+                Vec3d standTarget = getSafeStandPoint(standPos, actionPos);
+                if (horizontalDistanceSq(mc.player.getPos(), standTarget)
+                    <= MANUAL_CENTER_RANGE * MANUAL_CENTER_RANGE) {
+                    module.pathfinder.clearMinerGoal();
+                    moveTowardStandPoint(standTarget);
+                } else {
+                    module.pathfinder.setMinerGoal(standPos);
+                }
+            }
 
             if (selfBlockTicks >= SELF_BLOCK_RELOCATE_TICKS) {
-                if (!tryRelocateActionPos()) reselectActionPosition();
+                if (!tryRelocateActionPos()) reselectActionPosition(actionPos);
                 selfBlockTicks = 0;
             }
         } else {
@@ -875,7 +951,7 @@ public class EChestMiner {
         if (standPos == null) {
             ensureNoMoveTicks++;
             if (ensureNoMoveTicks > POSITION_STUCK_TICKS) {
-                if (!tryRelocateActionPos()) reselectActionPosition();
+                if (!tryRelocateActionPos()) reselectActionPosition(actionPos);
                 ensureNoMoveTicks = 0;
             }
             return false;
@@ -900,7 +976,7 @@ public class EChestMiner {
         lastEnsurePos = currentPos;
 
         if (ensureNoMoveTicks > POSITION_STUCK_TICKS) {
-            if (!tryRelocateActionPos()) reselectActionPosition();
+            if (!tryRelocateActionPos()) reselectActionPosition(actionPos);
             ensureNoMoveTicks = 0;
         }
 
@@ -946,7 +1022,7 @@ public class EChestMiner {
 
         // Before chest placement, relocation is safe and preferred.
         if (!tryRelocateActionPos()) {
-            reselectActionPosition();
+            reselectActionPosition(actionPos);
             if (actionPos == null) {
                 goToCollecting();
                 return;
@@ -966,7 +1042,12 @@ public class EChestMiner {
     }
 
     private void reselectActionPosition() {
-        actionPos = findAdjacentPlacePos();
+        reselectActionPosition(null);
+    }
+
+    private void reselectActionPosition(BlockPos avoidPos) {
+        actionPos = findAdjacentPlacePos(avoidPos);
+        if (actionPos == null && avoidPos != null) actionPos = findAdjacentPlacePos();
         standPos = actionPos != null ? findStandPos(actionPos) : null;
         lastEnsurePos = null;
     }
@@ -1016,7 +1097,7 @@ public class EChestMiner {
             return;
         }
 
-        double speed = Math.min(0.20, module.moveSpeed.get());
+        double speed = Math.max(0.18, Math.min(0.32, module.moveSpeed.get() + 0.08));
         mc.player.setVelocity(
             clamp(dx, -speed, speed),
             mc.player.getVelocity().y,
@@ -1095,6 +1176,10 @@ public class EChestMiner {
     }
 
     public void reset() {
+        reset(true);
+    }
+
+    private void reset(boolean clearRefillToCapacity) {
         state = State.IDLE;
         actionPos = null;
         standPos = null;
@@ -1110,6 +1195,7 @@ public class EChestMiner {
         ensureNoMoveTicks = 0;
         miningAccessStuckTicks = 0;
         selfBlockTicks = 0;
+        if (clearRefillToCapacity) refillToCapacity = false;
         if (module.pathfinder != null) {
             module.pathfinder.clearMinerGoal();
             if (module.pathfinder.isPickupActive()) {

@@ -574,6 +574,7 @@ public class InventoryHandler {
     private boolean shouldDropJunkStack(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         Item item = stack.getItem();
+        if (item instanceof BlockItem bi && bi.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) return false;
 
         if (item == Items.NETHERRACK) return false;
         if (JUNK_ITEMS.contains(item)) {
@@ -672,6 +673,7 @@ public class InventoryHandler {
     private boolean isDisposableBuildStack(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         if (!(stack.getItem() instanceof BlockItem bi)) return false;
+        if (bi.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) return false;
         Block block = bi.getBlock();
         return block == Blocks.OBSIDIAN
             || block == Blocks.NETHERRACK

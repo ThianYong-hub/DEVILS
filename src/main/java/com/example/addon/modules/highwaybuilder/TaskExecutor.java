@@ -225,15 +225,10 @@ public class TaskExecutor {
             return;
         }
 
-        // Block is already air
+        // Block is already gone. Always pass through BROKEN first to avoid
+        // BREAK <-> PLACE thrashing on desync-heavy servers.
         if (currentBlock == Blocks.AIR) {
-            if (containerBreakTask) {
-                blockTask.updateState(TaskState.BROKEN);
-            } else if (blockTask.targetBlock == Blocks.AIR) {
-                blockTask.updateState(TaskState.BROKEN);
-            } else {
-                blockTask.updateState(TaskState.PLACE);
-            }
+            blockTask.updateState(TaskState.BROKEN);
             return;
         }
 
@@ -519,6 +514,9 @@ public class TaskExecutor {
 
             double mx = chosen.x - playerPos.x;
             double mz = chosen.z - playerPos.z;
+            Vec3d selfCenter = Vec3d.ofCenter(mc.player.getBlockPos());
+            mx += (selfCenter.x - playerPos.x) * 0.90;
+            mz += (selfCenter.z - playerPos.z) * 0.90;
             double mLenSq = mx * mx + mz * mz;
             if (mLenSq < 0.04) {
                 // Hard fallback when chosen target is too close and player keeps
@@ -553,7 +551,16 @@ public class TaskExecutor {
         dx /= len;
         dz /= len;
 
-        double speed = Math.max(0.12, Math.min(0.28, module.moveSpeed.get() + 0.06));
+        Vec3d selfCenter = Vec3d.ofCenter(mc.player.getBlockPos());
+        dx += (selfCenter.x - playerPos.x) * 0.85;
+        dz += (selfCenter.z - playerPos.z) * 0.85;
+        double correctedLen = Math.sqrt(dx * dx + dz * dz);
+        if (correctedLen > 1.0e-4) {
+            dx /= correctedLen;
+            dz /= correctedLen;
+        }
+
+        double speed = Math.max(0.16, Math.min(0.34, module.moveSpeed.get() + 0.08));
         mc.player.setVelocity(dx * speed, mc.player.getVelocity().y, dz * speed);
 
         if (containerPlacement && module.containerHandler != null) {

@@ -311,14 +311,15 @@ public class TaskManager {
         int actionsThisTick = 0;
         int maxActions = module.blocksPerTick.get();
         boolean hasBreakPhaseTasks = sorted.stream().anyMatch(task ->
-            isBreakPhaseState(task)
-                && isWithinActiveMiningBounds(task.blockPos));
+            isBreakPhaseState(task) && isBreakPhaseActionableNow(task));
 
         for (BlockTask task : sorted) {
             if (hasBreakPhaseTasks) {
                 if (!isBreakPhaseState(task)) continue;
-                if (!isWithinActiveMiningBounds(task.blockPos)) continue;
+                if (!isBreakPhaseActionableNow(task)) continue;
             } else if (!isPlacePhaseState(task)) {
+                continue;
+            } else if (!isPlacePhaseActionableNow(task)) {
                 continue;
             }
             if (!checkStuckTimeout(task)) continue;
@@ -383,6 +384,34 @@ public class TaskManager {
             // Liquid tasks targeting AIR are effectively "clear this cell" and should
             // be processed before normal placement to avoid break/place thrashing.
             case LIQUID -> task.targetBlock == Blocks.AIR;
+            default -> false;
+        };
+    }
+
+    private boolean isBreakPhaseActionableNow(BlockTask task) {
+        if (mc.player == null || task == null) return false;
+
+        if (task.taskState == TaskState.LIQUID && task.targetBlock == Blocks.AIR) {
+            return mc.player.getEyePos().distanceTo(Vec3d.ofCenter(task.blockPos))
+                <= module.maxReach.get() + 0.8;
+        }
+
+        if (!isWithinActiveMiningBounds(task.blockPos)) return false;
+
+        double reachLimit = getEffectiveMiningReach() + MINING_REACH_EPSILON;
+        double best = getBreakReachDistance(task.blockPos);
+        return best <= reachLimit;
+    }
+
+    private boolean isPlacePhaseActionableNow(BlockTask task) {
+        if (mc.player == null || task == null) return false;
+        double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(task.blockPos));
+        double placeReach = module.maxReach.get() + 0.8;
+
+        return switch (task.taskState) {
+            case PLACE, PENDING_PLACE -> dist <= placeReach;
+            case IMPOSSIBLE_PLACE -> dist <= placeReach && !task.sequence.isEmpty();
+            case LIQUID -> task.targetBlock != Blocks.AIR && dist <= placeReach;
             default -> false;
         };
     }
