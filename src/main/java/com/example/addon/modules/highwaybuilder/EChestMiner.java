@@ -73,7 +73,7 @@ public class EChestMiner {
     }
 
     private boolean isSilent() {
-        return module.echestSwapMode.get() == EChestSwapMode.Silent;
+        return module.swapMode.get() == EChestSwapMode.Silent;
     }
 
     public boolean isActive() {
@@ -171,9 +171,8 @@ public class EChestMiner {
         if (actionPos == null) return;
         standPos = findStandPos(actionPos);
 
-        // Cache pickaxe slot for the whole cycle
-        pickSlot = findBestPickSlot();
-        if (pickSlot == -1) return;
+        // Ensure a valid pickaxe is available before starting the cycle.
+        if (!ensurePickaxeReadyForMining()) return;
 
         stuckTicks = 0;
         echestPlaced = false;
@@ -331,20 +330,8 @@ public class EChestMiner {
         }
         echestPlaced = true;
 
-        if (pickSlot == -1) {
-            pickSlot = findBestPickSlot();
-            if (pickSlot == -1) {
-                module.disableWithError("No pickaxe found for mining ender chests.");
-                return;
-            }
-        }
-
-        if (pickSlot < 9) {
-            InvUtils.swap(pickSlot, false);
-        } else {
-            InvUtils.move().from(pickSlot).toHotbar(mc.player.getInventory().getSelectedSlot());
-            tickDelay = isInsta() ? 0 : 1;
-        }
+        if (!ensurePickEquippedForMining()) return;
+        if (tickDelay == 0 && !isInsta()) tickDelay = 1;
 
         state = State.MINE_HIT;
         stuckTicks = 0;
@@ -387,11 +374,12 @@ public class EChestMiner {
                 if (isSilent()) {
                     // Silent: swap pick → attack → swap back
                     int prevSlot = mc.player.getInventory().getSelectedSlot();
-                    swapToPickSilent();
+                    if (!swapToPickSilent()) return;
                     mc.interactionManager.attackBlock(actionPos, side);
                     mc.player.swingHand(Hand.MAIN_HAND);
                     InvUtils.swap(prevSlot, false);
                 } else {
+                    if (!ensurePickEquippedForMining()) return;
                     mc.interactionManager.attackBlock(actionPos, side);
                     mc.player.swingHand(Hand.MAIN_HAND);
                 }
@@ -402,11 +390,12 @@ public class EChestMiner {
         } else {
             if (isSilent()) {
                 int prevSlot = mc.player.getInventory().getSelectedSlot();
-                swapToPickSilent();
+                if (!swapToPickSilent()) return;
                 mc.interactionManager.attackBlock(actionPos, side);
                 mc.player.swingHand(Hand.MAIN_HAND);
                 InvUtils.swap(prevSlot, false);
             } else {
+                if (!ensurePickEquippedForMining()) return;
                 mc.interactionManager.attackBlock(actionPos, side);
                 mc.player.swingHand(Hand.MAIN_HAND);
             }
@@ -510,14 +499,17 @@ public class EChestMiner {
 
     // ── Helpers ─────────────────────────────────────────────────────────
 
-    private void swapToPickSilent() {
-        if (pickSlot == -1) pickSlot = findBestPickSlot();
-        if (pickSlot == -1) return;
+    private boolean swapToPickSilent() {
+        if (mc.player == null) return false;
+        if (!ensurePickaxeReadyForMining()) return false;
+        int selected = mc.player.getInventory().getSelectedSlot();
         if (pickSlot < 9) {
             InvUtils.swap(pickSlot, false);
         } else {
-            InvUtils.move().from(pickSlot).toHotbar(mc.player.getInventory().getSelectedSlot());
+            InvUtils.move().from(pickSlot).toHotbar(selected);
+            pickSlot = selected;
         }
+        return mc.player.getMainHandStack().isIn(ItemTags.PICKAXES);
     }
 
     private int findBestPickSlot() {
@@ -534,6 +526,53 @@ public class EChestMiner {
             }
         }
         return bestSlot;
+    }
+
+    private boolean ensurePickaxeReadyForMining() {
+        if (mc.player == null) return false;
+
+        if (pickSlot >= 0 && pickSlot < 36) {
+            ItemStack cached = mc.player.getInventory().getStack(pickSlot);
+            if (cached.isIn(ItemTags.PICKAXES)) return true;
+            pickSlot = -1;
+        }
+
+        int bestSlot = findBestPickSlot();
+        if (bestSlot != -1) {
+            pickSlot = bestSlot;
+            return true;
+        }
+
+        if (tryStartFortunePickaxeRestock()) return false;
+
+        module.disableWithError("No pickaxe found for mining ender chests.");
+        return false;
+    }
+
+    private boolean ensurePickEquippedForMining() {
+        if (mc.player == null) return false;
+        if (mc.player.getMainHandStack().isIn(ItemTags.PICKAXES)) return true;
+        if (!ensurePickaxeReadyForMining()) return false;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        if (pickSlot < 9) {
+            InvUtils.swap(pickSlot, false);
+        } else {
+            InvUtils.move().from(pickSlot).toHotbar(selected);
+            pickSlot = selected;
+        }
+
+        return mc.player.getMainHandStack().isIn(ItemTags.PICKAXES);
+    }
+
+    private boolean tryStartFortunePickaxeRestock() {
+        if (!module.storageManagement.get() || module.containerHandler == null) return false;
+        if (module.containerHandler.containerTask.taskState != TaskState.DONE) return false;
+        if (module.containerHandler.findShulkerWithFortunePickaxe() == -1) return false;
+
+        module.containerHandler.handleFortunePickaxeRestock();
+        reset();
+        return true;
     }
 
     private boolean hasNearbyObsidian() {

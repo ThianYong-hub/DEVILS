@@ -140,11 +140,11 @@ public class InventoryHandler {
     public boolean swapOrMoveContainerBreakTool() {
         if (mc.player == null) return false;
 
-        // For temporary shulker break use any pickaxe; if none exists, keep current hand.
+        // For temporary shulker break use any pickaxe; never break by hand.
         for (int i = 0; i < 9; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isIn(ItemTags.PICKAXES)) continue;
-            captureSwapBackSlotIfSilent();
+            captureSwapBackSlotIfSilent(module.pickaxeSwapMode.get());
             InvUtils.swap(i, false);
             return true;
         }
@@ -152,7 +152,7 @@ public class InventoryHandler {
         for (int i = 9; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isIn(ItemTags.PICKAXES)) continue;
-            captureSwapBackSlotIfSilent();
+            captureSwapBackSlotIfSilent(module.pickaxeSwapMode.get());
             int hotbar = findPreferredBuildHotbarSlot();
             if (hotbar == -1) hotbar = mc.player.getInventory().getSelectedSlot();
             InvUtils.move().from(i).toHotbar(hotbar);
@@ -160,7 +160,7 @@ public class InventoryHandler {
             return true;
         }
 
-        return true;
+        return false;
     }
 
     private boolean swapToBestTool(BlockTask blockTask) {
@@ -192,14 +192,14 @@ public class InventoryHandler {
         if (bestSlot == -1) return false;
 
         blockTask.toolToUse = mc.player.getInventory().getStack(bestSlot);
-        captureSwapBackSlotIfSilent();
+        captureSwapBackSlotIfSilent(module.pickaxeSwapMode.get());
 
         if (bestSlot < 9) {
             InvUtils.swap(bestSlot, false);
             return true;
         }
 
-        int targetHotbar = findPreferredToolHotbarSlot(module.swapMode.get() == EChestSwapMode.Silent);
+        int targetHotbar = findPreferredToolHotbarSlot(module.pickaxeSwapMode.get() == ToolSwapMode.Silent);
         if (targetHotbar == -1) return false;
 
         InvUtils.move().from(bestSlot).toHotbar(targetHotbar);
@@ -245,7 +245,7 @@ public class InventoryHandler {
         Block useMat = findMaterial(blockTask);
         if (useMat == Blocks.AIR) return false;
 
-        captureSwapBackSlotIfSilent();
+        captureSwapBackSlotIfSilent(module.swapMode.get() == EChestSwapMode.Silent);
 
         FindItemResult result = InvUtils.findInHotbar(itemStack ->
             itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == useMat);
@@ -270,9 +270,14 @@ public class InventoryHandler {
         return false;
     }
 
-    private void captureSwapBackSlotIfSilent() {
+    private void captureSwapBackSlotIfSilent(ToolSwapMode mode) {
+        if (mode != ToolSwapMode.Silent) return;
+        captureSwapBackSlotIfSilent(true);
+    }
+
+    private void captureSwapBackSlotIfSilent(boolean silentMode) {
         if (mc.player == null) return;
-        if (module.swapMode.get() != EChestSwapMode.Silent) return;
+        if (!silentMode) return;
 
         // Keep the very first source slot until we explicitly restore.
         if (swapBackSlot == -1) {

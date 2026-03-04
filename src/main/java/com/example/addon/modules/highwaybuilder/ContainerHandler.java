@@ -62,6 +62,7 @@ public class ContainerHandler {
     private boolean restockingFortunePickaxe = false;
     private boolean tookReplacementPickaxe = false;
     private int pickaxeConfirmWaitTicks = 0;
+    private int pickaxeSearchMissTicks = 0;
     private Item activeContainerItem = null;
     private int activeContainerCountBeforePlace = -1;
     private int activeContainerHotbarSlot = -1;
@@ -83,6 +84,17 @@ public class ContainerHandler {
         if (containerTask.taskState != TaskState.DONE) return;
 
         if (mc.player == null) return;
+
+        // Global priority: always secure a valid Fortune III pickaxe first.
+        // This prevents starting any other restock flow and then breaking shulker by hand.
+        if (item != Items.DIAMOND_PICKAXE && findBestFortunePickaxeSlotInInventory() == -1) {
+            if (findShulkerWithFortunePickaxe() != -1) {
+                handleFortunePickaxeRestock();
+                return;
+            }
+            module.disableWithError("No Fortune III pickaxe available for restock workflow.");
+            return;
+        }
 
         clearRestockStandTarget();
 
@@ -128,6 +140,7 @@ public class ContainerHandler {
         restockingFortunePickaxe = true;
         tookReplacementPickaxe = false;
         pickaxeConfirmWaitTicks = 0;
+        pickaxeSearchMissTicks = 0;
         targetItem = Items.DIAMOND_PICKAXE;
 
         if (!startRestockCycle(shulkerSlot, targetItem)) {
@@ -193,6 +206,7 @@ public class ContainerHandler {
         restockingFortunePickaxe = false;
         tookReplacementPickaxe = false;
         pickaxeConfirmWaitTicks = 0;
+        pickaxeSearchMissTicks = 0;
         openLoadedWaitTicks = 0;
         activeContainerItem = null;
         activeContainerCountBeforePlace = -1;
@@ -810,9 +824,18 @@ public class ContainerHandler {
         if (!tookReplacementPickaxe) {
             int replacementSlot = findBestFortunePickaxeSlotInContainer(handler);
             if (replacementSlot == -1) {
+                // Container slot sync can lag for a few ticks after opening.
+                // Don't abort restock immediately on first "not found".
+                if (pickaxeSearchMissTicks < 20) {
+                    pickaxeSearchMissTicks++;
+                    transferDelay = 1;
+                    containerTask.resetStuck();
+                    return;
+                }
                 closeAndBreak();
                 return;
             }
+            pickaxeSearchMissTicks = 0;
 
             // Prefer deterministic hotbar swap: this avoids inventory-drop logic
             // while interacting with shulker and works even with full inventory.
@@ -846,6 +869,7 @@ public class ContainerHandler {
             // No confirmation after grace period — retry taking once more.
             tookReplacementPickaxe = false;
             transferDelay = 1;
+            containerTask.resetStuck();
             return;
         }
 

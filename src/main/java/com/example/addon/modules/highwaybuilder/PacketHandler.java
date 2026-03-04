@@ -105,7 +105,9 @@ public class PacketHandler {
         BlockTask containerTask = module.containerHandler.containerTask;
         if (containerTask.isOpen
             && mc.player.currentScreenHandler != null
-            && mc.player.currentScreenHandler.syncId != 0) {
+            && mc.player.currentScreenHandler.syncId != 0
+            && packet.getSyncId() == mc.player.currentScreenHandler.syncId
+            && isContainerStorageSlot(packet.getSlot(), mc.player.currentScreenHandler.slots.size())) {
             containerTask.isLoaded = true;
         }
 
@@ -118,5 +120,11 @@ public class PacketHandler {
                 module.statistics.durabilityUsages += newStack.getDamage() - currentStack.getDamage();
             }
         }
+    }
+
+    private boolean isContainerStorageSlot(int slot, int totalSlots) {
+        if (slot < 0 || totalSlots <= 36) return false;
+        int containerSlots = totalSlots - 36;
+        return slot < containerSlots;
     }
 }

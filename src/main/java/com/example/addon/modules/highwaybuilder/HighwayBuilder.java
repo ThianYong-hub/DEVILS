@@ -15,10 +15,12 @@ import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.BlockItem;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.Hand;
 
 import java.util.List;
 
@@ -236,6 +238,42 @@ public class HighwayBuilder extends Module {
         .build()
     );
 
+    public final Setting<ToolSwapMode> pickaxeSwapMode = sgBehavior.add(new EnumSetting.Builder<ToolSwapMode>()
+        .name("pickaxe-swap-mode")
+        .description("Vanilla: visible pickaxe swap for mining. Silent: silent swap and auto-restore.")
+        .defaultValue(ToolSwapMode.Vanilla)
+        .build()
+    );
+
+    public final Setting<Boolean> autoEat = sgBehavior.add(new BoolSetting.Builder()
+        .name("auto-eat")
+        .description("Pause Highway Builder and automatically eat food when health/hunger is low.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Integer> autoEatHealth = sgBehavior.add(new IntSetting.Builder()
+        .name("auto-eat-health")
+        .description("Auto-eat starts when health is at or below this value.")
+        .defaultValue(19)
+        .min(1)
+        .max(20)
+        .sliderRange(1, 20)
+        .visible(autoEat::get)
+        .build()
+    );
+
+    public final Setting<Integer> autoEatHunger = sgBehavior.add(new IntSetting.Builder()
+        .name("auto-eat-hunger")
+        .description("Auto-eat starts when hunger is at or below this value.")
+        .defaultValue(10)
+        .min(0)
+        .max(20)
+        .sliderRange(0, 20)
+        .visible(autoEat::get)
+        .build()
+    );
+
     // ── Mining Settings ─────────────────────────────────────────────────
 
     public final Setting<Double> miningReach = sgMining.add(new DoubleSetting.Builder()
@@ -383,13 +421,6 @@ public class HighwayBuilder extends Module {
         .build()
     );
 
-    public final Setting<EChestSwapMode> echestSwapMode = sgStorage.add(new EnumSetting.Builder<EChestSwapMode>()
-        .name("echest-swap-mode")
-        .description("Normal: visible hotbar swap. Silent: swap via packet, swap back after action.")
-        .defaultValue(EChestSwapMode.Silent)
-        .build()
-    );
-
     public final Setting<Boolean> autoJunkCleanup = sgStorage.add(new BoolSetting.Builder()
         .name("auto-junk-cleanup")
         .description("Automatically throw configured Nether junk items from inventory.")
@@ -509,6 +540,8 @@ public class HighwayBuilder extends Module {
     public EChestMiner echestMiner;
     private int repopulateTimer = 0;
     private boolean containerBusyLastTick = false;
+    private boolean autoEating = false;
+    private int autoEatRestoreSlot = -1;
 
     // ── Constructor ─────────────────────────────────────────────────────
 
@@ -580,6 +613,7 @@ public class HighwayBuilder extends Module {
         statistics = null;
         echestMiner = null;
         containerBusyLastTick = false;
+        stopAutoEat();
     }
 
     // ── Events ──────────────────────────────────────────────────────────
@@ -600,6 +634,7 @@ public class HighwayBuilder extends Module {
 
         // Pause checks (rubberband, death)
         if (pathfinder.pauseCheck()) return;
+        if (handleAutoEat()) return;
 
         // Clean packet limiter
         long now = System.currentTimeMillis();
@@ -746,5 +781,138 @@ public class HighwayBuilder extends Module {
     public String getInfoString() {
         if (statistics == null) return null;
         return statistics.getInfoString();
+    }
+
+    private boolean handleAutoEat() {
+        if (mc.player == null || mc.interactionManager == null) return false;
+
+        if (!autoEat.get()) {
+            stopAutoEat();
+            return false;
+        }
+
+        int hunger = mc.player.getHungerManager().getFoodLevel();
+        float health = mc.player.getHealth();
+        boolean needEat = health <= autoEatHealth.get() || hunger <= autoEatHunger.get();
+
+        if (!needEat) {
+            stopAutoEat();
+            return false;
+        }
+
+        if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) {
+            mc.player.closeHandledScreen();
+            return true;
+        }
+
+        if (!ensureFoodInMainHand()) {
+            if (pathfinder != null) pathfinder.resetBaritone();
+            mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
+            stopAutoEat();
+            return true;
+        }
+
+        if (pathfinder != null) pathfinder.resetBaritone();
+        mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
+
+        autoEating = true;
+        mc.options.useKey.setPressed(true);
+
+        if (!mc.player.isUsingItem()) {
+            var result = mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
+            if (result.isAccepted()) mc.player.swingHand(Hand.MAIN_HAND);
+        }
+
+        return true;
+    }
+
+    private void stopAutoEat() {
+        if (mc == null || mc.options == null) return;
+
+        mc.options.useKey.setPressed(false);
+
+        if (mc.player != null && autoEatRestoreSlot >= 0 && autoEatRestoreSlot < 9) {
+            int selected = mc.player.getInventory().getSelectedSlot();
+            if (selected != autoEatRestoreSlot) {
+                InvUtils.swap(autoEatRestoreSlot, false);
+            }
+        }
+
+        autoEating = false;
+        autoEatRestoreSlot = -1;
+    }
+
+    private boolean ensureFoodInMainHand() {
+        if (mc.player == null) return false;
+
+        if (isFoodStack(mc.player.getMainHandStack())) return true;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        int foodSlot = findFoodHotbarSlot();
+        if (foodSlot == -1) {
+            int inventoryFood = findFoodInventorySlot();
+            if (inventoryFood == -1) return false;
+
+            int targetHotbar = findAutoEatHotbarTarget(selected);
+            if (targetHotbar == -1) return false;
+
+            if (autoEatRestoreSlot == -1) autoEatRestoreSlot = selected;
+            InvUtils.move().from(inventoryFood).toHotbar(targetHotbar);
+            foodSlot = targetHotbar;
+        }
+
+        if (autoEatRestoreSlot == -1) autoEatRestoreSlot = selected;
+        if (selected != foodSlot) InvUtils.swap(foodSlot, false);
+
+        return isFoodStack(mc.player.getMainHandStack());
+    }
+
+    private int findFoodHotbarSlot() {
+        if (mc.player == null) return -1;
+        for (int i = 0; i < 9; i++) {
+            if (isFoodStack(mc.player.getInventory().getStack(i))) return i;
+        }
+        return -1;
+    }
+
+    private int findFoodInventorySlot() {
+        if (mc.player == null) return -1;
+        for (int i = 9; i < 36; i++) {
+            if (isFoodStack(mc.player.getInventory().getStack(i))) return i;
+        }
+        return -1;
+    }
+
+    private int findAutoEatHotbarTarget(int selected) {
+        if (mc.player == null) return -1;
+
+        if (selected >= 0 && selected < 9) {
+            ItemStack stack = mc.player.getInventory().getStack(selected);
+            if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) {
+                return selected;
+            }
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) return i;
+        }
+
+        return selected;
+    }
+
+    private boolean isFoodStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (stack.get(DataComponentTypes.FOOD) == null) return false;
+
+        Item item = stack.getItem();
+        return item != Items.ROTTEN_FLESH
+            && item != Items.SPIDER_EYE
+            && item != Items.POISONOUS_POTATO
+            && item != Items.PUFFERFISH;
     }
 }
