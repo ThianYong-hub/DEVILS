@@ -3,6 +3,7 @@ package com.example.addon.modules.highwaybuilder;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
@@ -17,11 +18,18 @@ import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.Arrays;
 import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class InventoryHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final int ROLE_SWORD = 0;
+    private static final int ROLE_PICKAXE = 1;
+    private static final int ROLE_APPLE = 2;
+    private static final int ROLE_OBSIDIAN = 3;
+    private static final int ROLE_ENDER_CHEST = 4;
+    private static final int ROLE_COUNT = 5;
     private static final Set<Item> JUNK_ITEMS = Set.of(
         Items.ANCIENT_DEBRIS,
         Items.NETHER_GOLD_ORE,
@@ -63,9 +71,13 @@ public class InventoryHandler {
     public final ConcurrentLinkedDeque<Long> packetLimiter = new ConcurrentLinkedDeque<>();
     public int swapBackSlot = -1;
     private int junkCleanupDelay = 0;
+    private int junkDropDirectionIndex = 0;
+    private final int[] protectedRoleSlots = new int[ROLE_COUNT];
+    private boolean protectedSlotsCaptured = false;
 
     public InventoryHandler(HighwayBuilder module) {
         this.module = module;
+        Arrays.fill(protectedRoleSlots, -1);
     }
 
     public void cleanupPacketLimiter() {
@@ -73,6 +85,80 @@ public class InventoryHandler {
         while (!packetLimiter.isEmpty() && now - packetLimiter.peekFirst() > 1000) {
             packetLimiter.pollFirst();
         }
+    }
+
+    public void captureInitialPreferredHotbarSlots() {
+        if (mc.player == null) return;
+        recaptureProtectedRoleSlots();
+        protectedSlotsCaptured = true;
+    }
+
+    public void refreshProtectedHotbarSlotsDynamically() {
+        if (mc.player == null) return;
+        if (swapBackSlot >= 0) return;
+        if (mc.player.currentScreenHandler == null || mc.player.currentScreenHandler.syncId != 0) return;
+        ensureProtectedSlotsCaptured();
+        recaptureProtectedRoleSlots();
+    }
+
+    public boolean canUseHotbarSlot(int slot, Item incomingItem) {
+        if (slot < 0 || slot >= 9) return false;
+        ensureProtectedSlotsCaptured();
+
+        int lockedRole = getLockedRoleForSlot(slot);
+        if (lockedRole == -1) return true;
+
+        int incomingRole = roleOfItem(incomingItem);
+        return incomingRole != -1 && incomingRole == lockedRole;
+    }
+
+    public boolean isProtectedHotbarSlot(int slot) {
+        if (slot < 0 || slot >= 9) return false;
+        ensureProtectedSlotsCaptured();
+        return getLockedRoleForSlot(slot) != -1;
+    }
+
+    public boolean isAppleReservedHotbarSlot(int slot) {
+        if (slot < 0 || slot >= 9) return false;
+        ensureProtectedSlotsCaptured();
+        return protectedRoleSlots[ROLE_APPLE] == slot;
+    }
+
+    private void ensureProtectedSlotsCaptured() {
+        if (!protectedSlotsCaptured) captureInitialPreferredHotbarSlots();
+    }
+
+    private void recaptureProtectedRoleSlots() {
+        Arrays.fill(protectedRoleSlots, -1);
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            int role = roleOfStack(stack);
+            if (role == -1) continue;
+            if (protectedRoleSlots[role] == -1) protectedRoleSlots[role] = i;
+        }
+    }
+
+    private int getLockedRoleForSlot(int slot) {
+        for (int role = 0; role < ROLE_COUNT; role++) {
+            if (protectedRoleSlots[role] == slot) return role;
+        }
+        return -1;
+    }
+
+    private int roleOfItem(Item item) {
+        if (item == null) return -1;
+        ItemStack stack = item.getDefaultStack();
+        return roleOfStack(stack);
+    }
+
+    private int roleOfStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return -1;
+        if (isSwordStack(stack)) return ROLE_SWORD;
+        if (stack.isIn(ItemTags.PICKAXES)) return ROLE_PICKAXE;
+        if (isAppleStackForHotbar(stack)) return ROLE_APPLE;
+        if (isObsidianStack(stack)) return ROLE_OBSIDIAN;
+        if (isEnderChestStack(stack)) return ROLE_ENDER_CHEST;
+        return -1;
     }
 
     public void cleanupJunkInventory() {
@@ -153,8 +239,8 @@ public class InventoryHandler {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isIn(ItemTags.PICKAXES)) continue;
             captureSwapBackSlotIfSilent(module.pickaxeSwapMode.get());
-            int hotbar = findPreferredBuildHotbarSlot();
-            if (hotbar == -1) hotbar = mc.player.getInventory().getSelectedSlot();
+            int hotbar = findPreferredToolHotbarSlot(false);
+            if (hotbar == -1) return false;
             InvUtils.move().from(i).toHotbar(hotbar);
             InvUtils.swap(hotbar, false);
             return true;
@@ -214,25 +300,28 @@ public class InventoryHandler {
 
         for (int i = 0; i < 9; i++) {
             if (avoidSelectedInSilent && i == selected) continue;
+            if (!canUseHotbarSlot(i, Items.DIAMOND_PICKAXE)) continue;
             if (mc.player.getInventory().getStack(i).isEmpty()) return i;
         }
 
         for (int i = 0; i < 9; i++) {
             if (avoidSelectedInSilent && i == selected) continue;
+            if (!canUseHotbarSlot(i, Items.DIAMOND_PICKAXE)) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (isDisposableBuildStack(stack)) return i;
         }
 
         for (int i = 0; i < 9; i++) {
             if (avoidSelectedInSilent && i == selected) continue;
+            if (!canUseHotbarSlot(i, Items.DIAMOND_PICKAXE)) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!isPickaxeStack(stack)) return i;
         }
 
-        if (!avoidSelectedInSilent) return selected;
+        if (!avoidSelectedInSilent && canUseHotbarSlot(selected, Items.DIAMOND_PICKAXE)) return selected;
 
         // Last resort in silent: only if absolutely no other target slot exists.
-        return selected;
+        return -1;
     }
 
     /**
@@ -260,7 +349,7 @@ public class InventoryHandler {
             itemStack.getItem() instanceof BlockItem bi && bi.getBlock() == useMat);
 
         if (invResult.found()) {
-            int targetHotbar = findPreferredBuildHotbarSlot();
+            int targetHotbar = findPreferredBuildHotbarSlot(useMat.asItem());
             if (targetHotbar == -1) return false;
             InvUtils.move().from(invResult.slot()).toHotbar(targetHotbar);
             InvUtils.swap(targetHotbar, false);
@@ -414,18 +503,72 @@ public class InventoryHandler {
         if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
         int screenSlot = inventorySlotToScreenSlot(inventorySlot);
         if (screenSlot < 0) return;
-        mc.interactionManager.clickSlot(
-            mc.player.currentScreenHandler.syncId,
-            screenSlot,
-            fullStack ? 1 : 0,
-            SlotActionType.THROW,
-            mc.player
-        );
+
+        Runnable throwAction = () -> {
+            if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
+            mc.interactionManager.clickSlot(
+                mc.player.currentScreenHandler.syncId,
+                screenSlot,
+                fullStack ? 1 : 0,
+                SlotActionType.THROW,
+                mc.player
+            );
+        };
+
+        float throwYaw = getNextJunkDropYaw();
+        float throwPitch = -10.0f;
+        Rotations.rotate(throwYaw, throwPitch, 30, throwAction);
+    }
+
+    private float getNextJunkDropYaw() {
+        if (mc.player == null) return 0.0f;
+
+        int mode = Math.floorMod(junkDropDirectionIndex++, 3); // left, right, back
+        HWDirection buildDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
+        if (buildDir != null) {
+            return switch (mode) {
+                case 0 -> buildDir.counterClockwise(2).yaw;
+                case 1 -> buildDir.clockwise(2).yaw;
+                default -> buildDir.clockwise(4).yaw;
+            };
+        }
+
+        float yaw = mc.player.getYaw();
+        return switch (mode) {
+            case 0 -> yaw - 90.0f;
+            case 1 -> yaw + 90.0f;
+            default -> yaw + 180.0f;
+        };
     }
 
     private int inventorySlotToScreenSlot(int inventorySlot) {
         if (inventorySlot < 0 || inventorySlot >= 36) return -1;
         return inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
+    }
+
+    private boolean isSwordStack(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.isIn(ItemTags.SWORDS);
+    }
+
+    private boolean isPickaxeStackForHotbar(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        if (!stack.isIn(ItemTags.PICKAXES)) return false;
+        return isFortuneThreePickaxeNoSilk(stack) || !isSilkTouchPickaxe(stack);
+    }
+
+    private boolean isAppleStackForHotbar(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        return stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE
+            || stack.getItem() == Items.GOLDEN_APPLE
+            || stack.getItem() == Items.APPLE;
+    }
+
+    private boolean isObsidianStack(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.getItem() == Items.OBSIDIAN;
+    }
+
+    private boolean isEnderChestStack(ItemStack stack) {
+        return stack != null && !stack.isEmpty() && stack.getItem() == Items.ENDER_CHEST;
     }
 
     private boolean shouldDropJunkStack(ItemStack stack) {
@@ -475,23 +618,26 @@ public class InventoryHandler {
             || stack.contains(DataComponentTypes.STORED_ENCHANTMENTS);
     }
 
-    private int findPreferredBuildHotbarSlot() {
+    private int findPreferredBuildHotbarSlot(Item incomingItem) {
         if (mc.player == null) return -1;
 
         int selected = mc.player.getInventory().getSelectedSlot();
         ItemStack selectedStack = mc.player.getInventory().getStack(selected);
-        if (!isPickaxeStack(selectedStack)) return selected;
+        if (!isPickaxeStack(selectedStack) && canUseHotbarSlot(selected, incomingItem)) return selected;
 
         for (int i = 0; i < 9; i++) {
+            if (!canUseHotbarSlot(i, incomingItem)) continue;
             if (mc.player.getInventory().getStack(i).isEmpty()) return i;
         }
 
         for (int i = 0; i < 9; i++) {
+            if (!canUseHotbarSlot(i, incomingItem)) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (isDisposableBuildStack(stack)) return i;
         }
 
         for (int i = 0; i < 9; i++) {
+            if (!canUseHotbarSlot(i, incomingItem)) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!isPickaxeStack(stack)) return i;
         }
@@ -502,6 +648,7 @@ public class InventoryHandler {
         if (pickCount > 1) {
             for (int i = 0; i < 9; i++) {
                 if (i == selected) continue;
+                if (!canUseHotbarSlot(i, incomingItem)) continue;
                 if (isPickaxeStack(mc.player.getInventory().getStack(i))) return i;
             }
         }

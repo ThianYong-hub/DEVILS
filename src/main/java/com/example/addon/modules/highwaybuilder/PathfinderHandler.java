@@ -13,7 +13,7 @@ import java.util.function.Predicate;
 public class PathfinderHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final double RESTOCK_NEAR_RANGE = 3.0;
-    private static final double RESTOCK_CENTER_TOLERANCE = 0.08;
+    private static final double RESTOCK_CENTER_TOLERANCE = 0.04;
     private static final int RUNNING_STALL_TICKS = 16;
     private static final double RUNNING_STALL_MOVE_EPSILON_SQ = 0.0004;
     private static final double RUNNING_NUDGE_MIN_DIST_SQ = 0.04;
@@ -21,6 +21,8 @@ public class PathfinderHandler {
     private static final double STEP_FORWARD_DIST_SQ = 3.24;
     private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
     private static final double BREAK_REACH_EPSILON = 0.05;
+    private static final int RESTOCK_STALL_TICKS = 8;
+    private static final double RESTOCK_STALL_MOVE_EPSILON_SQ = 0.00025;
 
     private final HighwayBuilder module;
 
@@ -48,6 +50,8 @@ public class PathfinderHandler {
     private boolean pickupActive = false;
     private int runningStallTicks = 0;
     private Vec3d lastRunningPos = null;
+    private int restockStallTicks = 0;
+    private Vec3d lastRestockPos = null;
 
     public PathfinderHandler(HighwayBuilder module) {
         this.module = module;
@@ -102,6 +106,8 @@ public class PathfinderHandler {
         startingDirection = HWDirection.fromYaw(mc.player.getYaw());
         runningStallTicks = 0;
         lastRunningPos = mc.player.getPos();
+        restockStallTicks = 0;
+        lastRestockPos = mc.player.getPos();
     }
 
     public void setMinerGoal(BlockPos pos) {
@@ -210,6 +216,8 @@ public class PathfinderHandler {
                         (int) Math.floor(standTarget.z)
                     );
                 }
+
+                applyRestockStallRecovery(standTarget, canInteract);
             }
         }
 
@@ -491,7 +499,17 @@ public class PathfinderHandler {
         Vec3d standTarget = module.containerHandler != null
             ? module.containerHandler.getRestockStandPos()
             : Vec3d.ofCenter(currentBlockPos);
-        return isCenteredOn(standTarget);
+        if (!isCenteredOn(standTarget)) return false;
+
+        if (module.containerHandler != null
+            && module.containerHandler.containerTask.taskState != TaskState.DONE
+            && mc.player.getBoundingBox().intersects(new net.minecraft.util.math.Box(
+                module.containerHandler.containerTask.blockPos
+            ))) {
+            return false;
+        }
+
+        return true;
     }
 
     private boolean isCenteredOn(Vec3d target) {
@@ -543,6 +561,11 @@ public class PathfinderHandler {
             moveState = MovementState.RUNNING;
         }
 
+        if (moveState != MovementState.RESTOCK) {
+            restockStallTicks = 0;
+            lastRestockPos = mc.player != null ? mc.player.getPos() : null;
+        }
+
         // Guard against stale external goals from EChest miner.
         if (minerGoal != null && (module.echestMiner == null || !module.echestMiner.isActive())) {
             minerGoal = null;
@@ -581,6 +604,39 @@ public class PathfinderHandler {
             moveTo(goalCenter);
             runningStallTicks = 0;
         }
+    }
+
+    private void applyRestockStallRecovery(Vec3d standTarget, boolean canInteract) {
+        if (mc.player == null || module.containerHandler == null || moveState != MovementState.RESTOCK) {
+            restockStallTicks = 0;
+            lastRestockPos = mc.player != null ? mc.player.getPos() : null;
+            return;
+        }
+
+        if (isCenteredOn(standTarget) && canInteract) {
+            restockStallTicks = 0;
+            lastRestockPos = mc.player.getPos();
+            return;
+        }
+
+        Vec3d currentPos = mc.player.getPos();
+        if (lastRestockPos != null
+            && horizontalDistanceSq(currentPos, lastRestockPos) <= RESTOCK_STALL_MOVE_EPSILON_SQ) {
+            restockStallTicks++;
+        } else {
+            restockStallTicks = 0;
+        }
+        lastRestockPos = currentPos;
+
+        if (restockStallTicks < RESTOCK_STALL_TICKS) return;
+
+        module.containerHandler.invalidateRestockStandTarget();
+        if (!module.containerHandler.tryRelocateContainerPlacement()) {
+            Vec3d refreshed = module.containerHandler.getRestockStandPos();
+            moveTo(refreshed);
+        }
+
+        restockStallTicks = 0;
     }
 
     public void setupBaritone() {

@@ -457,12 +457,18 @@ public class TaskManager {
                     containerTask.updateState(TaskState.OPEN_CONTAINER);
                     module.pathfinder.moveState = MovementState.RESTOCK;
                 } else {
-                    containerTask.updateState(TaskState.PICKUP);
-                    module.pathfinder.moveState = MovementState.PICKUP;
+                    if (module.containerHandler.tryRelocateContainerPlacement()) {
+                        module.pathfinder.moveState = MovementState.RESTOCK;
+                    } else {
+                        containerTask.updateState(TaskState.PICKUP);
+                        module.pathfinder.moveState = MovementState.PICKUP;
+                    }
                 }
             }
             case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE, PLACED -> {
-                containerTask.updateState(TaskState.PLACE);
+                if (!module.containerHandler.tryRelocateContainerPlacement()) {
+                    containerTask.updateState(TaskState.PLACE);
+                }
                 module.pathfinder.moveState = MovementState.RESTOCK;
             }
             default -> {

@@ -585,6 +585,7 @@ public class HighwayBuilder extends Module {
 
         pathfinder.setupPathing();
         pathfinder.setupBaritone();
+        inventoryHandler.captureInitialPreferredHotbarSlots();
         taskManager.populateTasks();
         containerBusyLastTick = false;
 
@@ -678,6 +679,7 @@ public class HighwayBuilder extends Module {
         }
 
         if (inventoryHandler != null) {
+            inventoryHandler.refreshProtectedHotbarSlotsDynamically();
             inventoryHandler.cleanupJunkInventory();
         }
 
@@ -888,16 +890,25 @@ public class HighwayBuilder extends Module {
 
         if (selected >= 0 && selected < 9) {
             ItemStack stack = mc.player.getInventory().getStack(selected);
-            if (stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) {
+            boolean selectedProtected = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(selected);
+            boolean selectedAppleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(selected);
+            if ((stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES))
+                && (!selectedProtected || selectedAppleReserved)) {
                 return selected;
             }
         }
 
         for (int i = 0; i < 9; i++) {
+            boolean protectedSlot = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(i);
+            boolean appleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(i);
+            if (protectedSlot && !appleReserved) continue;
             if (mc.player.getInventory().getStack(i).isEmpty()) return i;
         }
 
         for (int i = 0; i < 9; i++) {
+            boolean protectedSlot = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(i);
+            boolean appleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(i);
+            if (protectedSlot && !appleReserved) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (!stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) return i;
         }

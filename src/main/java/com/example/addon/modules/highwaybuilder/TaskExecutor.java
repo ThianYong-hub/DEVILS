@@ -14,6 +14,11 @@ import net.minecraft.util.math.Vec3d;
 public class TaskExecutor {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
+    private static final int CONTAINER_STUCK_RELOCATE_THRESHOLD = 3;
+    private static final int CONTAINER_STUCK_REPATH_THRESHOLD = 2;
+    private static final double CONTAINER_NUDGE_MIN_SPEED = 0.22;
+    private static final double CONTAINER_NUDGE_MAX_SPEED = 0.42;
+    private static final double CONTAINER_ESCAPE_DISTANCE = 1.30;
 
     private final HighwayBuilder module;
 
@@ -341,6 +346,22 @@ public class TaskExecutor {
 
         if (updateOnly) return;
 
+        boolean selfBlockingPlacement = mc.player != null
+            && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos));
+        if (selfBlockingPlacement) {
+            if (blockTask == containerTask && module.containerHandler.tryRelocateContainerPlacement()) {
+                return;
+            }
+
+            nudgeAwayFromPlacementBlock(blockTask, blockTask == containerTask);
+            blockTask.onStuck(2);
+
+            if (blockTask == containerTask && tryRecoverContainerPlacementStuck(blockTask)) {
+                return;
+            }
+            return;
+        }
+
         if (blockTask == containerTask
             && module.pathfinder.moveState == MovementState.RESTOCK) {
             if (!module.containerHandler.ensureContainerPlacementItemReady()) {
@@ -350,13 +371,15 @@ public class TaskExecutor {
 
             if (!module.pathfinder.isCenteredForRestock()
                 && !module.containerHandler.canInteractWithContainerFromCurrentPos()) {
-                blockTask.resetStuck();
-                return;
-            }
+                if (module.containerHandler.tryRelocateContainerPlacement()) {
+                    return;
+                }
 
-            if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
-                // Never place while player's hitbox intersects the placement block.
-                blockTask.resetStuck();
+                nudgeAwayFromPlacementBlock(blockTask, true);
+                blockTask.onStuck(2);
+                if (tryRecoverContainerPlacementStuck(blockTask)) {
+                    return;
+                }
                 return;
             }
 
@@ -369,10 +392,25 @@ public class TaskExecutor {
         }
 
         if (!HWUtils.isPlaceable(blockTask.blockPos)) {
+            if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
+                nudgeAwayFromPlacementBlock(blockTask, blockTask == containerTask);
+                blockTask.onStuck(2);
+                if (blockTask == containerTask && tryRecoverContainerPlacementStuck(blockTask)) {
+                    return;
+                }
+                return;
+            }
+
             if (blockTask == containerTask) {
+                if (module.containerHandler.tryRelocateContainerPlacement()) {
+                    return;
+                }
                 // Don't destroy the container task if placement spot is temporarily blocked
                 // (usually by player positioning while centering).
-                containerTask.resetStuck();
+                containerTask.onStuck(2);
+                if (tryRecoverContainerPlacementStuck(containerTask)) {
+                    return;
+                }
             } else {
                 module.taskManager.getTasks().remove(blockTask.blockPos);
             }
@@ -445,6 +483,105 @@ public class TaskExecutor {
             || (containerTask != null
             && containerTask.taskState != TaskState.DONE
             && blockTask.blockPos.equals(containerTask.blockPos));
+    }
+
+    private void nudgeAwayFromPlacementBlock(BlockTask blockTask, boolean containerPlacement) {
+        if (mc.player == null) return;
+        Vec3d playerPos = mc.player.getPos();
+
+        if (containerPlacement && module.containerHandler != null) {
+            module.containerHandler.invalidateRestockStandTarget();
+            Vec3d standTarget = module.containerHandler.getRestockStandPos();
+
+            Vec3d containerCenter = Vec3d.ofCenter(blockTask.blockPos);
+            double rx = playerPos.x - containerCenter.x;
+            double rz = playerPos.z - containerCenter.z;
+            if (rx * rx + rz * rz < 1.0e-4 && module.pathfinder != null) {
+                rx = -module.pathfinder.startingDirection.directionVec.getX();
+                rz = -module.pathfinder.startingDirection.directionVec.getZ();
+            }
+            if (rx * rx + rz * rz < 1.0e-4) {
+                rx = 1.0;
+                rz = 0.0;
+            }
+            double rLen = Math.sqrt(rx * rx + rz * rz);
+            Vec3d escapeTarget = new Vec3d(
+                containerCenter.x + (rx / rLen) * CONTAINER_ESCAPE_DISTANCE,
+                playerPos.y,
+                containerCenter.z + (rz / rLen) * CONTAINER_ESCAPE_DISTANCE
+            );
+
+            // Prefer the farther target from container center to ensure hitbox
+            // fully exits the placement block before retry.
+            double standDistSq = horizontalDistanceSq(standTarget, containerCenter);
+            double escapeDistSq = horizontalDistanceSq(escapeTarget, containerCenter);
+            Vec3d chosen = standDistSq >= escapeDistSq ? standTarget : escapeTarget;
+
+            double mx = chosen.x - playerPos.x;
+            double mz = chosen.z - playerPos.z;
+            double mLenSq = mx * mx + mz * mz;
+            if (mLenSq < 0.04) {
+                // Hard fallback when chosen target is too close and player keeps
+                // clipping the placement block: force a larger step directly away.
+                mx = rx;
+                mz = rz;
+                mLenSq = mx * mx + mz * mz;
+            }
+            if (mLenSq > 1.0e-4) {
+                double mLen = Math.sqrt(mLenSq);
+                double speed = Math.max(CONTAINER_NUDGE_MIN_SPEED, Math.min(CONTAINER_NUDGE_MAX_SPEED, module.moveSpeed.get() + 0.10));
+                mc.player.setVelocity((mx / mLen) * speed, mc.player.getVelocity().y, (mz / mLen) * speed);
+                module.pathfinder.moveState = MovementState.RESTOCK;
+                return;
+            }
+        }
+
+        Vec3d targetCenter = Vec3d.ofCenter(blockTask.blockPos);
+        double dx = playerPos.x - targetCenter.x;
+        double dz = playerPos.z - targetCenter.z;
+
+        if (dx * dx + dz * dz < 1.0e-4 && module.pathfinder != null) {
+            dx = -module.pathfinder.startingDirection.directionVec.getX();
+            dz = -module.pathfinder.startingDirection.directionVec.getZ();
+        }
+        if (dx * dx + dz * dz < 1.0e-4) {
+            dx = 1.0;
+            dz = 0.0;
+        }
+
+        double len = Math.sqrt(dx * dx + dz * dz);
+        dx /= len;
+        dz /= len;
+
+        double speed = Math.max(0.12, Math.min(0.28, module.moveSpeed.get() + 0.06));
+        mc.player.setVelocity(dx * speed, mc.player.getVelocity().y, dz * speed);
+
+        if (containerPlacement && module.containerHandler != null) {
+            module.pathfinder.moveState = MovementState.RESTOCK;
+        }
+    }
+
+    private boolean tryRecoverContainerPlacementStuck(BlockTask containerTask) {
+        if (containerTask == null || module.containerHandler == null) return false;
+
+        if (containerTask.getStuckTicks() >= CONTAINER_STUCK_REPATH_THRESHOLD) {
+            module.containerHandler.invalidateRestockStandTarget();
+            module.pathfinder.moveState = MovementState.RESTOCK;
+        }
+
+        if (containerTask.getStuckTicks() >= CONTAINER_STUCK_RELOCATE_THRESHOLD
+            && module.containerHandler.tryRelocateContainerPlacement()) {
+            containerTask.resetStuck();
+            return true;
+        }
+
+        return false;
+    }
+
+    private double horizontalDistanceSq(Vec3d a, Vec3d b) {
+        double dx = a.x - b.x;
+        double dz = a.z - b.z;
+        return dx * dx + dz * dz;
     }
 
     private boolean isContainerBreakInRange(BlockPos pos) {

@@ -36,11 +36,12 @@ public class ContainerHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final int MAX_EXACT_TRANSFER_PER_TICK = 8;
     private static final int ENDER_CHEST_RESERVE = 16;
-    private static final double RESTOCK_EDGE_PADDING = 0.04;
+    private static final double RESTOCK_EDGE_PADDING = 0.06;
     private static final double RESTOCK_BIAS_AWAY_FROM_CONTAINER = 0.08;
     private static final int HAND_SWAP_OPEN_DELAY_TICKS = 2;
     private static final double SHULKER_PICKUP_SEARCH_RADIUS = 32.0;
     private static final int PICKUP_MISS_GRACE_TICKS = 20;
+    private static final double RESTOCK_CONTAINER_CLEARANCE = 0.03;
 
     private final HighwayBuilder module;
     public BlockTask containerTask;
@@ -85,9 +86,16 @@ public class ContainerHandler {
 
         if (mc.player == null) return;
 
+        // Don't switch to other restock targets while Fortune-pick cycle isn't finished.
+        if (item != Items.DIAMOND_PICKAXE && restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
+            if (restartFortunePickaxeRestockCycle()) return;
+            module.disableWithError("No Fortune III pickaxe available for restock workflow.");
+            return;
+        }
+
         // Global priority: always secure a valid Fortune III pickaxe first.
         // This prevents starting any other restock flow and then breaking shulker by hand.
-        if (item != Items.DIAMOND_PICKAXE && findBestFortunePickaxeSlotInInventory() == -1) {
+        if (item != Items.DIAMOND_PICKAXE && !hasFortunePickaxeInInventory()) {
             if (findShulkerWithFortunePickaxe() != -1) {
                 handleFortunePickaxeRestock();
                 return;
@@ -213,6 +221,28 @@ public class ContainerHandler {
         activeContainerHotbarSlot = -1;
     }
 
+    private boolean hasFortunePickaxeInInventory() {
+        return findBestFortunePickaxeSlotInInventory() != -1;
+    }
+
+    private boolean restartFortunePickaxeRestockCycle() {
+        if (mc.player == null) return false;
+
+        int shulkerSlot = findShulkerWithFortunePickaxe();
+        if (shulkerSlot == -1) return false;
+
+        restockingFortunePickaxe = true;
+        tookReplacementPickaxe = false;
+        pickaxeConfirmWaitTicks = 0;
+        pickaxeSearchMissTicks = 0;
+        targetItem = Items.DIAMOND_PICKAXE;
+        clearRestockStandTarget();
+        waitingForScreenClose = false;
+        waitingForScreenCloseTicks = 0;
+
+        return startRestockCycle(shulkerSlot, targetItem);
+    }
+
     /**
      * Open the placed shulker box.
      */
@@ -282,6 +312,14 @@ public class ContainerHandler {
             openDelay = 2;
             openAttempts++;
             if (openAttempts > 30) {
+                if (restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
+                    if (restartFortunePickaxeRestockCycle()) {
+                        openAttempts = 0;
+                        return;
+                    }
+                    module.disableWithError("Failed to continue Fortune III pickaxe restock.");
+                    return;
+                }
                 clearRestockStandTarget();
                 BlockPos probePos = lastContainerPos != null ? lastContainerPos : containerTask.blockPos;
                 if (mc.world.getBlockState(probePos).getBlock() instanceof ShulkerBoxBlock) {
@@ -338,6 +376,15 @@ public class ContainerHandler {
             invalidateRestockStandTarget();
         }
         if (openAttempts > 25) {
+            // For Fortune-pick restock, never abandon unopened container.
+            if (restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
+                invalidateRestockStandTarget();
+                openDelay = 4;
+                openAttempts = 0;
+                containerTask.resetStuck();
+                return;
+            }
+
             // Stuck trying to open — break and abort
             beginContainerBreak();
             openAttempts = 0;
@@ -413,7 +460,10 @@ public class ContainerHandler {
             int safeInventorySlot = findSafeInventorySlot();
             if (safeInventorySlot != -1) {
                 int emptyHotbar = findEmptyHotbarSlot(selected);
-                int targetHotbarSlot = emptyHotbar != -1 ? emptyHotbar : selected;
+                Item safeItem = mc.player.getInventory().getStack(safeInventorySlot).getItem();
+                int targetHotbarSlot = emptyHotbar != -1 ? emptyHotbar
+                    : (canUseContainerHotbarSlot(selected, safeItem) ? selected : -1);
+                if (targetHotbarSlot == -1) return HandSafetyResult.FAILED;
                 InvUtils.move().from(safeInventorySlot).toHotbar(targetHotbarSlot);
                 if (targetHotbarSlot != selected) {
                     swapped = selectHotbarSlot(targetHotbarSlot);
@@ -464,6 +514,7 @@ public class ContainerHandler {
         if (mc.player == null) return -1;
         for (int i = 0; i < 9; i++) {
             if (i == excludeSlot) continue;
+            if (!canUseContainerHotbarSlot(i, null)) continue;
             if (mc.player.getInventory().getStack(i).isEmpty()) return i;
         }
         return -1;
@@ -526,12 +577,12 @@ public class ContainerHandler {
             return;
         }
 
-        if (targetItem == Items.ENDER_CHEST) {
-            doEnderChestRestock(handler);
-            return;
-        }
         if (restockingFortunePickaxe) {
             doFortunePickaxeRestock(handler);
+            return;
+        }
+        if (targetItem == Items.ENDER_CHEST) {
+            doEnderChestRestock(handler);
             return;
         }
 
@@ -599,12 +650,24 @@ public class ContainerHandler {
             return;
         }
 
+        if (restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
+            if (restartFortunePickaxeRestockCycle()) return;
+            module.disableWithError("No Fortune III pickaxe found after restock attempt.");
+            return;
+        }
+
         // Shulker wasn't confirmed as recovered yet: keep searching and don't
         // switch back to normal build loop prematurely.
         containerTask.resetStuck();
     }
 
     private void finishPickupSuccess() {
+        if (restockingFortunePickaxe && !hasFortunePickaxeInInventory()) {
+            if (restartFortunePickaxeRestockCycle()) return;
+            module.disableWithError("Fortune III pickaxe restock did not complete.");
+            return;
+        }
+
         if (restockingFortunePickaxe) {
             normalizePostPickaxeRestockHotbar();
         }
@@ -617,7 +680,10 @@ public class ContainerHandler {
 
     private boolean hasRecoveredContainerItem() {
         if (activeContainerItem == null || activeContainerCountBeforePlace < 0) return false;
-        return countInventoryItem(activeContainerItem) >= activeContainerCountBeforePlace;
+        boolean recoveredContainer = countInventoryItem(activeContainerItem) >= activeContainerCountBeforePlace;
+        if (!recoveredContainer) return false;
+        if (restockingFortunePickaxe) return hasFortunePickaxeInInventory();
+        return true;
     }
 
     private void normalizePostPickaxeRestockHotbar() {
@@ -1222,79 +1288,101 @@ public class ContainerHandler {
     /**
      * Find a valid position adjacent to the player to place a container.
      * Prioritises behind and back-diagonal positions, then sides.
-     * Never picks positions in front of the player relative to highway direction.
+     * Avoids forward positions unless no other safe adjacent candidate exists.
      * Keeps placement within one horizontal block (adjacent/diagonal), never two blocks away.
      */
     private BlockPos getRemotePos() {
+        return getRemotePos(null);
+    }
+
+    private BlockPos getRemotePos(BlockPos avoidPos) {
         if (mc.player == null || mc.world == null) return null;
 
         BlockPos playerPos = mc.player.getBlockPos();
+        BlockPos currentPos = module.pathfinder != null ? module.pathfinder.currentBlockPos : playerPos;
         double maxReach = module.maxReach.get();
         HWDirection hwDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
 
-        // Reuse previous successful container position if still valid.
+        // Reuse previous successful container position if still valid, preferred and
+        // not currently intersecting player's hitbox.
         if (lastContainerPos != null
+            && (avoidPos == null || !lastContainerPos.equals(avoidPos))
             && isPreferredContainerPos(lastContainerPos, playerPos, hwDir)
-            && isValidContainerPos(lastContainerPos, maxReach)) {
+            && isValidContainerPos(lastContainerPos, maxReach, false)) {
             return lastContainerPos;
         }
 
         List<BlockPos> candidates = new ArrayList<>();
         Set<BlockPos> unique = new HashSet<>();
 
-        // Preferred order: behind -> behind diagonals -> sides.
-        if (hwDir != null) {
-            int fx = Integer.signum(hwDir.directionVec.getX());
-            int fz = Integer.signum(hwDir.directionVec.getZ());
-            int bx = -fx;
-            int bz = -fz;
-
-            HWDirection lateral = hwDir.lateralDirection();
-            int sx = Integer.signum(lateral.directionVec.getX());
-            int sz = Integer.signum(lateral.directionVec.getZ());
-
-            // Directly behind.
-            if (bx != 0 || bz != 0) addCandidate(candidates, unique, playerPos.add(bx, 0, bz));
-
-            // Behind diagonals.
-            if (sx != 0 || sz != 0) {
-                addCandidate(candidates, unique, playerPos.add(bx + sx, 0, bz + sz));
-                addCandidate(candidates, unique, playerPos.add(bx - sx, 0, bz - sz));
-            }
-
-            // Side blocks.
-            if (sx != 0 || sz != 0) {
-                addCandidate(candidates, unique, playerPos.add(sx, 0, sz));
-                addCandidate(candidates, unique, playerPos.add(-sx, 0, -sz));
-            }
-
-            // Diagonal-forward directions can miss one of close back-adjacent cells.
-            if (bx != 0 && bz != 0) {
-                addCandidate(candidates, unique, playerPos.add(bx, 0, 0));
-                addCandidate(candidates, unique, playerPos.add(0, 0, bz));
-            }
+        addContainerCandidates(candidates, unique, playerPos, hwDir);
+        if (!currentPos.equals(playerPos)) {
+            addContainerCandidates(candidates, unique, currentPos, hwDir);
         }
 
-        // Fallback around player (still adjacent only).
-        for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(candidates, unique, playerPos.offset(dir));
-        }
-        addCandidate(candidates, unique, playerPos.add(1, 0, 1));
-        addCandidate(candidates, unique, playerPos.add(1, 0, -1));
-        addCandidate(candidates, unique, playerPos.add(-1, 0, 1));
-        addCandidate(candidates, unique, playerPos.add(-1, 0, -1));
-
-        // Validate with strict preference first.
+        // Pass 1: strict preference and no self-overlap.
         for (BlockPos pos : candidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
             if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
-            if (isValidContainerPos(pos, maxReach)) return pos;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
         }
 
-        // Last chance: same horizontal candidates one block higher (uneven floor).
+        // Pass 1b: strict preference one block higher and no self-overlap.
         for (BlockPos base : candidates) {
             BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
             if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
-            if (isValidContainerPos(pos, maxReach)) return pos;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+
+        // Pass 2: strict preference, allow self-overlap if nothing else exists.
+        for (BlockPos pos : candidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+
+        for (BlockPos base : candidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (!isPreferredContainerPos(pos, playerPos, hwDir)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+
+        // Pass 3: any adjacent safe position (including forward), no self-overlap.
+        for (BlockPos pos : candidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+
+        for (BlockPos base : candidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, false)) return pos;
+        }
+
+        // Pass 4: final fallback allowing self-overlap.
+        for (BlockPos pos : candidates) {
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+
+        for (BlockPos base : candidates) {
+            BlockPos pos = base.up();
+            if (avoidPos != null && pos.equals(avoidPos)) continue;
+            if (isValidContainerPos(pos, maxReach, true)) return pos;
+        }
+
+        // Last fallback: keep previous valid position even if not preferred.
+        if (lastContainerPos != null
+            && (avoidPos == null || !lastContainerPos.equals(avoidPos))
+            && isValidContainerPos(lastContainerPos, maxReach, false)) {
+            return lastContainerPos;
+        }
+        if (lastContainerPos != null
+            && (avoidPos == null || !lastContainerPos.equals(avoidPos))
+            && isValidContainerPos(lastContainerPos, maxReach, true)) {
+            return lastContainerPos;
         }
 
         return null;
@@ -1312,28 +1400,37 @@ public class ContainerHandler {
         return true;
     }
 
-    private boolean isValidContainerPos(BlockPos pos, double maxReach) {
+    private boolean isValidContainerPos(BlockPos pos, double maxReach, boolean allowSelfOverlap) {
         if (mc.world == null || mc.player == null) return false;
+        // Never choose the exact block the player currently occupies.
+        // Movement recovery handles near-overlap, but same-block placement is always invalid.
+        if (pos.equals(mc.player.getBlockPos())) return false;
         // Position must be air or replaceable
         if (!mc.world.getBlockState(pos).isAir()
             && !mc.world.getBlockState(pos).isReplaceable()) return false;
         // Shulker placed on ground opens upward — block above must be clear.
         BlockState aboveState = mc.world.getBlockState(pos.up());
         if (!aboveState.isAir() && !aboveState.isReplaceable() && aboveState.isOpaque()) return false;
-        // Never place container where player (or another blocking entity) is standing.
+        // Reject other blocking entities.
         Box targetBox = new Box(pos);
-        if (mc.player.getBoundingBox().intersects(targetBox)) return false;
-        if (!mc.world.getOtherEntities(null, targetBox, entity -> !(entity instanceof ItemEntity)).isEmpty()) {
+        if (!mc.world.getOtherEntities(
+            null,
+            targetBox,
+            entity -> entity != mc.player && !(entity instanceof ItemEntity)
+        ).isEmpty()) {
             return false;
         }
+        // Prefer candidates that do not intersect current player hitbox; this
+        // prevents seam-stalls where player blocks its own placement point.
+        if (!allowSelfOverlap && mc.player.getBoundingBox().intersects(targetBox)) return false;
         // Must have solid ground below (not air, not replaceable, not fluid)
         BlockPos below = pos.down();
         if (mc.world.getBlockState(below).isAir()
             || mc.world.getBlockState(below).isReplaceable()
             || !mc.world.getFluidState(below).isEmpty()) return false;
-        // Must be within reach
+        // Allow small tolerance: selection can happen while player is not centered yet.
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(pos));
-        return dist <= maxReach;
+        return dist <= maxReach + 1.0;
     }
 
     public Vec3d getRestockStandPos() {
@@ -1357,6 +1454,15 @@ public class ContainerHandler {
             restockStandPos = null;
         }
 
+        if (restockStandBlock == null && tryRelocateContainerPlacement()) {
+            containerPos = containerTask.blockPos;
+            restockStandBlock = selectRestockStandBlock(containerPos);
+            restockStandPos = null;
+            if (restockStandBlock == null) {
+                restockStandBlock = selectFallbackStandBlock(containerPos);
+            }
+        }
+
         if (restockStandBlock == null) return Vec3d.ofCenter(mc.player.getBlockPos());
 
         if (restockStandPos == null) {
@@ -1376,6 +1482,41 @@ public class ContainerHandler {
         clearRestockStandTarget();
     }
 
+    public boolean tryRelocateContainerPlacement() {
+        if (mc.player == null || mc.world == null) return false;
+        if (containerTask == null || containerTask.taskState == TaskState.DONE) return false;
+
+        // Already placed/open container should not be relocated.
+        Block currentAtTask = mc.world.getBlockState(containerTask.blockPos).getBlock();
+        if (currentAtTask instanceof ShulkerBoxBlock) return false;
+
+        BlockPos oldPos = containerTask.blockPos;
+        BlockPos newPos = getRemotePos(oldPos);
+        if (newPos == null || newPos.equals(oldPos)) return false;
+
+        BlockTask newTask = new BlockTask(newPos, TaskState.PLACE, containerTask.targetBlock);
+        newTask.item = containerTask.item;
+        newTask.collect = containerTask.collect;
+        newTask.destroy = containerTask.destroy;
+
+        containerTask = newTask;
+        lastContainerPos = newPos;
+
+        transferDelay = 0;
+        openAttempts = 0;
+        openDelay = 0;
+        handSwapDelay = 0;
+        pickupMissTicks = 0;
+        waitingForScreenClose = false;
+        waitingForScreenCloseTicks = 0;
+        openLoadedWaitTicks = 0;
+        openSideIndex = 0;
+
+        clearRestockStandTarget();
+        module.pathfinder.moveState = MovementState.RESTOCK;
+        return true;
+    }
+
     public void setOpenDelay(int ticks) {
         openDelay = ticks;
     }
@@ -1383,49 +1524,88 @@ public class ContainerHandler {
     private BlockPos selectRestockStandBlock(BlockPos containerPos) {
         if (mc.world == null || mc.player == null) return null;
 
-        List<BlockPos> candidates = new ArrayList<>();
-        Set<BlockPos> unique = new HashSet<>();
-
         BlockPos current = module.pathfinder != null ? module.pathfinder.currentBlockPos : mc.player.getBlockPos();
         BlockPos playerPos = mc.player.getBlockPos();
+        Set<BlockPos> unique = new HashSet<>();
 
-        // Prefer blocks directly adjacent to container.
+        // Tier 1: strictly adjacent to container (highest priority, most reliable).
+        List<BlockPos> adjacent = new ArrayList<>();
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(candidates, unique, containerPos.offset(dir));
+            addCandidate(adjacent, unique, containerPos.offset(dir));
         }
+        BlockPos hit = findNearestSafeCandidate(adjacent, containerPos);
+        if (hit != null) return hit;
 
-        // Keep previous stand block as sticky fallback.
-        addCandidate(candidates, unique, restockStandBlock);
-        addCandidate(candidates, unique, current);
-        addCandidate(candidates, unique, playerPos);
+        // Tier 2: sticky previous/current/player positions.
+        List<BlockPos> sticky = new ArrayList<>();
+        addCandidate(sticky, unique, restockStandBlock);
+        addCandidate(sticky, unique, current);
+        addCandidate(sticky, unique, playerPos);
+        hit = findNearestSafeCandidate(sticky, containerPos);
+        if (hit != null) return hit;
 
-        // Last-resort candidates around current/player position.
+        // Tier 3: around current/player.
+        List<BlockPos> around = new ArrayList<>();
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(candidates, unique, current.offset(dir));
-            addCandidate(candidates, unique, playerPos.offset(dir));
+            addCandidate(around, unique, current.offset(dir));
+            addCandidate(around, unique, playerPos.offset(dir));
         }
+        hit = findNearestSafeCandidate(around, containerPos);
+        if (hit != null) return hit;
 
-        // Rare edge case on diagonal highways.
+        // Tier 4: uneven floor around container.
+        List<BlockPos> raised = new ArrayList<>();
         for (Direction dir : Direction.Type.HORIZONTAL) {
-            addCandidate(candidates, unique, containerPos.offset(dir).up());
+            addCandidate(raised, unique, containerPos.offset(dir).up());
         }
-
-        candidates.sort((a, b) -> {
-            double da = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(a));
-            double db = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(b));
-            return Double.compare(da, db);
-        });
-
-        for (BlockPos candidate : candidates) {
-            if (isSafeRestockStandBlock(candidate, containerPos)) return candidate;
-        }
-
-        return null;
+        return findNearestSafeCandidate(raised, containerPos);
     }
 
     private void addCandidate(List<BlockPos> list, Set<BlockPos> unique, BlockPos pos) {
         if (pos == null) return;
         if (unique.add(pos)) list.add(pos);
+    }
+
+    private void addContainerCandidates(List<BlockPos> candidates, Set<BlockPos> unique, BlockPos anchor, HWDirection hwDir) {
+        if (anchor == null) return;
+
+        // Preferred order: behind -> behind diagonals -> sides.
+        if (hwDir != null) {
+            int fx = Integer.signum(hwDir.directionVec.getX());
+            int fz = Integer.signum(hwDir.directionVec.getZ());
+            int bx = -fx;
+            int bz = -fz;
+
+            HWDirection lateral = hwDir.lateralDirection();
+            int sx = Integer.signum(lateral.directionVec.getX());
+            int sz = Integer.signum(lateral.directionVec.getZ());
+
+            if (bx != 0 || bz != 0) addCandidate(candidates, unique, anchor.add(bx, 0, bz));
+
+            if (sx != 0 || sz != 0) {
+                addCandidate(candidates, unique, anchor.add(bx + sx, 0, bz + sz));
+                addCandidate(candidates, unique, anchor.add(bx - sx, 0, bz - sz));
+            }
+
+            if (sx != 0 || sz != 0) {
+                addCandidate(candidates, unique, anchor.add(sx, 0, sz));
+                addCandidate(candidates, unique, anchor.add(-sx, 0, -sz));
+            }
+
+            if (bx != 0 && bz != 0) {
+                addCandidate(candidates, unique, anchor.add(bx, 0, 0));
+                addCandidate(candidates, unique, anchor.add(0, 0, bz));
+            }
+        }
+
+        // General adjacent fallback around anchor.
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            addCandidate(candidates, unique, anchor.offset(dir));
+        }
+        addCandidate(candidates, unique, anchor.add(1, 0, 1));
+        addCandidate(candidates, unique, anchor.add(1, 0, -1));
+        addCandidate(candidates, unique, anchor.add(-1, 0, 1));
+        addCandidate(candidates, unique, anchor.add(-1, 0, -1));
     }
 
     private boolean isSafeRestockStandBlock(BlockPos standBlock, BlockPos containerPos) {
@@ -1520,11 +1700,35 @@ public class ContainerHandler {
             int dz = containerPos.getZ() - standBlock.getZ();
             tx -= Math.signum(dx) * RESTOCK_BIAS_AWAY_FROM_CONTAINER;
             tz -= Math.signum(dz) * RESTOCK_BIAS_AWAY_FROM_CONTAINER;
+
+            // Keep an explicit extra clearance from the shared container border so
+            // the player hitbox never clips into the placement block.
+            double clear = halfWidth + RESTOCK_CONTAINER_CLEARANCE;
+            if (dx < 0) tx = Math.max(tx, standBlock.getX() + clear);
+            else if (dx > 0) tx = Math.min(tx, standBlock.getX() + 1.0 - clear);
+            if (dz < 0) tz = Math.max(tz, standBlock.getZ() + clear);
+            else if (dz > 0) tz = Math.min(tz, standBlock.getZ() + 1.0 - clear);
         }
 
         tx = clamp(tx, minX, maxX);
         tz = clamp(tz, minZ, maxZ);
         return new Vec3d(tx, center.y, tz);
+    }
+
+    private BlockPos findNearestSafeCandidate(List<BlockPos> candidates, BlockPos containerPos) {
+        if (mc.player == null || candidates == null || candidates.isEmpty()) return null;
+
+        candidates.sort((a, b) -> {
+            double da = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(a));
+            double db = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(b));
+            return Double.compare(da, db);
+        });
+
+        for (BlockPos candidate : candidates) {
+            if (isSafeRestockStandBlock(candidate, containerPos)) return candidate;
+        }
+
+        return null;
     }
 
     public boolean canInteractWithContainerFromCurrentPos() {
@@ -1570,7 +1774,11 @@ public class ContainerHandler {
         int targetHotbar = activeContainerHotbarSlot >= 0 && activeContainerHotbarSlot < 9
             ? activeContainerHotbarSlot
             : findPreferredContainerHotbarSlot();
-        if (targetHotbar == -1) targetHotbar = mc.player.getInventory().getSelectedSlot();
+        if (targetHotbar == -1) {
+            int selected = mc.player.getInventory().getSelectedSlot();
+            if (canUseContainerHotbarSlot(selected, activeContainerItem)) targetHotbar = selected;
+        }
+        if (targetHotbar == -1) return false;
 
         for (int i = 9; i < 36; i++) {
             if (mc.player.getInventory().getStack(i).getItem() != activeContainerItem) continue;
@@ -1604,16 +1812,19 @@ public class ContainerHandler {
 
         // 1) Empty slot first.
         for (int i = 0; i < 9; i++) {
+            if (!canUseContainerHotbarSlot(i, activeContainerItem)) continue;
             if (mc.player.getInventory().getStack(i).isEmpty()) return i;
         }
 
         // 2) Prefer replacing disposable building blocks, not tools.
         for (int i = 0; i < 9; i++) {
+            if (!canUseContainerHotbarSlot(i, activeContainerItem)) continue;
             if (isDisposableForSlotReserve(mc.player.getInventory().getStack(i))) return i;
         }
 
         // 3) Avoid replacing pickaxe if possible.
         for (int i = 0; i < 9; i++) {
+            if (!canUseContainerHotbarSlot(i, activeContainerItem)) continue;
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) return i;
             if (!stack.isIn(ItemTags.PICKAXES)) return i;
@@ -1625,13 +1836,20 @@ public class ContainerHandler {
             int selected = mc.player.getInventory().getSelectedSlot();
             for (int i = 0; i < 9; i++) {
                 if (i == selected) continue;
+                if (!canUseContainerHotbarSlot(i, activeContainerItem)) continue;
                 ItemStack stack = mc.player.getInventory().getStack(i);
                 if (stack.isIn(ItemTags.PICKAXES)) return i;
             }
-            return selected;
+            if (canUseContainerHotbarSlot(selected, activeContainerItem)) return selected;
         }
 
         return -1;
+    }
+
+    private boolean canUseContainerHotbarSlot(int slot, Item incomingItem) {
+        if (slot < 0 || slot >= 9) return false;
+        if (module.inventoryHandler == null) return true;
+        return module.inventoryHandler.canUseHotbarSlot(slot, incomingItem);
     }
 
     private int countHotbarPickaxes() {
