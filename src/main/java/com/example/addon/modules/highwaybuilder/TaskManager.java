@@ -97,8 +97,6 @@ public class TaskManager {
         if (mc.world == null || mc.player == null) return;
 
         BlockState currentState = mc.world.getBlockState(blockPos);
-        Vec3d eyePos = mc.player.getEyePos();
-        double maxReach = module.maxReach.get();
 
         // Start padding - don't break behind player
         if (startPadding(blockPos)) return;

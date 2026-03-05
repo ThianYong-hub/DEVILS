@@ -147,7 +147,6 @@ public class TaskExecutor {
         BlockState currentState = mc.world.getBlockState(blockTask.blockPos);
         Block currentBlock = currentState.getBlock();
         BlockTask containerTask = module.containerHandler.containerTask;
-        boolean isContainerTask = blockTask == containerTask;
 
         if ((blockTask.targetBlock == currentBlock || blockTask.isFiller)
             && !currentState.isReplaceable()) {

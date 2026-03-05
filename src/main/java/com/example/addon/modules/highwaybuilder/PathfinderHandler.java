@@ -443,32 +443,6 @@ public class PathfinderHandler {
         return true;
     }
 
-    private boolean checkForResidue(BlockPos pos) {
-        if (module.containerHandler.containerTask.taskState != TaskState.DONE) return false;
-
-        for (BlockTask task : module.taskManager.getTasks().values()) {
-            // Block on any unfinished build-critical tasks behind the move plane.
-            if (isMovementBlockingState(task.taskState)
-                && !isDeferredBreakTask(task)
-                && module.taskManager.isBehindPos(pos, task.blockPos)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean hasPendingTasksBefore(BlockPos nextPos) {
-        double nextProgress = getForwardProgressFromStart(nextPos) + 0.5;
-
-        for (BlockTask task : module.taskManager.getTasks().values()) {
-            if (!isMovementBlockingState(task.taskState)) continue;
-            if (isDeferredBreakTask(task)) continue;
-            if (getForwardProgressFromStart(task.blockPos) <= nextProgress) return true;
-        }
-
-        return false;
-    }
-
     private double getForwardProgressFromStart(BlockPos pos) {
         return startingDirection.forwardProgress(startingBlockPos, pos);
     }

@@ -639,10 +639,6 @@ public class EChestMiner {
         return true;
     }
 
-    private boolean hasNearbyObsidian() {
-        return findClosestObsidian() != null;
-    }
-
     private ItemEntity findClosestObsidian() {
         if (mc.player == null || mc.world == null) return null;
         Box searchBox = getObsidianSearchBox();
@@ -1114,10 +1110,6 @@ public class EChestMiner {
             && !mc.world.getBlockState(pos).isAir()
             && !mc.world.getBlockState(pos).isReplaceable()) return false;
         return findSupportSide(pos) != null;
-    }
-
-    private void reselectActionPosition() {
-        reselectActionPosition(null);
     }
 
     private void reselectActionPosition(BlockPos avoidPos) {

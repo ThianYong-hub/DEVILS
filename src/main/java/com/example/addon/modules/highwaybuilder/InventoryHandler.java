@@ -550,12 +550,6 @@ public class InventoryHandler {
         return stack != null && !stack.isEmpty() && stack.isIn(ItemTags.SWORDS);
     }
 
-    private boolean isPickaxeStackForHotbar(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        if (!stack.isIn(ItemTags.PICKAXES)) return false;
-        return isFortuneThreePickaxeNoSilk(stack) || !isSilkTouchPickaxe(stack);
-    }
-
     private boolean isAppleStackForHotbar(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         return stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE
@@ -709,13 +703,6 @@ public class InventoryHandler {
         if (!stack.isIn(ItemTags.PICKAXES)) return false;
         if (Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH)) return false;
         return Utils.getEnchantmentLevel(stack, Enchantments.FORTUNE) == 3;
-    }
-
-    private boolean isSilkTouchPickaxe(ItemStack stack) {
-        return stack != null
-            && !stack.isEmpty()
-            && stack.isIn(ItemTags.PICKAXES)
-            && Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH);
     }
 
     private int countItem(Item item) {

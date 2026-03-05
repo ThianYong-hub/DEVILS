@@ -58,16 +58,17 @@ class WorkflowConfigTest {
         assertTrue(workflow.contains("tag:"));
         assertFalse(workflow.contains("push:"));
         assertTrue(workflow.contains("ref: ${{ inputs.tag }}"));
-        assertTrue(workflow.contains("RELEASE_TAG"));
-        assertTrue(workflow.contains("APP_VERSION=${RELEASE_TAG#v}"));
+        assertTrue(workflow.contains("id: resolve_tag"));
+        assertTrue(workflow.contains("id: app_version"));
+        assertTrue(workflow.contains("APP_VERSION=${app_version}"));
         assertTrue(workflow.contains("Prepare release artifact name"));
-        assertTrue(workflow.contains("RELEASE_ASSET"));
-        assertTrue(workflow.contains("devils-addon-${APP_VERSION}.jar"));
+        assertTrue(workflow.contains("id: prepare_asset"));
+        assertTrue(workflow.contains("devils-addon-${{ steps.app_version.outputs.app_version }}.jar"));
         assertTrue(workflow.contains("Generate release notes"));
         assertTrue(workflow.contains("RELEASE_NOTES.md"));
         assertTrue(workflow.contains("softprops/action-gh-release@v2"));
         assertTrue(workflow.contains("body_path: RELEASE_NOTES.md"));
-        assertTrue(workflow.contains("files: ${{ env.RELEASE_ASSET }}"));
+        assertTrue(workflow.contains("files: ${{ steps.prepare_asset.outputs.release_asset }}"));
     }
 
     @Test

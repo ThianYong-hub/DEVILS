@@ -540,7 +540,6 @@ public class HighwayBuilder extends Module {
     public EChestMiner echestMiner;
     private int repopulateTimer = 0;
     private boolean containerBusyLastTick = false;
-    private boolean autoEating = false;
     private int autoEatRestoreSlot = -1;
 
     // ── Constructor ─────────────────────────────────────────────────────
@@ -817,7 +816,6 @@ public class HighwayBuilder extends Module {
         if (pathfinder != null) pathfinder.resetBaritone();
         mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
 
-        autoEating = true;
         mc.options.useKey.setPressed(true);
 
         if (!mc.player.isUsingItem()) {
@@ -840,7 +838,6 @@ public class HighwayBuilder extends Module {
             }
         }
 
-        autoEating = false;
         autoEatRestoreSlot = -1;
     }
 

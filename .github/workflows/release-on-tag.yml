@@ -26,24 +26,29 @@ jobs:
           ref: ${{ inputs.tag }}
 
       - name: Resolve Release Tag
+        id: resolve_tag
         shell: bash
         run: |
           set -euo pipefail
 
-          release_tag="${{ inputs.tag }}"
+          tag_value="${{ inputs.tag }}"
 
-          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Invalid release tag '${release_tag}'. Expected format vX.Y.Z."
+          if [[ ! "${tag_value}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid release tag '${tag_value}'. Expected format vX.Y.Z."
             exit 1
           fi
 
-          echo "RELEASE_TAG=${release_tag}" >> "${GITHUB_ENV}"
+          echo "release_tag=${tag_value}" >> "${GITHUB_OUTPUT}"
 
       - name: Set APP_VERSION From Tag
+        id: app_version
         shell: bash
         run: |
           set -euo pipefail
-          echo "APP_VERSION=${RELEASE_TAG#v}" >> "${GITHUB_ENV}"
+          app_version="${{ steps.resolve_tag.outputs.release_tag }}"
+          app_version="${app_version#v}"
+          echo "APP_VERSION=${app_version}" >> "${GITHUB_ENV}"
+          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -64,6 +69,7 @@ jobs:
         run: ./gradlew --no-daemon build -x test
 
       - name: Prepare release artifact name
+        id: prepare_asset
         shell: bash
         run: |
           set -euo pipefail
@@ -74,17 +80,17 @@ jobs:
             exit 1
           fi
 
-          release_asset="build/libs/devils-addon-${APP_VERSION}.jar"
-          cp "${jar_path}" "${release_asset}"
+          asset_path="build/libs/devils-addon-${{ steps.app_version.outputs.app_version }}.jar"
+          cp "${jar_path}" "${asset_path}"
 
-          echo "RELEASE_ASSET=${release_asset}" >> "${GITHUB_ENV}"
+          echo "release_asset=${asset_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate release notes
         shell: bash
         run: |
           set -euo pipefail
 
-          current_tag="${RELEASE_TAG}"
+          current_tag="${{ steps.resolve_tag.outputs.release_tag }}"
           prev_tag="$(
             git tag -l 'v*' \
               | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
@@ -125,19 +131,19 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-build-${{ env.RELEASE_TAG }}
-          path: ${{ env.RELEASE_ASSET }}
+          name: release-build-${{ steps.resolve_tag.outputs.release_tag }}
+          path: ${{ steps.prepare_asset.outputs.release_asset }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: Release ${{ env.RELEASE_TAG }}
+          tag_name: ${{ steps.resolve_tag.outputs.release_tag }}
+          name: Release ${{ steps.resolve_tag.outputs.release_tag }}
           draft: false
           prerelease: false
           body_path: RELEASE_NOTES.md
-          files: ${{ env.RELEASE_ASSET }}
+          files: ${{ steps.prepare_asset.outputs.release_asset }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

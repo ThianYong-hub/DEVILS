@@ -1,0 +1,64 @@
+name: Sync README Version
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  sync-readmes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Default Branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update README version links
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Skip: non-semver release tag '${RELEASE_TAG}'."
+            exit 0
+          fi
+
+          version="${RELEASE_TAG#v}"
+          new_url="https://github.com/ThianYong-hub/DEVILS/releases/download/${RELEASE_TAG}/devils-addon-${version}.jar"
+
+          for file in README*.md; do
+            if [[ ! -f "${file}" ]]; then
+              continue
+            fi
+
+            sed -E -i \
+              "s#https://github.com/ThianYong-hub/DEVILS/releases/download/v[0-9]+\\.[0-9]+\\.[0-9]+/devils-addon-[0-9]+\\.[0-9]+\\.[0-9]+\\.jar#${new_url}#g" \
+              "${file}"
+
+            sed -E -i \
+              "s#\\(v[0-9]+\\.[0-9]+\\.[0-9]+\\)#(v${version})#g" \
+              "${file}"
+          done
+
+      - name: Commit and Push if changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "No README changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README*.md
+          git commit -m "docs: sync README download link for ${GITHUB_REF_NAME}"
+          git push
