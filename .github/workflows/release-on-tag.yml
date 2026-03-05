@@ -110,25 +110,110 @@ jobs:
             range="${current_tag}"
           fi
 
-          {
-            echo "## ${current_tag}"
-            echo
-            if [[ -n "${prev_tag}" ]]; then
-              echo "Changes since ${prev_tag}:"
-            else
-              echo "Changes:"
-            fi
-            echo
-            git log --no-merges --pretty='- %s (%h)' "${range}" || true
-          } > RELEASE_NOTES.md
+          export CURRENT_TAG="${current_tag}"
+          export PREV_TAG="${prev_tag}"
+          export RANGE="${range}"
+          export REPO_URL="${{ github.server_url }}/${{ github.repository }}"
 
-          if ! grep -q '^- ' RELEASE_NOTES.md; then
-            {
-              echo "## ${current_tag}"
-              echo
-              echo "- Maintenance release."
-            } > RELEASE_NOTES.md
-          fi
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          current_tag = os.environ["CURRENT_TAG"]
+          prev_tag = os.environ.get("PREV_TAG", "")
+          commit_range = os.environ["RANGE"]
+          repo_url = os.environ["REPO_URL"]
+
+          def run(cmd):
+              return subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace")
+
+          try:
+              raw = run(["git", "log", "--no-merges", "--pretty=%s%x09%h", commit_range]).splitlines()
+          except subprocess.CalledProcessError:
+              raw = []
+
+          ignore_patterns = [
+              r"^docs:\s*sync readme download link\b",
+              r"^auto_sync_",
+              r"^switch_readme_sync",
+              r"^fix_readme_sync",
+          ]
+
+          grouped = {
+              "Features": [],
+              "Fixes": [],
+              "Improvements": [],
+              "Documentation": [],
+              "Maintenance": []
+          }
+
+          prefix_re = re.compile(r"^(feat|fix|refactor|perf|docs|build|ci|chore|test)(\([^)]+\))?:\s*", re.IGNORECASE)
+
+          for line in raw:
+              if "\t" not in line:
+                  continue
+              subject, sha = line.split("\t", 1)
+              subject = subject.strip()
+              sha = sha.strip()
+              if not subject or not sha:
+                  continue
+
+              lowered = subject.lower()
+              if any(re.search(p, lowered) for p in ignore_patterns):
+                  continue
+
+              cleaned = prefix_re.sub("", subject).strip()
+              if not cleaned:
+                  cleaned = subject
+              cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+
+              item = f"- {cleaned} ([{sha}]({repo_url}/commit/{sha}))"
+
+              if lowered.startswith("feat"):
+                  grouped["Features"].append(item)
+              elif lowered.startswith("fix"):
+                  grouped["Fixes"].append(item)
+              elif lowered.startswith("refactor") or lowered.startswith("perf"):
+                  grouped["Improvements"].append(item)
+              elif lowered.startswith("docs"):
+                  grouped["Documentation"].append(item)
+              else:
+                  grouped["Maintenance"].append(item)
+
+          lines = []
+          lines.append(f"## {current_tag}")
+          lines.append("")
+
+          if prev_tag:
+              lines.append(f"Changes since **{prev_tag}**.")
+          else:
+              lines.append("Initial tagged release changes.")
+          lines.append("")
+
+          written_any = False
+          for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
+              entries = grouped[title]
+              if not entries:
+                  continue
+              written_any = True
+              lines.append(f"### {title}")
+              lines.extend(entries)
+              lines.append("")
+
+          if not written_any:
+              lines.append("### Maintenance")
+              lines.append("- Maintenance release.")
+              lines.append("")
+
+          if prev_tag:
+              lines.append(f"### Full Changelog")
+              lines.append(f"[{prev_tag}...{current_tag}]({repo_url}/compare/{prev_tag}...{current_tag})")
+              lines.append("")
+
+          Path("RELEASE_NOTES.md").write_text("\n".join(lines), encoding="utf-8")
+          PY
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
