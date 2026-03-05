@@ -81,7 +81,9 @@ jobs:
           fi
 
           asset_path="build/libs/devils-addon-${{ steps.app_version.outputs.app_version }}.jar"
-          cp "${jar_path}" "${asset_path}"
+          if [[ "${jar_path}" != "${asset_path}" ]]; then
+            cp "${jar_path}" "${asset_path}"
+          fi
 
           echo "release_asset=${asset_path}" >> "${GITHUB_OUTPUT}"
 
