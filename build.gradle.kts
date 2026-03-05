@@ -155,6 +155,7 @@ tasks {
     }
 
     jar {
+        dependsOn(cleanLibsJars)
         inputs.property("archivesName", project.base.archivesName.get())
 
         from("LICENSE") {
@@ -169,10 +170,6 @@ tasks {
 
     test {
         useJUnitPlatform()
-    }
-
-    named("build") {
-        dependsOn(cleanLibsJars)
     }
 
     withType<JavaCompile> {
