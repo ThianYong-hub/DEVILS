@@ -68,7 +68,6 @@ public class InventoryHandler {
         Items.BONE,
         Items.ROTTEN_FLESH,
         Items.GOLD_NUGGET,
-        Items.ENDER_PEARL,
         Items.GOLDEN_SWORD,
         Items.GOLDEN_HELMET,
         Items.GOLDEN_CHESTPLATE,
