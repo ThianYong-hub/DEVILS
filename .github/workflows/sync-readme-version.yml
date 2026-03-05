@@ -45,25 +45,30 @@ jobs:
 
           echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
 
-          version="${RELEASE_TAG#v}"
-          new_url="https://github.com/ThianYong-hub/DEVILS/releases/download/${RELEASE_TAG}/devils-addon-${version}.jar"
+          python3 - <<'PY'
+          import glob
+          import os
+          import re
+          from pathlib import Path
 
-          for file in README.md docs/i18n/*.md; do
-            if [[ ! -f "${file}" ]]; then
+          release_tag = os.environ["RELEASE_TAG"]
+          version = release_tag[1:]
+          new_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{version}.jar"
+
+          files = [Path("README.md")] + [Path(p) for p in glob.glob("docs/i18n/*.md")]
+          url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-addon-\d+\.\d+\.\d+\.jar")
+          ver_plain_re = re.compile(r"\(v\d+\.\d+\.\d+\)")
+          ver_backtick_re = re.compile(r"\(`v\d+\.\d+\.\d+`\)")
+
+          for file in files:
+            if not file.exists():
               continue
-            fi
-
-            sed -E -i \
-              "s#https://github.com/ThianYong-hub/DEVILS/releases/download/v[0-9]+\\.[0-9]+\\.[0-9]+/devils-addon-[0-9]+\\.[0-9]+\\.[0-9]+\\.jar#${new_url}#g" \
-              "${file}"
-
-            sed -E -i \
-              "s#\\(v[0-9]+\\.[0-9]+\\.[0-9]+\\)#(v${version})#g" \
-              "${file}"
-            sed -E -i \
-              "s#\\(`v[0-9]+\\.[0-9]+\\.[0-9]+`\\)#(\\`v${version}\\`)#g" \
-              "${file}"
-          done
+            text = file.read_text(encoding="utf-8")
+            text = url_re.sub(new_url, text)
+            text = ver_backtick_re.sub(f"(`v{version}`)", text)
+            text = ver_plain_re.sub(f"(v{version})", text)
+            file.write_text(text, encoding="utf-8")
+          PY
 
       - name: Commit and Push if changed
         shell: bash
