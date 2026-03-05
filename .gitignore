@@ -40,3 +40,13 @@ icon.png
 category_icon.png
 .tmp_meteor_src/
 .claude/
+
+# local server sources and reverse-engineering workdirs
+Folia-ver-1.21.8/
+NoCheatPlus/
+_tmp_*.txt
+_tmp_classdump/
+_tmp_meteor_ref/
+_tmp_meteor_src/
+_tmp_mio_extract/
+_tmp_mio_1218_decomp/
