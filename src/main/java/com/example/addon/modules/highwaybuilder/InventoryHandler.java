@@ -38,31 +38,42 @@ public class InventoryHandler {
         Items.GLOWSTONE,
         Items.BLACKSTONE,
         Items.BASALT,
+        Items.SMOOTH_BASALT,
+        Items.MAGMA_BLOCK,
         Items.SOUL_SAND,
         Items.SOUL_SOIL,
-        Items.NETHER_WART,
-        Items.SHROOMLIGHT,
-        Items.BLAZE_ROD,
-        Items.BLAZE_POWDER,
-        Items.WITHER_SKELETON_SKULL,
-        Items.BONE,
-        Items.COAL,
-        Items.GHAST_TEAR,
-        Items.MAGMA_CREAM,
-        Items.GOLD_NUGGET,
-        Items.GOLDEN_SWORD,
-        Items.ROTTEN_FLESH,
-        Items.PORKCHOP,
-        Items.LEATHER,
-        Items.CRYING_OBSIDIAN,
-        Items.SPECTRAL_ARROW,
-        Items.STRING,
         Items.GRAVEL,
-        Items.DIAMOND,
-        Items.GOLD_INGOT,
-        Items.GOLD_BLOCK,
-        Items.SADDLE,
-        Items.NETHERITE_UPGRADE_SMITHING_TEMPLATE
+        Items.FLINT,
+        Items.CRIMSON_NYLIUM,
+        Items.WARPED_NYLIUM,
+        Items.CRIMSON_STEM,
+        Items.WARPED_STEM,
+        Items.NETHER_WART_BLOCK,
+        Items.WARPED_WART_BLOCK,
+        Items.BONE_BLOCK,
+        Items.NETHER_BRICKS,
+        Items.RED_NETHER_BRICKS,
+        Items.CRYING_OBSIDIAN,
+        Items.WEEPING_VINES,
+        Items.TWISTING_VINES,
+        Items.CRIMSON_ROOTS,
+        Items.WARPED_ROOTS,
+        Items.NETHER_SPROUTS,
+        Items.CRIMSON_FUNGUS,
+        Items.WARPED_FUNGUS,
+        Items.NETHER_WART,
+        Items.BLAZE_ROD,
+        Items.MAGMA_CREAM,
+        Items.GHAST_TEAR,
+        Items.BONE,
+        Items.ROTTEN_FLESH,
+        Items.GOLD_NUGGET,
+        Items.ENDER_PEARL,
+        Items.GOLDEN_SWORD,
+        Items.GOLDEN_HELMET,
+        Items.GOLDEN_CHESTPLATE,
+        Items.GOLDEN_LEGGINGS,
+        Items.GOLDEN_BOOTS
     );
 
     private final HighwayBuilder module;
@@ -570,28 +581,20 @@ public class InventoryHandler {
         Item item = stack.getItem();
         if (item instanceof BlockItem bi && bi.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) return false;
 
+        // Never trash useful tools used by builder/combat logic.
+        if (isFortuneThreePickaxeNoSilk(stack)) return false;
+        if (stack.isIn(ItemTags.PICKAXES)) return false;
+        if (stack.isIn(ItemTags.SHOVELS)) return false;
+        if (stack.isIn(ItemTags.AXES) && item != Items.GOLDEN_AXE) return false;
+        if (stack.isIn(ItemTags.SWORDS) && item != Items.GOLDEN_SWORD) return false;
+
         if (item == Items.NETHERRACK) return false;
         if (JUNK_ITEMS.contains(item)) {
-            // Keep Fortune III pickaxe, even if enchanted.
-            return !isFortuneThreePickaxeNoSilk(stack);
+            return true;
         }
 
         if (isFireResistancePotion(stack)) return true;
-
-        // Extra rule from request: throw enchanted armor/tools as junk,
-        // except the valid Fortune III pickaxe used by the builder.
-        if (hasAnyEnchantments(stack) && !isFortuneThreePickaxeNoSilk(stack)) {
-            if (stack.isDamageable()) return true;
-            if (stack.isIn(ItemTags.SWORDS)) return true;
-            if (stack.isIn(ItemTags.AXES)) return true;
-            if (stack.isIn(ItemTags.SHOVELS)) return true;
-            if (stack.isIn(ItemTags.HOES)) return true;
-            if (stack.isIn(ItemTags.PICKAXES)) return true;
-        }
-
-        // Soul Speed enchanted book is junk by request.
-        return item == Items.ENCHANTED_BOOK
-            && Utils.getEnchantmentLevel(stack, Enchantments.SOUL_SPEED) > 0;
+        return false;
     }
 
     private boolean isFireResistancePotion(ItemStack stack) {
@@ -605,12 +608,6 @@ public class InventoryHandler {
         var potion = contents.potion().get().value();
         var id = Registries.POTION.getId(potion);
         return id != null && id.getPath().contains("fire_resistance");
-    }
-
-    private boolean hasAnyEnchantments(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        return stack.contains(DataComponentTypes.ENCHANTMENTS)
-            || stack.contains(DataComponentTypes.STORED_ENCHANTMENTS);
     }
 
     private int findPreferredBuildHotbarSlot(Item incomingItem) {

@@ -117,6 +117,14 @@ public class ContainerHandler {
             return;
         }
 
+        // Don't start empty Ender Chest restock cycles when we already have enough.
+        if (item == Items.ENDER_CHEST) {
+            int desiredEnderChestCount = getDesiredEnderChestCount();
+            if (countInventoryItem(Items.ENDER_CHEST) >= desiredEnderChestCount) {
+                return;
+            }
+        }
+
         clearRestockStandTarget();
 
         // Reserve at least one slot for the shulker item after breaking it.
@@ -144,6 +152,12 @@ public class ContainerHandler {
 
         if (containerTask.taskState != TaskState.DONE) return;
         if (mc.player == null) return;
+
+        // No-op if we already have a valid pickaxe.
+        if (hasFortunePickaxeInInventory()) {
+            resetPickaxeRestockState();
+            return;
+        }
 
         clearRestockStandTarget();
 
