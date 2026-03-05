@@ -74,10 +74,53 @@ jobs:
             exit 1
           fi
 
-          release_asset="build/libs/devils-addon-${RELEASE_TAG}.jar"
+          release_asset="build/libs/devils-addon-${APP_VERSION}.jar"
           cp "${jar_path}" "${release_asset}"
 
           echo "RELEASE_ASSET=${release_asset}" >> "${GITHUB_ENV}"
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_tag="${RELEASE_TAG}"
+          prev_tag="$(
+            git tag -l 'v*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | awk -v current="${current_tag}" '
+                  $0 == current { print prev; found=1; exit }
+                  { prev=$0 }
+                  END { if (!found) print prev }
+                '
+          )"
+
+          if [[ -n "${prev_tag}" ]]; then
+            range="${prev_tag}..${current_tag}"
+          else
+            range="${current_tag}"
+          fi
+
+          {
+            echo "## ${current_tag}"
+            echo
+            if [[ -n "${prev_tag}" ]]; then
+              echo "Changes since ${prev_tag}:"
+            else
+              echo "Changes:"
+            fi
+            echo
+            git log --no-merges --pretty='- %s (%h)' "${range}" || true
+          } > RELEASE_NOTES.md
+
+          if ! grep -q '^- ' RELEASE_NOTES.md; then
+            {
+              echo "## ${current_tag}"
+              echo
+              echo "- Maintenance release."
+            } > RELEASE_NOTES.md
+          fi
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -93,7 +136,7 @@ jobs:
           name: Release ${{ env.RELEASE_TAG }}
           draft: false
           prerelease: false
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: ${{ env.RELEASE_ASSET }}
           fail_on_unmatched_files: true
         env:
