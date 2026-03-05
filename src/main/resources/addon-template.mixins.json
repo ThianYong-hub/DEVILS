@@ -8,7 +8,10 @@
     "AnvilScreenHandlerAccessor",
     "PlayerInteractEntityC2SPacketAccessor",
     "ItemListSettingScreenMixin",
-    "ModulesScreenIconsMixin"
+    "ModulesScreenIconsMixin",
+    "MultiTaskMixin",
+    "ClientPlayerEntityMioMultiTaskMixin",
+    "KeyBindingMioMultiTaskMixin"
   ],
   "injectors": {
     "defaultRequire": 1

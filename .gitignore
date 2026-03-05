@@ -34,9 +34,32 @@ bin/
 # fabric
 
 run/
+devils-addon/
+crash-reports/
 
 # local refs and root icons
 icon.png
 category_icon.png
 .tmp_meteor_src/
 .claude/
+meteordevelopment/meteorclient/systems/modules/misc/DiscordPresence.java
+
+# NCP source (local analysis only)
+NoCheatPlus/
+
+# local temporary analysis artifacts
+_tmp*/
+_tmp*.txt
+_tmp_CrystalAura_bytecode.txt
+_tmp_CrystalAura_javap.txt
+_tmp_MinecraftClient_bytecode.txt
+_tmp_minecraftclient_javap.txt
+_tmp_mio_1211_jarlist.txt
+_tmp_mio_1218_jarlist.txt
+_tmp_mio_1218_decomp/
+_tmp_mio_extract/
+_tmp_meteor_src/
+.tmp_meteor_src/
+*.stacktrace
+hs_err_pid*.log
+replay_pid*.log
