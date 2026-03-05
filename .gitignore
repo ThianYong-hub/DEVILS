@@ -44,6 +44,7 @@ category_icon.png
 # local server sources and reverse-engineering workdirs
 Folia-ver-1.21.8/
 NoCheatPlus/
+Source/
 _tmp_*.txt
 _tmp_classdump/
 _tmp_meteor_ref/
