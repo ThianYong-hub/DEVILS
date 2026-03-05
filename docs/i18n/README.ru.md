@@ -4,7 +4,7 @@
 
 ## Скачать
 
-- Текущая сборка (`v0.0.15`): [Скачать jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.15/devils-addon-0.0.15.jar)
+- Текущая сборка (`v0.0.17`): [Скачать jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.17/devils-addon-0.0.17.jar)
 - Последний релиз: [Открыть](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Все релизы: [Открыть](https://github.com/ThianYong-hub/DEVILS/releases)
 
