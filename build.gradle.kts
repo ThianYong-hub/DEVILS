@@ -3,6 +3,68 @@ plugins {
     java
 }
 
+fun runGit(vararg args: String): String? {
+    return try {
+        val process = ProcessBuilder("git", *args)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        if (process.waitFor() == 0 && output.isNotEmpty()) output else null
+    } catch (_: Exception) {
+        null
+    }
+}
+
+fun resolveVersionFromGitTags(): String? {
+    val described = runGit(
+        "describe",
+        "--tags",
+        "--match",
+        "v[0-9]*.[0-9]*.[0-9]*",
+        "--long",
+        "--dirty"
+    ) ?: return null
+
+    // Examples:
+    // v0.0.15-0-gabc1234
+    // v0.0.15-3-gabc1234
+    // v0.0.15-3-gabc1234-dirty
+    val match = Regex("^v(\\d+\\.\\d+\\.\\d+)-(\\d+)-g([0-9a-f]+)(-dirty)?$")
+        .matchEntire(described)
+        ?: return described.removePrefix("v").takeIf { it.isNotBlank() }
+
+    val base = match.groupValues[1]
+    val commitsAhead = match.groupValues[2].toIntOrNull() ?: 0
+    val sha = match.groupValues[3]
+    val dirty = match.groupValues[4].isNotEmpty()
+
+    if (commitsAhead == 0 && !dirty) return base
+
+    val localMeta = buildString {
+        append("g")
+        append(sha)
+        if (dirty) append(".dirty")
+    }
+    return "$base-dev.$commitsAhead+$localMeta"
+}
+
+fun parseSemverBase(version: String): Triple<Int, Int, Int>? {
+    val match = Regex("^(\\d+)\\.(\\d+)\\.(\\d+).*").matchEntire(version) ?: return null
+    return Triple(
+        match.groupValues[1].toInt(),
+        match.groupValues[2].toInt(),
+        match.groupValues[3].toInt()
+    )
+}
+
+fun compareSemverBase(left: String, right: String): Int {
+    val l = parseSemverBase(left) ?: return 0
+    val r = parseSemverBase(right) ?: return 0
+    if (l.first != r.first) return l.first.compareTo(r.first)
+    if (l.second != r.second) return l.second.compareTo(r.second)
+    return l.third.compareTo(r.third)
+}
+
 val appVersionFromEnv = System.getenv("APP_VERSION")
     ?.removePrefix("v")
     ?.trim()
@@ -11,9 +73,16 @@ val appVersionFromProperty = (findProperty("app_version") as String?)
     ?.removePrefix("v")
     ?.trim()
     ?.takeIf { it.isNotEmpty() }
+val modVersionFallback = (properties["mod_version"] as String)
+val appVersionFromGit = resolveVersionFromGitTags()
+    ?.let { gitVersion ->
+        if (compareSemverBase(gitVersion, modVersionFallback) < 0) modVersionFallback
+        else gitVersion
+    }
 val resolvedAppVersion = appVersionFromEnv
     ?: appVersionFromProperty
-    ?: (properties["mod_version"] as String)
+    ?: appVersionFromGit
+    ?: modVersionFallback
 
 java {
     toolchain {
