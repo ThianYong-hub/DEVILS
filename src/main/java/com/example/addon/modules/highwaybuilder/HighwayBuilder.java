@@ -8,8 +8,10 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.component.DataComponentTypes;
@@ -19,9 +21,16 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
 
+import java.util.Set;
 import java.util.List;
 
 public class HighwayBuilder extends Module {
@@ -271,6 +280,24 @@ public class HighwayBuilder extends Module {
         .max(20)
         .sliderRange(0, 20)
         .visible(autoEat::get)
+        .build()
+    );
+
+    public final Setting<Boolean> mobShield = sgBehavior.add(new BoolSetting.Builder()
+        .name("mob-shield")
+        .description("Automatically attacks selected Nether mobs that physically block obsidian placement.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Double> mobShieldRange = sgBehavior.add(new DoubleSetting.Builder()
+        .name("mob-shield-range")
+        .description("Attack range for mob-shield.")
+        .defaultValue(5.0)
+        .min(1.0)
+        .max(5.5)
+        .sliderRange(1.0, 5.5)
+        .visible(mobShield::get)
         .build()
     );
 
@@ -635,6 +662,7 @@ public class HighwayBuilder extends Module {
         // Pause checks (rubberband, death)
         if (pathfinder.pauseCheck()) return;
         if (handleAutoEat()) return;
+        if (handleMobShield()) return;
 
         // Clean packet limiter
         long now = System.currentTimeMillis();
@@ -923,4 +951,201 @@ public class HighwayBuilder extends Module {
             && item != Items.POISONOUS_POTATO
             && item != Items.PUFFERFISH;
     }
+
+    private boolean handleMobShield() {
+        if (!mobShield.get()) return false;
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
+        if (blueprintGenerator == null || taskManager == null) return false;
+        if (containerHandler != null && containerHandler.containerTask.taskState != TaskState.DONE) return false;
+
+        Entity target = findPlacementBlockingThreat();
+        if (target == null) return false;
+
+        // Wait for vanilla attack cooldown so hits are reliable.
+        if (mc.player.getAttackCooldownProgress(0.0f) < 0.92f) return true;
+        if (!equipBestCombatTool()) return true;
+
+        Runnable attack = () -> {
+            if (mc.player == null || mc.interactionManager == null) return;
+            if (!target.isAlive() || target.isRemoved()) return;
+            mc.interactionManager.attackEntity(mc.player, target);
+            mc.player.swingHand(Hand.MAIN_HAND);
+        };
+
+        if (rotate.get()) {
+            var hitVec = target.getBoundingBox().getCenter();
+            Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), 60, attack);
+        } else {
+            attack.run();
+        }
+
+        return true;
+    }
+
+    private Entity findPlacementBlockingThreat() {
+        if (mc.player == null || mc.world == null || blueprintGenerator == null) return null;
+
+        double range = mobShieldRange.get();
+        double maxSq = range * range;
+
+        Entity best = null;
+        double bestSq = Double.MAX_VALUE;
+
+        Box search = mc.player.getBoundingBox().expand(range);
+        List<Entity> candidates = mc.world.getOtherEntities(
+            null,
+            search,
+            entity -> isThreatEntity(entity) && entity instanceof LivingEntity living && living.getHealth() > 0.0f
+        );
+
+        for (Entity entity : candidates) {
+            double distSq = mc.player.squaredDistanceTo(entity);
+            if (distSq > maxSq) continue;
+            if (!isBlockingObsidianPlacement(entity)) continue;
+
+            if (distSq < bestSq) {
+                bestSq = distSq;
+                best = entity;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean isThreatEntity(Entity entity) {
+        return entity != null
+            && entity.isAlive()
+            && !entity.isRemoved()
+            && NETHER_PLACEMENT_THREATS.contains(entity.getType());
+    }
+
+    private boolean isBlockingObsidianPlacement(Entity entity) {
+        if (mc.world == null || blueprintGenerator == null) return false;
+
+        Box box = entity.getBoundingBox();
+        int minX = (int) Math.floor(box.minX);
+        int minY = (int) Math.floor(box.minY);
+        int minZ = (int) Math.floor(box.minZ);
+        int maxX = (int) Math.floor(box.maxX);
+        int maxY = (int) Math.floor(box.maxY);
+        int maxZ = (int) Math.floor(box.maxZ);
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlueprintTask bp = blueprintGenerator.getBlueprint().get(pos);
+                    if (bp == null || bp.targetBlock != Blocks.OBSIDIAN) continue;
+
+                    BlockState state = mc.world.getBlockState(pos);
+                    if (state.getBlock() == Blocks.OBSIDIAN && !state.isReplaceable()) continue;
+                    if (!state.isAir() && !state.isReplaceable()) continue;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private boolean equipBestCombatTool() {
+        if (mc.player == null) return false;
+
+        int slot = findCombatToolInHotbar();
+        if (slot == -1) {
+            slot = moveCombatToolToHotbar();
+        }
+        if (slot == -1) return false;
+
+        if (mc.player.getInventory().getSelectedSlot() != slot) {
+            InvUtils.swap(slot, false);
+        }
+        return true;
+    }
+
+    private int findCombatToolInHotbar() {
+        if (mc.player == null) return -1;
+        int sword = findHotbarSlot(stack -> stack.isIn(ItemTags.SWORDS));
+        if (sword != -1) return sword;
+        int axe = findHotbarSlot(stack -> stack.isIn(ItemTags.AXES));
+        if (axe != -1) return axe;
+        return findHotbarSlot(stack -> stack.isIn(ItemTags.PICKAXES));
+    }
+
+    private int findHotbarSlot(java.util.function.Predicate<ItemStack> predicate) {
+        if (mc.player == null) return -1;
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isEmpty() && predicate.test(stack)) return i;
+        }
+        return -1;
+    }
+
+    private int moveCombatToolToHotbar() {
+        if (mc.player == null || inventoryHandler == null) return -1;
+
+        int sword = findInventorySlot(stack -> stack.isIn(ItemTags.SWORDS));
+        if (sword != -1) return moveInventoryToolToHotbar(sword);
+
+        int axe = findInventorySlot(stack -> stack.isIn(ItemTags.AXES));
+        if (axe != -1) return moveInventoryToolToHotbar(axe);
+
+        int pickaxe = findInventorySlot(stack -> stack.isIn(ItemTags.PICKAXES));
+        if (pickaxe != -1) return moveInventoryToolToHotbar(pickaxe);
+
+        return -1;
+    }
+
+    private int findInventorySlot(java.util.function.Predicate<ItemStack> predicate) {
+        if (mc.player == null) return -1;
+        for (int i = 9; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (!stack.isEmpty() && predicate.test(stack)) return i;
+        }
+        return -1;
+    }
+
+    private int moveInventoryToolToHotbar(int inventorySlot) {
+        if (mc.player == null || inventoryHandler == null) return -1;
+        if (inventorySlot < 9 || inventorySlot > 35) return -1;
+
+        ItemStack source = mc.player.getInventory().getStack(inventorySlot);
+        if (source.isEmpty()) return -1;
+
+        int selected = mc.player.getInventory().getSelectedSlot();
+        if (inventoryHandler.canUseHotbarSlot(selected, source.getItem())) {
+            InvUtils.move().from(inventorySlot).toHotbar(selected);
+            return selected;
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (!inventoryHandler.canUseHotbarSlot(i, source.getItem())) continue;
+            if (mc.player.getInventory().getStack(i).isEmpty()) {
+                InvUtils.move().from(inventorySlot).toHotbar(i);
+                return i;
+            }
+        }
+
+        for (int i = 0; i < 9; i++) {
+            if (!inventoryHandler.canUseHotbarSlot(i, source.getItem())) continue;
+            InvUtils.move().from(inventorySlot).toHotbar(i);
+            return i;
+        }
+
+        return -1;
+    }
+
+    private static final Set<EntityType<?>> NETHER_PLACEMENT_THREATS = Set.of(
+        EntityType.GHAST,
+        EntityType.ZOMBIFIED_PIGLIN,
+        EntityType.MAGMA_CUBE,
+        EntityType.ENDERMAN,
+        EntityType.PIGLIN,
+        EntityType.SKELETON,
+        EntityType.HOGLIN,
+        EntityType.WITHER_SKELETON,
+        EntityType.BLAZE,
+        EntityType.PIGLIN_BRUTE,
+        EntityType.STRIDER
+    );
 }
