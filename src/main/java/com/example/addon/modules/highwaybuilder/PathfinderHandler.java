@@ -234,6 +234,12 @@ public class PathfinderHandler {
         // instead of inching forward one slice at a time.
         if (hasActionableWork()) return;
 
+        // If liquid is detected near the front but currently out of placement reach,
+        // advance one safe step so it can enter interaction range.
+        if (distToCurrentSq <= STEP_FORWARD_DIST_SQ && hasOutOfReachFrontLiquidTask()) {
+            if (tryAdvanceOneStep()) return;
+        }
+
         // All work done — find the farthest contiguous completed position
         BlockPos farthest = currentBlockPos;
         BlockPos candidate = currentBlockPos;
@@ -271,19 +277,7 @@ public class PathfinderHandler {
         // If nothing is actionable in current reach, but there is unfinished work ahead,
         // advance one step so that next slice enters active range.
         if (distToCurrentSq <= STEP_FORWARD_DIST_SQ && hasUnfinishedAhead()) {
-            BlockPos next = currentBlockPos.add(
-                startingDirection.directionVec.getX(),
-                startingDirection.directionVec.getY(),
-                startingDirection.directionVec.getZ()
-            );
-
-            BlockState downState = mc.world.getBlockState(next.down());
-            if (!downState.isAir() && !downState.isReplaceable()) {
-                module.statistics.simpleMovingAverageDistance.add(System.currentTimeMillis());
-                module.inventoryHandler.lastHitVec = Vec3d.ZERO;
-                currentBlockPos = next;
-                module.taskManager.populateTasks();
-            }
+            tryAdvanceOneStep();
         }
     }
 
@@ -311,11 +305,54 @@ public class PathfinderHandler {
         return false;
     }
 
+    private boolean hasOutOfReachFrontLiquidTask() {
+        if (mc.player == null) return false;
+
+        double currentProgress = getForwardProgressFromStart(currentBlockPos);
+        double maxForward = module.miningReach.get() + 2.0;
+        double maxLateral = Math.max(2.5, module.width.get() / 2.0 + 2.0);
+
+        for (BlockTask task : module.taskManager.getTasks().values()) {
+            if (task == null || task.taskState != TaskState.LIQUID) continue;
+            if (isTaskExecutableNow(task)) continue;
+
+            double progress = getForwardProgressFromStart(task.blockPos);
+            if (progress < currentProgress - 1.0 || progress > currentProgress + maxForward) continue;
+
+            double lateral = Math.abs(startingDirection.lateralOffset(currentBlockPos, task.blockPos));
+            if (lateral > maxLateral) continue;
+
+            int dy = Math.abs(task.blockPos.getY() - mc.player.getBlockY());
+            if (dy > module.miningRangeUp.get() + 2) continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean tryAdvanceOneStep() {
+        BlockPos next = currentBlockPos.add(
+            startingDirection.directionVec.getX(),
+            startingDirection.directionVec.getY(),
+            startingDirection.directionVec.getZ()
+        );
+
+        BlockState downState = mc.world.getBlockState(next.down());
+        if (downState.isAir() || downState.isReplaceable()) return false;
+
+        module.statistics.simpleMovingAverageDistance.add(System.currentTimeMillis());
+        module.inventoryHandler.lastHitVec = Vec3d.ZERO;
+        currentBlockPos = next;
+        module.taskManager.populateTasks();
+        return true;
+    }
+
     private boolean isTaskExecutableNow(BlockTask task) {
         if (mc.player == null) return false;
 
         double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(task.blockPos));
-        double placeReach = module.maxReach.get() + 0.6;
+        double placeReach = module.maxReach.get() + 0.8;
 
         return switch (task.taskState) {
             case BREAK, BREAKING, PENDING_BREAK -> canExecuteBreakTaskNow(task);

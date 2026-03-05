@@ -8,9 +8,12 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 public class LiquidHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final double LIQUID_REACH_EPSILON = 0.2;
+    private static final double LIQUID_REACH_EPSILON = 0.6;
     private static final double PRE_SCAN_FORWARD_PADDING = 2.0;
     private static final double PRE_SCAN_LATERAL_PADDING = 2.0;
 
@@ -28,10 +31,8 @@ public class LiquidHandler {
         if (mc.world == null || mc.player == null || module.taskManager == null) return false;
 
         LiquidCandidate best = null;
-
-        for (Direction side : Direction.values()) {
-            BlockPos neighbourPos = blockTask.blockPos.offset(side);
-            LiquidCandidate candidate = evaluateLiquidCandidate(neighbourPos, blockTask.blockPos, true);
+        for (BlockPos candidatePos : getLiquidSearchPositions(blockTask.blockPos)) {
+            LiquidCandidate candidate = evaluateLiquidCandidate(candidatePos, blockTask.blockPos, true);
             best = pickBetter(best, candidate);
         }
 
@@ -57,11 +58,8 @@ public class LiquidHandler {
         for (BlockTask task : module.taskManager.getTasks().values()) {
             if (!isAheadWorkTask(task, maxForward, maxLateral)) continue;
 
-            LiquidCandidate self = evaluateLiquidCandidate(task.blockPos, task.blockPos, false);
-            best = pickBetter(best, self);
-
-            for (Direction side : Direction.values()) {
-                LiquidCandidate around = evaluateLiquidCandidate(task.blockPos.offset(side), task.blockPos, false);
+            for (BlockPos candidatePos : getLiquidSearchPositions(task.blockPos)) {
+                LiquidCandidate around = evaluateLiquidCandidate(candidatePos, task.blockPos, false);
                 best = pickBetter(best, around);
             }
         }
@@ -104,6 +102,37 @@ public class LiquidHandler {
         return false;
     }
 
+    private Set<BlockPos> getLiquidSearchPositions(BlockPos center) {
+        Set<BlockPos> result = new LinkedHashSet<>();
+        if (center == null) return result;
+
+        result.add(center);
+
+        for (Direction dir : Direction.values()) {
+            result.add(center.offset(dir));
+        }
+
+        // Cover lava directly adjacent to highway border and one block beyond it,
+        // including diagonals where source blocks often sit while flow reaches
+        // the mining/build area.
+        for (Direction dir : Direction.Type.HORIZONTAL) {
+            BlockPos one = center.offset(dir);
+            result.add(one);
+            result.add(one.up());
+            result.add(one.down());
+            result.add(center.offset(dir, 2));
+        }
+
+        for (Direction a : Direction.Type.HORIZONTAL) {
+            for (Direction b : Direction.Type.HORIZONTAL) {
+                if (a == b || a == b.getOpposite()) continue;
+                result.add(center.offset(a).offset(b));
+            }
+        }
+
+        return result;
+    }
+
     private LiquidCandidate evaluateLiquidCandidate(BlockPos liquidPos, BlockPos relatedPos, boolean strictReach) {
         if (mc.world == null || mc.player == null) return null;
 
@@ -118,11 +147,13 @@ public class LiquidHandler {
         double eyeDistance = eyePos.distanceTo(Vec3d.ofCenter(liquidPos));
         if (eyeDistance > allowedReach) return null;
 
+        // For fluid cells, visibility checks in neighbour sequence can reject
+        // valid placements; use non-visible search for liquid mitigation.
         if (HWUtils.getNeighbourSequence(
             liquidPos,
             module.placementSearch.get(),
             allowedReach,
-            !module.illegalPlacements.get()
+            false
         ).isEmpty()) {
             return null;
         }

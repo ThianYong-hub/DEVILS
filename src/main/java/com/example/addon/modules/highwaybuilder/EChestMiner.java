@@ -59,7 +59,9 @@ public class EChestMiner {
     private BlockPos collectionCenter = null;
     private BlockPos standPos = null;
     private boolean refillToCapacity = false;
+    private final List<BlockPos> farmCenters = new ArrayList<>();
     private static final double COLLECTION_RADIUS = 6.0;
+    private static final double FALLBACK_COLLECTION_RADIUS = 24.0;
     private static final double ACTION_TOLERANCE = 0.10;
     private static final double STAND_EDGE_PADDING = 0.04;
     private static final double STAND_BIAS_AWAY = 0.08;
@@ -84,8 +86,12 @@ public class EChestMiner {
         return module.echestMineMode.get() == EChestMineMode.Insta;
     }
 
-    private boolean isSilent() {
+    private boolean isContainerSilent() {
         return module.swapMode.get() == EChestSwapMode.Silent;
+    }
+
+    private boolean isPickSilent() {
+        return module.pickaxeSwapMode.get() == ToolSwapMode.Silent;
     }
 
     public boolean isActive() {
@@ -147,16 +153,21 @@ public class EChestMiner {
         }
         if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) return;
 
+        int missingObsidian = countMissingObsidianForRefill();
+        boolean refillContinuation = refillToCapacity && missingObsidian >= 8;
+
         double distToBuild = mc.player.getPos().distanceTo(
             Vec3d.ofCenter(module.pathfinder.currentBlockPos));
-        if (distToBuild > 1.5) return;
+        // During ongoing refill continuation (after taking extra ender chests),
+        // start immediately from current position instead of detouring into
+        // normal build tick loop first.
+        if (!refillContinuation && distToBuild > 1.5) return;
 
         // Hard priority: never start or request ender-chest cycle without a pickaxe.
         // If none is available, this call triggers Fortune pickaxe restock first.
         if (!ensurePickaxeReadyForMining()) return;
 
-        int freeSpace = countFreeObsidianSpace();
-        if (freeSpace < 8) {
+        if (missingObsidian < 8) {
             refillToCapacity = false;
             return;
         }
@@ -174,7 +185,7 @@ public class EChestMiner {
             return;
         }
 
-        int chestsNeeded = (int) Math.ceil(freeSpace / 8.0);
+        int chestsNeeded = (int) Math.ceil(missingObsidian / 8.0);
         int availableToMine = echest.count() - MIN_ECHEST_RESERVE;
         chestsRemaining = Math.min(chestsNeeded, Math.max(0, availableToMine));
         if (chestsRemaining <= 0) {
@@ -190,7 +201,7 @@ public class EChestMiner {
         stuckTicks = 0;
         echestPlaced = false;
 
-        if (isSilent()) {
+        if (isContainerSilent()) {
             // Silent: skip SWAP_TO_ECHEST, go directly to PLACE_ECHEST
             state = State.PLACE_ECHEST;
         } else {
@@ -207,7 +218,7 @@ public class EChestMiner {
         if (mc.world != null && mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
             echestPlaced = true;
             stuckTicks = 0;
-            if (isSilent()) state = State.MINE_HIT;
+            if (isPickSilent()) state = State.MINE_HIT;
             else state = State.SWAP_TO_PICK;
             return;
         }
@@ -250,7 +261,7 @@ public class EChestMiner {
         // Already placed?
         if (mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
             echestPlaced = true;
-            if (isSilent()) {
+            if (isPickSilent()) {
                 // Go directly to mining, no separate swap state
                 state = State.MINE_HIT;
             } else {
@@ -289,13 +300,13 @@ public class EChestMiner {
 
         mc.player.setSneaking(true);
 
-        if (!isInsta() && !isSilent() && !sneakingForPlace) {
+        if (!isInsta() && !isContainerSilent() && !sneakingForPlace) {
             sneakingForPlace = true;
             tickDelay = 1;
             return;
         }
 
-        if (isSilent()) {
+        if (isContainerSilent()) {
             // Silent: find EC, swap → place → swap back, all in one tick
             FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
             if (!echest.found()) { mc.player.setSneaking(false); goToCollecting(); return; }
@@ -328,7 +339,7 @@ public class EChestMiner {
         // Do not advance until placement is actually confirmed.
         if (mc.world.getBlockState(actionPos).getBlock() == Blocks.ENDER_CHEST) {
             echestPlaced = true;
-            if (isSilent()) {
+            if (isPickSilent()) {
                 // Silent: skip SWAP_TO_PICK, go directly to MINE_HIT
                 state = State.MINE_HIT;
             } else {
@@ -406,7 +417,7 @@ public class EChestMiner {
 
         if (isInsta()) {
             if (!hitSent) {
-                if (isSilent()) {
+                if (isPickSilent()) {
                     // Silent: swap pick → attack → swap back
                     int prevSlot = mc.player.getInventory().getSelectedSlot();
                     if (!swapToPickSilent()) return;
@@ -423,7 +434,7 @@ public class EChestMiner {
             state = State.WAIT_BREAK;
             stuckTicks = 0;
         } else {
-            if (isSilent()) {
+            if (isPickSilent()) {
                 int prevSlot = mc.player.getInventory().getSelectedSlot();
                 if (!swapToPickSilent()) return;
                 mc.interactionManager.attackBlock(actionPos, side);
@@ -471,6 +482,11 @@ public class EChestMiner {
         if (!isInsta()) hitSent = false;
         stuckTicks = 0;
         collectionCenter = actionPos;
+        trackFarmCenter(actionPos);
+
+        // If pickaxe broke during mining, switch to pickaxe restock immediately
+        // instead of continuing with chest/place phases for a few extra ticks.
+        if (!ensurePickaxeReadyForMining()) return;
 
         if (chestsRemaining <= 0) {
             goToCollecting();
@@ -479,7 +495,7 @@ public class EChestMiner {
 
         FindItemResult echest = InvUtils.find(Items.ENDER_CHEST);
         if (echest.found()) {
-            if (isSilent()) {
+            if (isContainerSilent()) {
                 // Silent: skip SWAP_TO_ECHEST, go directly to placement
                 state = State.PLACE_ECHEST;
             } else {
@@ -497,7 +513,7 @@ public class EChestMiner {
     private void doCollecting() {
         if (mc.player == null || mc.world == null) { reset(); return; }
 
-        int freeSpace = countFreeObsidianSpace();
+        int freeSpace = countFreeObsidianInventorySpace();
         if (freeSpace <= 0) {
             module.pathfinder.clearMinerGoal();
             reset();
@@ -509,7 +525,8 @@ public class EChestMiner {
         // No obsidian left on ground — done collecting
         if (closest == null) {
             module.pathfinder.clearMinerGoal();
-            if (refillToCapacity && freeSpace >= 8) {
+            int missingObsidian = countMissingObsidianForRefill();
+            if (refillToCapacity && missingObsidian >= 8) {
                 // Keep refilling in the same session until all convertible space is filled.
                 if (countItem(Items.ENDER_CHEST) > MIN_ECHEST_RESERVE || tryRequestEchestRestock()) {
                     reset(false);
@@ -616,7 +633,9 @@ public class EChestMiner {
         if (module.containerHandler.findShulkerWithFortunePickaxe() == -1) return false;
 
         module.containerHandler.handleFortunePickaxeRestock();
-        reset();
+        // Keep refill intent so after pickaxe restock the miner continues
+        // filling empty slots with obsidian instead of stopping early.
+        reset(false);
         return true;
     }
 
@@ -626,19 +645,33 @@ public class EChestMiner {
 
     private ItemEntity findClosestObsidian() {
         if (mc.player == null || mc.world == null) return null;
-        Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
-        double radius = collectionCenter != null ? COLLECTION_RADIUS : 16.0;
-        Box searchBox = new Box(center, center).expand(radius);
+        Box searchBox = getObsidianSearchBox();
         ItemEntity closest = null;
         double closestDist = Double.MAX_VALUE;
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
             if (!searchBox.contains(itemEntity.getPos())) continue;
-            double d = itemEntity.getPos().squaredDistanceTo(center);
+            if (!isInsideTrackedFarmArea(itemEntity.getPos())) continue;
+            double d = itemEntity.getPos().squaredDistanceTo(mc.player.getPos());
             if (d < closestDist) {
                 closestDist = d;
                 closest = itemEntity;
+            }
+        }
+
+        if (closest == null && !farmCenters.isEmpty()) {
+            Vec3d playerPos = mc.player.getPos();
+            Box fallback = new Box(playerPos, playerPos).expand(FALLBACK_COLLECTION_RADIUS);
+            for (var entity : mc.world.getEntities()) {
+                if (!(entity instanceof ItemEntity itemEntity)) continue;
+                if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
+                if (!fallback.contains(itemEntity.getPos())) continue;
+                double d = itemEntity.getPos().squaredDistanceTo(playerPos);
+                if (d < closestDist) {
+                    closestDist = d;
+                    closest = itemEntity;
+                }
             }
         }
         return closest;
@@ -646,17 +679,59 @@ public class EChestMiner {
 
     private int countGroundObsidian() {
         if (mc.player == null || mc.world == null) return 0;
-        Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
-        double radius = collectionCenter != null ? COLLECTION_RADIUS : 16.0;
-        Box searchBox = new Box(center, center).expand(radius);
+        Box searchBox = getObsidianSearchBox();
         int count = 0;
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
             if (!searchBox.contains(itemEntity.getPos())) continue;
+            if (!isInsideTrackedFarmArea(itemEntity.getPos())) continue;
             count += itemEntity.getStack().getCount();
         }
         return count;
+    }
+
+    private Box getObsidianSearchBox() {
+        if (mc.player == null) return new Box(0, 0, 0, 0, 0, 0);
+
+        if (!farmCenters.isEmpty()) {
+            Box union = null;
+            for (BlockPos centerPos : farmCenters) {
+                Vec3d center = Vec3d.ofCenter(centerPos);
+                Box around = new Box(center, center).expand(COLLECTION_RADIUS);
+                union = union == null ? around : union.union(around);
+            }
+            if (union != null) return union.expand(1.0);
+        }
+
+        Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
+        double radius = collectionCenter != null ? COLLECTION_RADIUS : FALLBACK_COLLECTION_RADIUS;
+        return new Box(center, center).expand(radius);
+    }
+
+    private boolean isInsideTrackedFarmArea(Vec3d pos) {
+        if (mc.player == null || pos == null) return false;
+
+        if (farmCenters.isEmpty()) {
+            Vec3d center = collectionCenter != null ? Vec3d.ofCenter(collectionCenter) : mc.player.getPos();
+            double radius = collectionCenter != null ? COLLECTION_RADIUS : FALLBACK_COLLECTION_RADIUS;
+            return pos.squaredDistanceTo(center) <= radius * radius;
+        }
+
+        double sq = COLLECTION_RADIUS * COLLECTION_RADIUS;
+        for (BlockPos centerPos : farmCenters) {
+            if (pos.squaredDistanceTo(Vec3d.ofCenter(centerPos)) <= sq) return true;
+        }
+        return false;
+    }
+
+    private void trackFarmCenter(BlockPos pos) {
+        if (pos == null) return;
+        if (farmCenters.stream().anyMatch(existing -> existing.equals(pos))) return;
+        farmCenters.add(pos);
+        while (farmCenters.size() > 16) {
+            farmCenters.remove(0);
+        }
     }
 
     private boolean tryRequestEchestRestock() {
@@ -1142,7 +1217,7 @@ public class EChestMiner {
         return count;
     }
 
-    private int countFreeObsidianSpace() {
+    private int countFreeObsidianInventorySpace() {
         if (mc.player == null) return 0;
         int space = 0;
         for (int i = 0; i < 36; i++) {
@@ -1153,8 +1228,13 @@ public class EChestMiner {
                 space += stack.getMaxCount() - stack.getCount();
             }
         }
-        space -= countGroundObsidian();
-        return Math.max(0, space);
+        return space;
+    }
+
+    private int countMissingObsidianForRefill() {
+        int inventorySpace = countFreeObsidianInventorySpace();
+        if (inventorySpace <= 0) return 0;
+        return Math.max(0, inventorySpace - countGroundObsidian());
     }
 
     private int findSafeHotbarSlot() {
@@ -1191,6 +1271,9 @@ public class EChestMiner {
         sneakingForPlace = false;
         pickSlot = -1;
         collectionCenter = null;
+        if (clearRefillToCapacity) {
+            farmCenters.clear();
+        }
         lastEnsurePos = null;
         ensureNoMoveTicks = 0;
         miningAccessStuckTicks = 0;

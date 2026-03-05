@@ -275,7 +275,9 @@ public class TaskExecutor {
         // Hard guard against stale tasks: never place a non-AIR block into a blueprint AIR cell.
         // Skip temporary container task (shulker restock), it can be intentionally outside/over blueprint.
         BlockTask containerTask = module.containerHandler.containerTask;
-        if (blockTask != containerTask && module.blueprintGenerator != null) {
+        if (blockTask != containerTask
+            && blockTask.taskState != TaskState.LIQUID
+            && module.blueprintGenerator != null) {
             BlueprintTask blueprintTask = module.blueprintGenerator.getBlueprint().get(blockTask.blockPos);
             if (blueprintTask == null) {
                 // Stale task outside current blueprint window.
@@ -339,7 +341,29 @@ public class TaskExecutor {
             }
         }
 
+        // Recover stale PLACE state even during update pass so TaskManager can
+        // switch to break phase in the same tick.
+        if (blockTask != containerTask
+            && blockTask.taskState != TaskState.LIQUID
+            && blockTask.targetBlock != Blocks.AIR
+            && !currentState.isAir()
+            && !currentState.isReplaceable()
+            && currentBlock != blockTask.targetBlock) {
+            blockTask.updateState(TaskState.BREAK);
+            return;
+        }
+
         if (updateOnly) return;
+
+        // Global phase guard: never perform normal placement while there is
+        // pending break work in active mining bounds.
+        if (blockTask != containerTask
+            && blockTask.taskState != TaskState.LIQUID
+            && module.taskManager != null
+            && module.taskManager.hasActiveBreakWork()) {
+            blockTask.resetStuck();
+            return;
+        }
 
         boolean selfBlockingPlacement = mc.player != null
             && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos));
@@ -386,7 +410,29 @@ public class TaskExecutor {
             }
         }
 
-        if (!HWUtils.isPlaceable(blockTask.blockPos)) {
+        // If a non-container placement task still has a solid block in the cell,
+        // this is a stale PLACE state. Recover by breaking first instead of
+        // repeatedly trying to place and rendering bright blue flicker.
+        if (blockTask != containerTask
+            && blockTask.taskState != TaskState.LIQUID
+            && blockTask.targetBlock != Blocks.AIR
+            && !currentState.isAir()
+            && !currentState.isReplaceable()
+            && currentBlock != blockTask.targetBlock) {
+            blockTask.updateState(TaskState.BREAK);
+            return;
+        }
+
+        boolean isLiquidCell = !mc.world.getFluidState(blockTask.blockPos).isEmpty();
+        if (!HWUtils.isPlaceable(blockTask.blockPos) && !(blockTask.taskState == TaskState.LIQUID && isLiquidCell)) {
+            // Another solid block occupies the target cell: break it first.
+            if (blockTask != containerTask
+                && !currentState.isAir()
+                && !currentState.isReplaceable()) {
+                blockTask.updateState(TaskState.BREAK);
+                return;
+            }
+
             if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
                 nudgeAwayFromPlacementBlock(blockTask, blockTask == containerTask);
                 blockTask.onStuck(2);
@@ -448,6 +494,12 @@ public class TaskExecutor {
             && !currentState.isReplaceable()) {
             // Block already placed — skip waiting
             blockTask.updateState(TaskState.PLACED);
+        } else if (!currentState.isAir()
+            && !currentState.isReplaceable()
+            && blockTask.targetBlock != Blocks.AIR
+            && blockTask.targetBlock != currentState.getBlock()) {
+            // Wrong solid block in cell: break first instead of waiting for timeout.
+            blockTask.updateState(TaskState.BREAK);
         } else if ((currentState.isAir() || currentState.isReplaceable())
             && blockTask.targetBlock != Blocks.AIR) {
             // Placement did not land (lag/packet drop). Retry immediately instead of sitting in black state.

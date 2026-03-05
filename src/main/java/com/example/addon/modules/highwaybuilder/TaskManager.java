@@ -52,9 +52,24 @@ public class TaskManager {
         // Drop stale tasks that are no longer part of the active blueprint window.
         BlockTask containerTask = module.containerHandler.containerTask;
         tasks.entrySet().removeIf(entry -> {
+            BlockTask task = entry.getValue();
             boolean isActiveContainerPos = entry.getKey().equals(containerTask.blockPos)
                 && containerTask.taskState != TaskState.DONE;
             if (isActiveContainerPos) return false;
+
+            // Keep nearby active liquid mitigation tasks even when they are
+            // temporarily outside blueprint (e.g., lava adjacent/below break cells).
+            if (task != null && task.taskState == TaskState.LIQUID && task.taskState != TaskState.DONE) {
+                double dist = Vec3d.ofCenter(module.pathfinder.currentBlockPos)
+                    .distanceTo(Vec3d.ofCenter(entry.getKey()));
+                double forward = module.pathfinder.startingDirection
+                    .forwardProgress(module.pathfinder.currentBlockPos, entry.getKey());
+                // Keep nearby liquid mitigation tasks slightly behind the player too,
+                // so side/back lava pockets are not dropped before being plugged.
+                boolean nearWorkArea = dist <= module.maxReach.get() + 4.0 && forward >= -3.0;
+                if (nearWorkArea) return false;
+            }
+
             return !blueprint.containsKey(entry.getKey()) || startPadding(entry.getKey());
         });
 
@@ -212,18 +227,47 @@ public class TaskManager {
 
         BlockTask existing = tasks.get(blockTask.blockPos);
         if (existing != null) {
-            if (existing.getStuckTicks() > existing.taskState.stuckTimeout
-                || blockTask.taskState == TaskState.LIQUID
-                || (existing.taskState != blockTask.taskState
-                    && (existing.taskState == TaskState.DONE
-                        || existing.taskState == TaskState.IMPOSSIBLE_PLACE
-                        || (existing.taskState == TaskState.PLACE
-                            && !HWUtils.isPlaceable(existing.blockPos))))) {
+            if (shouldReplaceExistingTask(existing, blockTask)) {
                 tasks.put(blockTask.blockPos, blockTask);
             }
         } else {
             tasks.put(blockTask.blockPos, blockTask);
         }
+    }
+
+    private boolean shouldReplaceExistingTask(BlockTask existing, BlockTask next) {
+        if (existing == null || next == null) return true;
+
+        if (existing.getStuckTicks() > existing.taskState.stuckTimeout) return true;
+        if (next.taskState == TaskState.LIQUID) return true;
+        if (existing.targetBlock != next.targetBlock) return true;
+        if (existing.taskState == TaskState.DONE || existing.taskState == TaskState.IMPOSSIBLE_PLACE) return true;
+
+        if (existing.taskState != next.taskState) {
+            // Critical recovery: never keep stale PLACE/PENDING_PLACE when
+            // blueprint regeneration says the block must be broken.
+            if (isBreakLikeState(next.taskState) && isPlaceLikeState(existing.taskState)) return true;
+
+            if (existing.taskState == TaskState.PLACE && !HWUtils.isPlaceable(existing.blockPos)) return true;
+        }
+
+        return false;
+    }
+
+    private boolean isBreakLikeState(TaskState state) {
+        return switch (state) {
+            case BREAK, BREAKING, PENDING_BREAK -> true;
+            case LIQUID -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isPlaceLikeState(TaskState state) {
+        return switch (state) {
+            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
+            case LIQUID -> true;
+            default -> false;
+        };
     }
 
     private void updateTaskData(BlockTask blockTask) {
@@ -247,11 +291,17 @@ public class TaskManager {
                 || (now - blockTask.lastSequenceUpdate) >= recalcInterval);
 
             if (shouldRecalculateSequence) {
+                boolean visibleOnly = !module.illegalPlacements.get();
+                if (blockTask.taskState == TaskState.LIQUID) {
+                    // Liquid plugs must not depend on strict face-visibility checks:
+                    // on lava cells this frequently yields empty sequence and skips rotate/place.
+                    visibleOnly = false;
+                }
                 blockTask.sequence = HWUtils.getNeighbourSequence(
                     blockTask.blockPos,
                     module.placementSearch.get(),
                     module.maxReach.get(),
-                    !module.illegalPlacements.get()
+                    visibleOnly
                 );
                 blockTask.lastSequenceUpdate = now;
             }
@@ -310,8 +360,9 @@ public class TaskManager {
 
         int actionsThisTick = 0;
         int maxActions = module.blocksPerTick.get();
-        boolean hasBreakPhaseTasks = sorted.stream().anyMatch(task ->
-            isBreakPhaseState(task) && isBreakPhaseActionableNow(task));
+        // Do not place while there are unresolved break-phase tasks in active bounds.
+        // This prevents "skip nearest break -> try place into solid block" behavior.
+        boolean hasBreakPhaseTasks = hasActiveBreakWork();
 
         for (BlockTask task : sorted) {
             if (hasBreakPhaseTasks) {
@@ -352,10 +403,26 @@ public class TaskManager {
         }
 
         switch (blockTask.taskState) {
+            case BREAK, BREAKING -> {
+                // Never drop break tasks as DONE on timeout: retry from BREAK state.
+                blockTask.miningSide = null;
+                blockTask.updateState(TaskState.BREAK);
+            }
             case PLACE -> {
                 if (module.dynamicDelay.get() && module.blockPlacer.extraPlaceDelay < 10
                     && module.pathfinder.moveState != MovementState.BRIDGE) {
                     module.blockPlacer.extraPlaceDelay += 1;
+                }
+            }
+            case LIQUID -> {
+                if (mc.world != null && !mc.world.getFluidState(blockTask.blockPos).isEmpty()) {
+                    // Never mark active liquid mitigation as DONE on timeout.
+                    // Keep it alive and retry with refreshed supports.
+                    blockTask.resetStuck();
+                    blockTask.updateState(TaskState.LIQUID);
+                } else {
+                    if (blockTask.targetBlock == Blocks.AIR) blockTask.updateState(TaskState.DONE);
+                    else blockTask.updateState(TaskState.PLACE);
                 }
             }
             case IMPOSSIBLE_PLACE -> {
@@ -367,6 +434,16 @@ public class TaskManager {
                 module.pathfinder.moveState = MovementState.RUNNING;
             }
             default -> blockTask.updateState(TaskState.DONE);
+        }
+        return false;
+    }
+
+    public boolean hasActiveBreakWork() {
+        for (BlockTask task : tasks.values()) {
+            if (!isBreakPhaseState(task)) continue;
+            if (!isWithinActiveMiningBounds(task.blockPos)) continue;
+            if (task.taskState == TaskState.DONE) continue;
+            return true;
         }
         return false;
     }
@@ -449,7 +526,7 @@ public class TaskManager {
         if (mc.player == null) return null;
 
         Vec3d eyePos = mc.player.getEyePos();
-        double maxReach = module.maxReach.get() + 0.6;
+        double maxReach = module.maxReach.get() + 0.8;
         double maxForward = module.miningReach.get() + 1.5;
 
         for (BlockTask task : sorted) {
@@ -543,6 +620,9 @@ public class TaskManager {
             .thenComparingDouble(t -> {
                 if (module.pathfinder.moveState == MovementState.BRIDGE) {
                     return t.sequence.isEmpty() ? 69 : t.sequence.size();
+                } else if (isBreakPhaseState(t)) {
+                    // Break nearest forward slice first to avoid leaving close blocks behind.
+                    return getForwardPriority(t.blockPos);
                 } else if (isClosingPlacementState(t.taskState)) {
                     // Prioritize nearest forward slice first (close holes before extending).
                     return getForwardPriority(t.blockPos);
@@ -550,6 +630,9 @@ public class TaskManager {
                     return module.multiBuilding.get() ? t.getShuffle() : t.getStartDistance();
                 }
             })
+            .thenComparingDouble(t -> isBreakPhaseState(t)
+                ? getLateralPriority(t.blockPos) // center lane first while breaking
+                : 0.0)
             .thenComparingDouble(t -> isClosingPlacementState(t.taskState)
                 ? getLateralPriority(t.blockPos) // center lane first, edges/railings later
                 : 0.0)

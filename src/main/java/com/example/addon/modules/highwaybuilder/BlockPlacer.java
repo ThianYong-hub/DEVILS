@@ -16,6 +16,7 @@ import java.util.Set;
 
 public class BlockPlacer {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
+    private static final double PLACE_REACH_EPSILON = 0.8;
 
     private final HighwayBuilder module;
     public int extraPlaceDelay = 0;
@@ -43,6 +44,17 @@ public class BlockPlacer {
             return;
         }
 
+        // Liquid plugs should always use a direct solid neighbor as anchor.
+        // This avoids deep-sequence anchors landing on air and spinning in
+        // retry loops without actual placement.
+        if (blockTask.taskState == TaskState.LIQUID) {
+            PlaceInfo directAnchor = findDirectLiquidAnchor(blockTask.blockPos);
+            if (directAnchor != null) {
+                placeBlockNormal(blockTask, directAnchor.pos(), directAnchor.side());
+                return;
+            }
+        }
+
         if (blockTask.sequence.isEmpty()) {
             // No valid anchor right now. Keep task alive and retry after sequence refresh.
             blockTask.onStuck();
@@ -68,7 +80,9 @@ public class BlockPlacer {
             return;
         }
 
-        if (!HWUtils.isPlaceable(blockTask.blockPos)) {
+        boolean liquidCell = !mc.world.getFluidState(blockTask.blockPos).isEmpty();
+        if (!HWUtils.isPlaceable(blockTask.blockPos)
+            && !(blockTask.taskState == TaskState.LIQUID && liquidCell)) {
             blockTask.onStuck();
             module.inventoryHandler.restoreSilentSwap();
             return;
@@ -85,7 +99,7 @@ public class BlockPlacer {
 
         // Raw packet — bypasses client-side reach/placement checks (needed for wide highways)
         Vec3d hitVec = HWUtils.getHitVec(placePos, side);
-        if (mc.player.getEyePos().distanceTo(hitVec) > module.maxReach.get() + 0.2) {
+        if (mc.player.getEyePos().distanceTo(hitVec) > module.maxReach.get() + PLACE_REACH_EPSILON) {
             blockTask.onStuck();
             if (needSneak && !wasSneaking) mc.player.setSneaking(false);
             module.inventoryHandler.restoreSilentSwap();
@@ -116,9 +130,37 @@ public class BlockPlacer {
         };
 
         if (module.rotate.get()) {
-            Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), 50, doPlace);
+            int rotatePriority = blockTask.taskState == TaskState.LIQUID ? 100 : 50;
+            Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), rotatePriority, doPlace);
         } else {
             doPlace.run();
         }
+    }
+
+    private PlaceInfo findDirectLiquidAnchor(BlockPos targetPos) {
+        if (mc.world == null || mc.player == null || targetPos == null) return null;
+
+        Vec3d eyePos = mc.player.getEyePos();
+        PlaceInfo best = null;
+        double bestDist = Double.MAX_VALUE;
+        double maxReach = module.maxReach.get() + PLACE_REACH_EPSILON;
+
+        for (Direction dir : Direction.values()) {
+            BlockPos supportPos = targetPos.offset(dir);
+            Direction clickSide = dir.getOpposite();
+            BlockState supportState = mc.world.getBlockState(supportPos);
+            if (supportState.isAir() || supportState.isReplaceable()) continue;
+
+            Vec3d hitVec = HWUtils.getHitVec(supportPos, clickSide);
+            double dist = eyePos.distanceTo(hitVec);
+            if (dist > maxReach) continue;
+
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = new PlaceInfo(supportPos, clickSide);
+            }
+        }
+
+        return best;
     }
 }
