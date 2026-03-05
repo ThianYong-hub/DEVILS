@@ -177,6 +177,9 @@ jobs:
             sed -E -i \
               "s#\\(v[0-9]+\\.[0-9]+\\.[0-9]+\\)#(v${version})#g" \
               "${file}"
+            sed -E -i \
+              "s#\\(`v[0-9]+\\.[0-9]+\\.[0-9]+`\\)#(`v${version}`)#g" \
+              "${file}"
           done
 
           if git diff --quiet; then
