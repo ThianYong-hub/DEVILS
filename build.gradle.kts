@@ -135,6 +135,10 @@ dependencies {
 }
 
 tasks {
+    val cleanLibsJars by registering(Delete::class) {
+        delete(fileTree(layout.buildDirectory.dir("libs")) { include("*.jar") })
+    }
+
     processResources {
         val propertyMap = mapOf(
             "version" to project.version,
@@ -165,6 +169,10 @@ tasks {
 
     test {
         useJUnitPlatform()
+    }
+
+    named("build") {
+        dependsOn(cleanLibsJars)
     }
 
     withType<JavaCompile> {
