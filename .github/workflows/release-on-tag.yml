@@ -119,6 +119,7 @@ jobs:
           import os
           import re
           import subprocess
+          from collections import Counter
           from pathlib import Path
 
           current_tag = os.environ["CURRENT_TAG"]
@@ -129,8 +130,109 @@ jobs:
           def run(cmd):
               return subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace")
 
+          def sentence_case(text):
+              text = re.sub(r"\s+", " ", text).strip()
+              if not text:
+                  return text
+              return text[0].upper() + text[1:]
+
+          component_aliases = {
+              "auto-cev": "AutoCev",
+              "auto-wasp": "AutoWasp",
+              "anti-wasp": "AntiWasp",
+              "highwaybuilder": "HighwayBuilder",
+          }
+
+          def prettify_component(raw):
+              raw = raw.strip()
+              if not raw:
+                  return ""
+
+              lowered = raw.lower()
+              if lowered in component_aliases:
+                  return component_aliases[lowered]
+
+              if any(ch.isupper() for ch in raw[1:]):
+                  return raw
+
+              pieces = [p for p in re.split(r"[^a-zA-Z0-9]+", raw) if p]
+              if not pieces:
+                  return raw
+              return "".join(piece[:1].upper() + piece[1:] for piece in pieces)
+
+          def infer_components(full_sha):
+              try:
+                  changed_files = run(["git", "show", "--name-only", "--format=", full_sha]).splitlines()
+              except subprocess.CalledProcessError:
+                  changed_files = []
+
+              components = []
+              for changed in changed_files:
+                  changed = changed.strip()
+                  if not changed:
+                      continue
+
+                  if changed.startswith("src/main/java/com/example/addon/modules/"):
+                      components.append(Path(changed).stem)
+                  elif changed.startswith("src/main/java/com/example/addon/mixin/"):
+                      components.append("Mixins")
+                  elif changed.startswith(".github/workflows/"):
+                      components.append("Release workflow")
+                  elif changed.startswith("docs/") or changed == "README.md":
+                      components.append("Documentation")
+                  elif changed.startswith("src/main/resources/"):
+                      components.append("Resources")
+
+              unique = []
+              seen = set()
+              for component in components:
+                  pretty = prettify_component(component)
+                  if not pretty or pretty in seen:
+                      continue
+                  seen.add(pretty)
+                  unique.append(pretty)
+              return unique
+
+          def trim_components(components):
+              generic = {"Mixins", "Resources", "Documentation", "Release workflow"}
+              if any(component not in generic for component in components):
+                  return [component for component in components if component not in generic]
+              return components
+
+          def format_commit_line(subject, scope, inferred_components):
+              cleaned = sentence_case(subject)
+              components = []
+
+              if scope:
+                  pretty_scope = prettify_component(scope)
+                  if pretty_scope:
+                      components.append(pretty_scope)
+
+              for component in inferred_components:
+                  if component not in components:
+                      components.append(component)
+
+              components = trim_components(components)
+              if components:
+                  return f"{', '.join(components)}: {cleaned}", components
+              return cleaned, components
+
+          def normalize_kind(kind, cleaned_subject):
+              lowered = cleaned_subject.lower()
+              if kind == "feat" and lowered.startswith((
+                  "refactor ",
+                  "rework ",
+                  "improve ",
+                  "optimize ",
+                  "reduce ",
+                  "cleanup ",
+                  "clean up ",
+              )):
+                  return "refactor"
+              return kind
+
           try:
-              raw = run(["git", "log", "--no-merges", "--pretty=%s%x09%h", commit_range]).splitlines()
+              raw = run(["git", "log", "--no-merges", "--pretty=%H%x09%h%x09%s", commit_range]).splitlines()
           except subprocess.CalledProcessError:
               raw = []
 
@@ -148,39 +250,64 @@ jobs:
               "Documentation": [],
               "Maintenance": []
           }
+          component_counter = Counter()
+          type_counter = Counter()
+          included_commits = 0
 
-          prefix_re = re.compile(r"^(feat|fix|refactor|perf|docs|build|ci|chore|test)(\([^)]+\))?:\s*", re.IGNORECASE)
+          prefix_re = re.compile(
+              r"^(?P<kind>feat|fix|refactor|perf|docs|build|ci|chore|test)(?:\((?P<scope>[^)]+)\))?:\s*(?P<subject>.+)$",
+              re.IGNORECASE
+          )
 
           for line in raw:
-              if "\t" not in line:
+              if line.count("\t") < 2:
                   continue
-              subject, sha = line.split("\t", 1)
+
+              full_sha, short_sha, subject = line.split("\t", 2)
+              full_sha = full_sha.strip()
+              short_sha = short_sha.strip()
               subject = subject.strip()
-              sha = sha.strip()
-              if not subject or not sha:
+              if not full_sha or not short_sha or not subject:
                   continue
 
               lowered = subject.lower()
               if any(re.search(p, lowered) for p in ignore_patterns):
                   continue
 
-              cleaned = prefix_re.sub("", subject).strip()
-              if not cleaned:
-                  cleaned = subject
-              cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+              match = prefix_re.match(subject)
+              scope = ""
+              kind = "maintenance"
+              cleaned_subject = subject
+              if match:
+                  scope = (match.group("scope") or "").strip()
+                  kind = match.group("kind").lower()
+                  cleaned_subject = match.group("subject").strip()
 
-              item = f"- {cleaned} ([{sha}]({repo_url}/commit/{sha}))"
+              kind = normalize_kind(kind, cleaned_subject)
 
-              if lowered.startswith("feat"):
+              inferred_components = infer_components(full_sha)
+              formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
+              item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
+
+              included_commits += 1
+              for component in components:
+                  component_counter[component] += 1
+
+              if kind == "feat":
                   grouped["Features"].append(item)
-              elif lowered.startswith("fix"):
+                  type_counter["feature"] += 1
+              elif kind == "fix":
                   grouped["Fixes"].append(item)
-              elif lowered.startswith("refactor") or lowered.startswith("perf"):
+                  type_counter["fix"] += 1
+              elif kind in ("refactor", "perf"):
                   grouped["Improvements"].append(item)
-              elif lowered.startswith("docs"):
+                  type_counter["improvement"] += 1
+              elif kind == "docs":
                   grouped["Documentation"].append(item)
+                  type_counter["documentation"] += 1
               else:
                   grouped["Maintenance"].append(item)
+                  type_counter["maintenance"] += 1
 
           lines = []
           lines.append(f"## {current_tag}")
@@ -191,6 +318,30 @@ jobs:
           else:
               lines.append("Initial tagged release changes.")
           lines.append("")
+
+          if included_commits:
+              lines.append("### Highlights")
+              if component_counter:
+                  ordered_components = [name for name, _count in component_counter.most_common()]
+                  lines.append(f"- Updated areas: {', '.join(ordered_components)}")
+
+              summary_parts = []
+              for key, singular, plural in (
+                  ("feature", "feature", "features"),
+                  ("fix", "fix", "fixes"),
+                  ("improvement", "improvement", "improvements"),
+                  ("documentation", "documentation change", "documentation changes"),
+                  ("maintenance", "maintenance change", "maintenance changes"),
+              ):
+                  count = type_counter.get(key, 0)
+                  if count:
+                      suffix = singular if count == 1 else plural
+                      summary_parts.append(f"{count} {suffix}")
+
+              if summary_parts:
+                  lines.append(f"- Release summary: {', '.join(summary_parts)}")
+              lines.append(f"- Included commits: {included_commits}")
+              lines.append("")
 
           written_any = False
           for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
@@ -208,7 +359,7 @@ jobs:
               lines.append("")
 
           if prev_tag:
-              lines.append(f"### Full Changelog")
+              lines.append("### Full Changelog")
               lines.append(f"[{prev_tag}...{current_tag}]({repo_url}/compare/{prev_tag}...{current_tag})")
               lines.append("")
 
