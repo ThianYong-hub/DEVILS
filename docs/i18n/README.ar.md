@@ -4,7 +4,7 @@
 
 ## التنزيل
 
-- الإصدار الحالي (`v0.0.18`): [تنزيل jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.18/devils-addon-0.0.18.jar)
+- الإصدار الحالي (`v0.0.19`): [تنزيل jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.19/devils-addon-0.0.19.jar)
 - أحدث إصدار: [فتح](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - جميع الإصدارات: [فتح](https://github.com/ThianYong-hub/DEVILS/releases)
 
