@@ -10,6 +10,7 @@ import meteordevelopment.meteorclient.systems.friends.Friends;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
 import meteordevelopment.meteorclient.utils.entity.TargetUtils;
+import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.EquipmentSlot;
@@ -58,8 +59,10 @@ public class AutoWasp extends Module {
     private static final double NETHER_MAX_FLIGHT_Y = 123.0;
     private static final int CACHE_SWEEP_TICKS = 64;
     private static final int MAX_CACHE_ENTRIES = 20000;
+    private static final int AUTO_ARMOR_COMMAND_COOLDOWN_TICKS = 10;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgChestSwap = settings.createGroup("Chest Swap");
 
     private final Setting<Double> horizontalSpeed = sgGeneral.add(new DoubleSetting.Builder()
         .name("horizontal-speed")
@@ -124,6 +127,43 @@ public class AutoWasp extends Module {
         .build()
     );
 
+    private final Setting<Boolean> autoChestSwap = sgChestSwap.add(new BoolSetting.Builder()
+        .name("auto-chest-swap")
+        .description("Uses AutoArmor chat commands to swap off elytra when you are close enough to fight on stable ground.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Double> chestSwapHorizontalRange = sgChestSwap.add(new DoubleSetting.Builder()
+        .name("chest-swap-horizontal-range")
+        .description("Maximum horizontal distance to the target before swapping off elytra.")
+        .defaultValue(2.5)
+        .range(0.5, 6.0)
+        .sliderRange(0.5, 6.0)
+        .visible(autoChestSwap::get)
+        .build()
+    );
+
+    private final Setting<Double> chestSwapVerticalRange = sgChestSwap.add(new DoubleSetting.Builder()
+        .name("chest-swap-vertical-range")
+        .description("Maximum vertical difference to the target before swapping off elytra.")
+        .defaultValue(1.0)
+        .range(0.0, 4.0)
+        .sliderRange(0.0, 4.0)
+        .visible(autoChestSwap::get)
+        .build()
+    );
+
+    private final Setting<Double> chestSwapGroundDistance = sgChestSwap.add(new DoubleSetting.Builder()
+        .name("chest-swap-ground-distance")
+        .description("Only swaps off elytra when there is solid ground close enough below you.")
+        .defaultValue(1.25)
+        .range(0.0, 4.0)
+        .sliderRange(0.0, 4.0)
+        .visible(autoChestSwap::get)
+        .build()
+    );
+
     public PlayerEntity target;
     private int jumpTimer = 0;
     private boolean incrementJumpTimer = false;
@@ -139,6 +179,8 @@ public class AutoWasp extends Module {
     private int cacheSweepTicks = 0;
     private int targetSearchTimer = 0;
     private boolean waitingForElytra = false;
+    private int autoArmorCommandCooldown = 0;
+    private Boolean autoArmorElytraEnabled = null;
 
     private final Map<Long, Boolean> clearanceCache = new HashMap<>();
     private final Map<Long, Double> floorDistanceCache = new HashMap<>();
@@ -153,6 +195,8 @@ public class AutoWasp extends Module {
         if (mc.player == null || mc.world == null) return;
 
         resetNavigationState();
+        autoArmorCommandCooldown = 0;
+        autoArmorElytraEnabled = hasEquippedElytra();
 
         if (target == null || target.isRemoved()) {
             if (tryAcquireTarget(false)) {
@@ -179,6 +223,8 @@ public class AutoWasp extends Module {
         cacheSweepTicks = 0;
         targetSearchTimer = 0;
         waitingForElytra = false;
+        autoArmorCommandCooldown = 0;
+        autoArmorElytraEnabled = null;
         clearCaches();
     }
 
@@ -222,13 +268,18 @@ public class AutoWasp extends Module {
             cacheSweepTicks = 0;
             clearCaches();
         }
+        if (autoArmorCommandCooldown > 0) autoArmorCommandCooldown--;
         if (targetSearchTimer > 0) targetSearchTimer--;
 
         if (target == null || target.isRemoved() || target.isDead() || target.getHealth() <= 0) {
-            if (!handleMissingTarget()) return;
+            if (!handleMissingTarget()) {
+                tickAutoChestSwap();
+                return;
+            }
         }
 
         if (target == null) {
+            tickAutoChestSwap();
             return;
         }
 
@@ -243,14 +294,25 @@ public class AutoWasp extends Module {
 
         if (shouldIgnore) {
             clearTargetState();
-            if (!handleMissingTarget()) return;
+            if (!handleMissingTarget()) {
+                tickAutoChestSwap();
+                return;
+            }
         }
 
         if (target == null) {
+            tickAutoChestSwap();
             return;
         }
 
+        boolean shouldUseElytra = tickAutoChestSwap();
+
         if (!hasEquippedElytra()) {
+            if (!shouldUseElytra) {
+                waitingForElytra = false;
+                resetFlightTracking();
+                return;
+            }
             if (!waitingForElytra) {
                 warning("No elytra equipped, waiting for swap...");
                 waitingForElytra = true;
@@ -484,6 +546,38 @@ public class AutoWasp extends Module {
 
     private double resolveVerticalCap() {
         return verticalSpeed.get();
+    }
+
+    private boolean tickAutoChestSwap() {
+        boolean shouldUseElytra = !shouldSwapToChestplate();
+        requestAutoArmorElytra(shouldUseElytra);
+        return shouldUseElytra;
+    }
+
+    private boolean shouldSwapToChestplate() {
+        if (!autoChestSwap.get() || mc.player == null || target == null) return false;
+
+        double horizontalDistance = Math.hypot(mc.player.getX() - target.getX(), mc.player.getZ() - target.getZ());
+        if (horizontalDistance > chestSwapHorizontalRange.get()) return false;
+
+        double verticalDistance = Math.abs(mc.player.getY() - target.getY());
+        if (verticalDistance > chestSwapVerticalRange.get()) return false;
+
+        int scanDepth = Math.max(3, MathHelper.ceil(chestSwapGroundDistance.get()) + 2);
+        double groundDistance = distanceToSolidBelow(mc.player.getPos(), scanDepth);
+        return groundDistance <= chestSwapGroundDistance.get();
+    }
+
+    private void requestAutoArmorElytra(boolean enabled) {
+        if (mc.player == null || mc.player.networkHandler == null) return;
+
+        boolean elytraEquipped = hasEquippedElytra();
+        if (autoArmorElytraEnabled != null && autoArmorElytraEnabled == enabled && elytraEquipped == enabled) return;
+        if (autoArmorCommandCooldown > 0) return;
+
+        ChatUtils.sendPlayerMsg(";autoarmor Elytra " + enabled);
+        autoArmorElytraEnabled = enabled;
+        autoArmorCommandCooldown = AUTO_ARMOR_COMMAND_COOLDOWN_TICKS;
     }
 
     private boolean hasEquippedElytra() {

@@ -187,7 +187,7 @@ public class AutoCev extends Module {
             return;
         }
 
-        if (plan.type() == PlanType.FACE && head != null && head.type() == PlanType.HEAD_BLOCKER) {
+        if ((plan.type() == PlanType.FACE || plan.type() == PlanType.FACE_BLOCKER) && head != null && head.type() == PlanType.HEAD_BLOCKER) {
             if (lockedFaceBase == null || !lockedFaceBase.equals(plan.pos())) instaMinePos = null;
             lockedFaceBase = plan.pos().toImmutable();
             debug("lock face base -> " + formatPos(lockedFaceBase) + " head=" + planSummary(head));
@@ -222,6 +222,7 @@ public class AutoCev extends Module {
             if (player == mc.player) return false;
             if (player.isDead() || player.getHealth() <= 0) return false;
             if (Friends.get().isFriend(player)) return false;
+            if (isSameHole(mc.player, player)) return false;
             if (isPlayerInBlocks(player)) return false;
             return mc.player.distanceTo(player) <= targetRange.get();
         }, SortPriority.LowestDistance);
@@ -231,14 +232,14 @@ public class AutoCev extends Module {
         CyclePlan head = chooseHeadPlan(player);
         CyclePlan active = getActivePlan(player);
         CyclePlan lockedHead = getLockedHeadPlan(player);
-        CyclePlan openFace = chooseOpenFacePlan(player);
+        CyclePlan face = chooseFacePlan(player);
         CyclePlan lockedFace = getLockedFacePlan(player);
 
         if (lockedHead != null) return lockedHead;
         if (head != null && head.type() == PlanType.HEAD_CLEAR) return head;
         if (head != null && head.type() == PlanType.HEAD_BLOCKER) {
             if (lockedFace != null) return lockedFace;
-            if (openFace != null) return preferActive(openFace, active);
+            if (face != null) return preferActive(face, active);
             if (lockedFaceBase != null) debug("clear face lock -> no open face, use head blocker");
             lockedFaceBase = null;
             return head;
@@ -246,8 +247,8 @@ public class AutoCev extends Module {
         if (lockedFace != null) return lockedFace;
 
         if (head != null && head.type() == PlanType.HEAD) return preferActive(head, active);
-        if (active != null && active.type() == PlanType.FACE) return active;
-        if (openFace != null) return preferActive(openFace, active);
+        if (active != null && (active.type() == PlanType.FACE || active.type() == PlanType.FACE_BLOCKER)) return active;
+        if (face != null) return preferActive(face, active);
         if (head != null && head.type() == PlanType.HEAD_BLOCKER) return head;
         return null;
     }
@@ -281,6 +282,10 @@ public class AutoCev extends Module {
                 SpaceState state = getSpaceStateForBase(activeBase, player);
                 yield state == SpaceState.OPEN ? new CyclePlan(activeBase.toImmutable(), PlanType.FACE, score(activeBase) - 1e-3) : null;
             }
+            case FACE_BLOCKER -> {
+                SpaceState state = getSpaceStateForBase(activeBase, player);
+                yield state == SpaceState.OBSIDIAN_BLOCKER ? new CyclePlan(activeBase.toImmutable(), PlanType.FACE_BLOCKER, score(activeBase) - 1e-3) : null;
+            }
             case HEAD_BLOCKER -> {
                 CyclePlan head = chooseHeadPlan(player);
                 yield head != null && head.type() == PlanType.HEAD_BLOCKER && head.pos().equals(activeBase) ? head : null;
@@ -295,13 +300,18 @@ public class AutoCev extends Module {
             return null;
         }
 
-        BlockState state = mc.world.getBlockState(lockedFaceBase);
-        if (state.isOf(Blocks.BEDROCK) || (!state.isOf(Blocks.OBSIDIAN) && !state.isAir() && !state.isReplaceable())) {
+        BlockState blockState = mc.world.getBlockState(lockedFaceBase);
+        if (blockState.isOf(Blocks.BEDROCK) || (!blockState.isOf(Blocks.OBSIDIAN) && !blockState.isAir() && !blockState.isReplaceable())) {
             lockedFaceBase = null;
             return null;
         }
 
-        return new CyclePlan(lockedFaceBase.toImmutable(), PlanType.FACE, score(lockedFaceBase) - 1e-3);
+        SpaceState faceState = getSpaceStateForBase(lockedFaceBase, player);
+        if (faceState == SpaceState.OPEN) return new CyclePlan(lockedFaceBase.toImmutable(), PlanType.FACE, score(lockedFaceBase) - 1e-3);
+        if (faceState == SpaceState.OBSIDIAN_BLOCKER) return new CyclePlan(lockedFaceBase.toImmutable(), PlanType.FACE_BLOCKER, score(lockedFaceBase) - 1e-3);
+
+        lockedFaceBase = null;
+        return null;
     }
 
     private CyclePlan getLockedHeadPlan(PlayerEntity player) {
@@ -320,25 +330,28 @@ public class AutoCev extends Module {
         return new CyclePlan(lockedHeadMineBase.toImmutable(), PlanType.HEAD, score(lockedHeadMineBase) - 1e-3);
     }
 
-    private CyclePlan chooseOpenFacePlan(PlayerEntity player) {
+    private CyclePlan chooseFacePlan(PlayerEntity player) {
         if (player == null || mc.player == null || mc.world == null) return null;
 
         int faceY = MathHelper.floor(player.getEyeY());
         BlockPos center = new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
 
-        CyclePlan best = null;
+        CyclePlan bestOpen = null;
+        CyclePlan bestBlocker = null;
         for (Direction dir : CARDINAL) {
             BlockPos pos = center.offset(dir);
             if (!isFreshFaceBase(pos)) continue;
             SpaceState state = getSpaceStateForBase(pos, player);
-            if (state != SpaceState.OPEN) continue;
-
-            CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, score(pos));
-
-            if (best == null || plan.score() < best.score()) best = plan;
+            if (state == SpaceState.OPEN) {
+                CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, score(pos));
+                if (bestOpen == null || plan.score() < bestOpen.score()) bestOpen = plan;
+            } else if (state == SpaceState.OBSIDIAN_BLOCKER) {
+                CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE_BLOCKER, score(pos));
+                if (bestBlocker == null || plan.score() < bestBlocker.score()) bestBlocker = plan;
+            }
         }
 
-        return best;
+        return bestOpen != null ? bestOpen : bestBlocker;
     }
 
     private CyclePlan preferActive(CyclePlan candidate, CyclePlan active) {
@@ -386,8 +399,26 @@ public class AutoCev extends Module {
 
         switch (plan.type()) {
             case HEAD, FACE -> executeCyclePlan(plan);
+            case FACE_BLOCKER -> executeFaceBlockerPlan(plan);
             case HEAD_CLEAR -> executeHeadClearPlan(plan);
             case HEAD_BLOCKER -> executeHeadBlockerPlan(plan);
+        }
+    }
+
+    private void executeFaceBlockerPlan(CyclePlan plan) {
+        if (plan == null || mc.world == null || target == null) return;
+
+        if (baseNeedsPlacement(plan.pos())) {
+            if (placeObsidian(plan.pos())) {
+                tryContinueCycleSameTick(new CyclePlan(plan.pos(), PlanType.FACE_BLOCKER, score(plan.pos())));
+            }
+            return;
+        }
+
+        if (mineCrystalBlocker(plan.pos())) return;
+
+        if (getSpaceStateForBase(plan.pos(), target) == SpaceState.OPEN) {
+            executeCyclePlan(new CyclePlan(plan.pos(), PlanType.FACE, score(plan.pos())));
         }
     }
 
@@ -558,6 +589,7 @@ public class AutoCev extends Module {
         if (!mc.world.getBlockState(plan.pos()).isOf(Blocks.OBSIDIAN)) return;
 
         if (plan.type() == PlanType.HEAD || plan.type() == PlanType.FACE) executeCyclePlan(plan);
+        else if (plan.type() == PlanType.FACE_BLOCKER) executeFaceBlockerPlan(plan);
     }
 
     private boolean placeCrystal(BlockPos base) {
@@ -646,7 +678,7 @@ public class AutoCev extends Module {
 
     private boolean mineCrystalBlocker(BlockPos base) {
         if (base == null || mc.world == null) return false;
-        if (target != null && isTopBase(base, target) && chooseOpenFacePlan(target) != null) {
+        if (target != null && isTopBase(base, target) && chooseFacePlan(target) != null) {
             debug("skip head blocker mine -> face exists");
             return false;
         }
@@ -828,6 +860,76 @@ public class AutoCev extends Module {
         return false;
     }
 
+    private boolean isSameHole(PlayerEntity first, PlayerEntity second) {
+        if (first == null || second == null || mc.world == null) return false;
+
+        BlockPos firstPos = first.getBlockPos();
+        BlockPos secondPos = second.getBlockPos();
+
+        if (firstPos.equals(secondPos)) return isSingleHole(firstPos) || isDoubleHoleCell(firstPos);
+        if (firstPos.getY() != secondPos.getY()) return false;
+
+        int dx = Math.abs(firstPos.getX() - secondPos.getX());
+        int dz = Math.abs(firstPos.getZ() - secondPos.getZ());
+        if (dx + dz != 1) return false;
+
+        return isDoubleHole(firstPos, secondPos);
+    }
+
+    private boolean isSingleHole(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
+        if (!mc.world.getBlockState(pos).isAir()) return false;
+        if (!mc.world.getBlockState(pos.up()).isAir()) return false;
+
+        return isHoleWall(pos.down())
+            && isHoleWall(pos.north())
+            && isHoleWall(pos.south())
+            && isHoleWall(pos.east())
+            && isHoleWall(pos.west());
+    }
+
+    private boolean isDoubleHoleCell(BlockPos pos) {
+        if (pos == null) return false;
+
+        for (Direction direction : CARDINAL) {
+            if (isDoubleHole(pos, pos.offset(direction))) return true;
+        }
+
+        return false;
+    }
+
+    private boolean isDoubleHole(BlockPos firstPos, BlockPos secondPos) {
+        if (firstPos == null || secondPos == null || mc.world == null) return false;
+        if (firstPos.getY() != secondPos.getY()) return false;
+        if (!mc.world.getBlockState(firstPos).isAir() || !mc.world.getBlockState(firstPos.up()).isAir()) return false;
+        if (!mc.world.getBlockState(secondPos).isAir() || !mc.world.getBlockState(secondPos.up()).isAir()) return false;
+        if (!isHoleWall(firstPos.down()) || !isHoleWall(secondPos.down())) return false;
+
+        Direction sharedSide = null;
+        for (Direction direction : CARDINAL) {
+            if (firstPos.offset(direction).equals(secondPos)) {
+                sharedSide = direction;
+                break;
+            }
+        }
+
+        if (sharedSide == null) return false;
+
+        for (Direction direction : CARDINAL) {
+            if (direction != sharedSide && !isHoleWall(firstPos.offset(direction))) return false;
+            if (direction != sharedSide.getOpposite() && !isHoleWall(secondPos.offset(direction))) return false;
+        }
+
+        return true;
+    }
+
+    private boolean isHoleWall(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
+
+        BlockState state = mc.world.getBlockState(pos);
+        return !state.isAir() && !state.isReplaceable();
+    }
+
     private void resetState() {
         target = null;
         targetId = null;
@@ -843,7 +945,7 @@ public class AutoCev extends Module {
     public String getInfoString() {
         if (target == null) return null;
         if (activeBase == null) return target.getName().getString();
-        return target.getName().getString() + (activeType == PlanType.FACE ? " F" : " T");
+        return target.getName().getString() + ((activeType == PlanType.FACE || activeType == PlanType.FACE_BLOCKER) ? " F" : " T");
     }
 
     private record CyclePlan(BlockPos pos, PlanType type, double score) {
@@ -871,6 +973,7 @@ public class AutoCev extends Module {
         HEAD,
         HEAD_CLEAR,
         FACE,
+        FACE_BLOCKER,
         HEAD_BLOCKER
     }
 
