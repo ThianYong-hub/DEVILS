@@ -142,6 +142,15 @@ jobs:
               "anti-wasp": "AntiWasp",
               "highwaybuilder": "HighwayBuilder",
           }
+          generic_scopes = {
+              "addon",
+              "addons",
+              "combat",
+              "misc",
+              "module",
+              "modules",
+              "release",
+          }
 
           def prettify_component(raw):
               raw = raw.strip()
@@ -228,7 +237,7 @@ jobs:
               cleaned = sentence_case(subject)
               components = []
 
-              if scope:
+              if scope and not (inferred_components and scope.strip().lower() in generic_scopes):
                   pretty_scope = prettify_component(scope)
                   if pretty_scope:
                       components.append(pretty_scope)
@@ -259,6 +268,22 @@ jobs:
                       "changes": "It now respects the Nether roof limit and uses lighter pathfinding logic.",
                       "impact": "This should reduce upward-stuck behavior and route-calculation lag on weaker PCs.",
                       "result": "Pursuit should be more stable in the Nether and less expensive to run.",
+                  }
+
+              if component == "AutoCev" and "auto-cev planning" in lowered:
+                  return {
+                      "intro": "AutoCev got a combat-flow update.",
+                      "changes": "Face and blocker planning were tightened up, including cleaner handling for blocked face cycles.",
+                      "impact": "This should make target selection and cycle continuation more reliable in cramped fights.",
+                      "result": "AutoCev should stall less and recover cleaner when a setup is partially blocked.",
+                  }
+
+              if component == "AutoWasp" and "auto-wasp swapping" in lowered:
+                  return {
+                      "intro": "AutoWasp got a close-range swap update.",
+                      "changes": "It can now tell AutoArmor to swap between elytra and chestplate when you are close enough to commit on stable ground.",
+                      "impact": "This should make bedrock-level pressure more practical without forcing awkward swaps while you are still flying over open space.",
+                      "result": "AutoWasp should transition into close-range fights more naturally.",
                   }
 
               if component == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
@@ -481,13 +506,14 @@ jobs:
               lines.append("Initial tagged release changes.")
           lines.append("")
 
+          rendered_player_sections = bool(new_module_updates or module_updates or general_updates)
+
           if included_commits:
               lines.append("### Highlights")
               if new_module_updates:
                   lines.append(f"- New modules: {', '.join(new_module_updates.keys())}")
               if module_updates:
                   lines.append(f"- Updated modules: {', '.join(module_updates.keys())}")
-              lines.append(f"- Included commits: {included_commits}")
               lines.append("")
 
           render_update_section(lines, "New Modules", new_module_updates)
@@ -512,17 +538,20 @@ jobs:
                   lines.append("")
               lines.append("")
 
-          written_any = False
-          for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
-              entries = technical_groups[title]
-              if not entries:
-                  continue
-              written_any = True
-              lines.append(f"### Technical Notes: {title}")
-              lines.extend(entries)
-              lines.append("")
+          should_render_technical = not (included_commits == 1 and rendered_player_sections)
 
-          if not written_any:
+          written_any = False
+          if should_render_technical:
+              for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
+                  entries = technical_groups[title]
+                  if not entries:
+                      continue
+                  written_any = True
+                  lines.append(f"### Technical Notes: {title}")
+                  lines.extend(entries)
+                  lines.append("")
+
+          if not written_any and not rendered_player_sections:
               lines.append("### Maintenance")
               lines.append("- Maintenance release.")
               lines.append("")
