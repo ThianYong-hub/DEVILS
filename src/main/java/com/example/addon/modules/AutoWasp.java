@@ -138,6 +138,7 @@ public class AutoWasp extends Module {
     private int antiCheatSlowTicks = 0;
     private int cacheSweepTicks = 0;
     private int targetSearchTimer = 0;
+    private boolean waitingForElytra = false;
 
     private final Map<Long, Boolean> clearanceCache = new HashMap<>();
     private final Map<Long, Double> floorDistanceCache = new HashMap<>();
@@ -177,6 +178,7 @@ public class AutoWasp extends Module {
         antiCheatSlowTicks = 0;
         cacheSweepTicks = 0;
         targetSearchTimer = 0;
+        waitingForElytra = false;
         clearCaches();
     }
 
@@ -248,11 +250,15 @@ public class AutoWasp extends Module {
             return;
         }
 
-        if (!mc.player.getEquippedStack(EquipmentSlot.CHEST).contains(DataComponentTypes.GLIDER)) {
-            error("No elytra equipped!");
-            toggle();
+        if (!hasEquippedElytra()) {
+            if (!waitingForElytra) {
+                warning("No elytra equipped, waiting for swap...");
+                waitingForElytra = true;
+            }
+            resetFlightTracking();
             return;
         }
+        waitingForElytra = false;
 
         if (incrementJumpTimer) jumpTimer++;
 
@@ -399,7 +405,7 @@ public class AutoWasp extends Module {
     private void onMoveSafe(PlayerMoveEvent event) {
         if (mc.player == null || mc.world == null) return;
         if (target == null || target.isRemoved() || target.isDead()) return;
-        if (!mc.player.getEquippedStack(EquipmentSlot.CHEST).contains(DataComponentTypes.GLIDER)) return;
+        if (!hasEquippedElytra()) return;
         if (!mc.player.isGliding()) return;
 
         Vec3d steerTarget = getTargetPos();
@@ -478,6 +484,23 @@ public class AutoWasp extends Module {
 
     private double resolveVerticalCap() {
         return verticalSpeed.get();
+    }
+
+    private boolean hasEquippedElytra() {
+        return mc.player != null && mc.player.getEquippedStack(EquipmentSlot.CHEST).contains(DataComponentTypes.GLIDER);
+    }
+
+    private void resetFlightTracking() {
+        jumpTimer = 0;
+        incrementJumpTimer = false;
+        currentPath.clear();
+        currentWaypointIndex = 0;
+        pathTimer = 0;
+        lastPathTarget = null;
+        stuckTicks = 0;
+        adaptiveHorizontalCap = -1;
+        antiCheatSlowTicks = 0;
+        lastPlayerPos = mc.player != null ? mc.player.getPos() : null;
     }
 
     private boolean isInDragState() {
