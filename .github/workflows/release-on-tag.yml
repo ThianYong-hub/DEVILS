@@ -394,6 +394,7 @@ jobs:
               r"^auto_sync_",
               r"^switch_readme_sync",
               r"^fix_readme_sync",
+              r"^ci\(release\):",
           ]
 
           technical_groups = {
@@ -441,6 +442,8 @@ jobs:
 
               changed_files = get_changed_files(full_sha)
               inferred_components, new_modules = infer_components(changed_files)
+              if inferred_components and all(component in {"Documentation", "Release workflow"} for component in inferred_components):
+                  continue
               formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
               item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
 
