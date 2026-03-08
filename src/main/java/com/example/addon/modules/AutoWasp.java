@@ -24,6 +24,7 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import org.joml.Vector3d;
 
 import java.util.ArrayList;
@@ -39,17 +40,24 @@ public class AutoWasp extends Module {
     private static final Direction[] CARDINAL_DIRECTIONS = new Direction[] {
         Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
     };
+    private static final NeighborStep[] NEIGHBOR_STEPS = createNeighborSteps();
     private static final int PATH_UPDATE_TICKS = 14;
+    private static final int PATH_FORCE_REFRESH_TICKS = 32;
+    private static final int TARGET_SEARCH_TICKS = 10;
     private static final int PATH_MAX_NODES = 3500;
     private static final int PATH_RESOLUTION = 1;
     private static final double WAYPOINT_REACH = 2.0;
     private static final int STUCK_REPATH_TICKS = 12;
+    private static final double TARGET_REPATH_DISTANCE_SQ = 6.25;
     private static final double FLOOR_CLEARANCE = 2.2;
     private static final double CEILING_CLEARANCE = 1.5;
     private static final int SAFETY_SCAN = 14;
     private static final double OBSTACLE_LOOK_AHEAD = 7.5;
     private static final double AVOIDANCE_STRENGTH = 0.85;
     private static final double COLLISION_STEP = 0.55;
+    private static final double NETHER_MAX_FLIGHT_Y = 123.0;
+    private static final int CACHE_SWEEP_TICKS = 64;
+    private static final int MAX_CACHE_ENTRIES = 20000;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -102,6 +110,13 @@ public class AutoWasp extends Module {
         .build()
     );
 
+    private final Setting<Boolean> keepSearching = sgGeneral.add(new BoolSetting.Builder()
+        .name("keep-searching")
+        .description("Stays enabled and keeps looking for a target instead of disabling when none is loaded.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Vector3d> offset = sgGeneral.add(new Vector3dSetting.Builder()
         .name("offset")
         .description("How many blocks offset to wasp at from the target.")
@@ -122,6 +137,7 @@ public class AutoWasp extends Module {
     private double adaptiveHorizontalCap = -1;
     private int antiCheatSlowTicks = 0;
     private int cacheSweepTicks = 0;
+    private int targetSearchTimer = 0;
 
     private final Map<Long, Boolean> clearanceCache = new HashMap<>();
     private final Map<Long, Double> floorDistanceCache = new HashMap<>();
@@ -135,30 +151,17 @@ public class AutoWasp extends Module {
     public void onActivate() {
         if (mc.player == null || mc.world == null) return;
 
+        resetNavigationState();
+
         if (target == null || target.isRemoved()) {
-            findTarget();
-            
-            if (target == null) {
+            if (tryAcquireTarget(false)) {
+                info("Target set to: " + target.getName().getString());
+            } else if (!keepSearching.get()) {
                 error("No valid targets.");
                 toggle();
                 return;
-            } else {
-                info("Target set to: " + target.getName().getString());
             }
         }
-
-        jumpTimer = 0;
-        incrementJumpTimer = false;
-        currentPath.clear();
-        currentWaypointIndex = 0;
-        pathTimer = 0;
-        lastPathTarget = null;
-        lastPlayerPos = mc.player.getPos();
-        stuckTicks = 0;
-        adaptiveHorizontalCap = -1;
-        antiCheatSlowTicks = 0;
-        cacheSweepTicks = 0;
-        clearCaches();
     }
 
     @Override
@@ -173,6 +176,7 @@ public class AutoWasp extends Module {
         adaptiveHorizontalCap = -1;
         antiCheatSlowTicks = 0;
         cacheSweepTicks = 0;
+        targetSearchTimer = 0;
         clearCaches();
     }
 
@@ -212,13 +216,17 @@ public class AutoWasp extends Module {
 
     private void onTickSafe(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
-        if (++cacheSweepTicks >= 8) {
+        if (++cacheSweepTicks >= CACHE_SWEEP_TICKS || shouldTrimCaches()) {
             cacheSweepTicks = 0;
             clearCaches();
         }
+        if (targetSearchTimer > 0) targetSearchTimer--;
 
         if (target == null || target.isRemoved() || target.isDead() || target.getHealth() <= 0) {
-            handleTargetLoss();
+            if (!handleMissingTarget()) return;
+        }
+
+        if (target == null) {
             return;
         }
 
@@ -232,15 +240,12 @@ public class AutoWasp extends Module {
         }
 
         if (shouldIgnore) {
-            warning("Current target no longer matches criteria, finding new target...");
-            findTarget();
+            clearTargetState();
+            if (!handleMissingTarget()) return;
+        }
 
-            if (target == null) {
-                handleTargetLoss();
-                return;
-            } else {
-                info("New target: " + target.getName().getString());
-            }
+        if (target == null) {
+            return;
         }
 
         if (!mc.player.getEquippedStack(EquipmentSlot.CHEST).contains(DataComponentTypes.GLIDER)) {
@@ -284,12 +289,15 @@ public class AutoWasp extends Module {
 
             pathTimer++;
             Vec3d targetPos = getTargetPos();
+            boolean targetMovedFar = lastPathTarget == null || lastPathTarget.squaredDistanceTo(targetPos) > TARGET_REPATH_DISTANCE_SQ;
+            boolean pathBlocked = currentWaypointIndex < currentPath.size() && !isDirectPathClear(mc.player.getPos(), currentPath.get(currentWaypointIndex));
+            boolean pathDepleted = currentPath.isEmpty() || currentWaypointIndex >= currentPath.size();
 
-            boolean needsRepath = pathTimer >= PATH_UPDATE_TICKS
-                || currentPath.isEmpty()
-                || (lastPathTarget != null && lastPathTarget.squaredDistanceTo(targetPos) > 16)
+            boolean needsRepath = pathDepleted
+                || (targetMovedFar && pathTimer >= PATH_UPDATE_TICKS)
+                || pathTimer >= PATH_FORCE_REFRESH_TICKS
                 || stuckTicks >= STUCK_REPATH_TICKS
-                || (currentWaypointIndex < currentPath.size() && !isDirectPathClear(mc.player.getPos(), currentPath.get(currentWaypointIndex)));
+                || pathBlocked;
 
             if (needsRepath) {
                 pathTimer = 0;
@@ -421,6 +429,7 @@ public class AutoWasp extends Module {
         Vec3d avoid = computeLocalAvoidance(steerTarget, base, maxHorizontal);
         Vec3d velocity = base.add(avoid);
         velocity = applyEmergencyBraking(velocity);
+        velocity = applyDimensionFlightLimit(velocity, mc.player.getPos());
 
         double velHorizontal = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
         if (velHorizontal > maxHorizontal && velHorizontal > 1.0E-6) {
@@ -522,6 +531,23 @@ public class AutoWasp extends Module {
         }
 
         return yVel;
+    }
+
+    private Vec3d applyDimensionFlightLimit(Vec3d velocity, Vec3d currentPos) {
+        if (!hasNetherFlightCap()) return velocity;
+
+        double y = currentPos.y;
+        double vy = velocity.y;
+
+        if (y >= NETHER_MAX_FLIGHT_Y) {
+            vy = Math.min(vy, -0.10);
+        } else if (y >= NETHER_MAX_FLIGHT_Y - 0.75) {
+            vy = Math.min(vy, 0.0);
+        } else if (y >= NETHER_MAX_FLIGHT_Y - 1.5) {
+            vy = Math.min(vy, 0.08);
+        }
+
+        return new Vec3d(velocity.x, vy, velocity.z);
     }
 
     private Vec3d applyEmergencyBraking(Vec3d velocity) {
@@ -686,11 +712,13 @@ public class AutoWasp extends Module {
     }
 
     private Vec3d adjustToSafeCorridor(Vec3d desired, Vec3d fallbackRef) {
+        desired = clampToDimensionFlightCap(desired);
         double floorY = nearestSolidBelow(desired, SAFETY_SCAN);
         double ceilingY = nearestSolidAbove(desired, SAFETY_SCAN);
 
         double minY = floorY + FLOOR_CLEARANCE;
         double maxY = ceilingY - playerHeight() - CEILING_CLEARANCE;
+        if (hasNetherFlightCap()) maxY = Math.min(maxY, NETHER_MAX_FLIGHT_Y);
         double y = desired.y;
 
         if (minY <= maxY) {
@@ -732,6 +760,7 @@ public class AutoWasp extends Module {
 
     private boolean hasPlayerClearance(Vec3d center) {
         if (mc.world == null) return false;
+        if (hasNetherFlightCap() && center.y > NETHER_MAX_FLIGHT_Y) return false;
 
         long key = BlockPos.ofFloored(center).asLong();
         Boolean cached = clearanceCache.get(key);
@@ -746,6 +775,7 @@ public class AutoWasp extends Module {
         int maxY = MathHelper.floor(center.y + height);
         int minZ = MathHelper.floor(center.z - halfWidth);
         int maxZ = MathHelper.floor(center.z + halfWidth);
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
 
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
@@ -754,8 +784,8 @@ public class AutoWasp extends Module {
                     return false;
                 }
                 for (int z = minZ; z <= maxZ; z++) {
-                    BlockPos pos = new BlockPos(x, y, z);
-                    if (!mc.world.getBlockState(pos).getCollisionShape(mc.world, pos).isEmpty()) {
+                    mutable.set(x, y, z);
+                    if (!mc.world.getBlockState(mutable).getCollisionShape(mc.world, mutable).isEmpty()) {
                         clearanceCache.put(key, false);
                         return false;
                     }
@@ -835,9 +865,11 @@ public class AutoWasp extends Module {
     }
 
     private void computePath(Vec3d start, Vec3d goal) {
+        start = clampToDimensionFlightCap(start);
+        goal = clampToDimensionFlightCap(goal);
         int res = PATH_RESOLUTION;
-        BlockPos startBlock = toGrid(BlockPos.ofFloored(start), res);
-        BlockPos goalBlock = toGrid(BlockPos.ofFloored(goal), res);
+        BlockPos startBlock = clampToDimensionFlightCap(toGrid(BlockPos.ofFloored(start), res));
+        BlockPos goalBlock = clampToDimensionFlightCap(toGrid(BlockPos.ofFloored(goal), res));
 
         startBlock = findNearestPassable(startBlock, res, 10);
         goalBlock = findNearestPassable(goalBlock, res, 10);
@@ -856,67 +888,22 @@ public class AutoWasp extends Module {
             return;
         }
 
-        Map<Long, AStarNode> openMap = new HashMap<>();
-        Set<Long> closedSet = new HashSet<>();
-        PriorityQueue<AStarNode> openQueue = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
-
-        AStarNode startNode = new AStarNode(startBlock, null, 0, heuristic(startBlock, goalBlock));
-        openMap.put(startBlock.asLong(), startNode);
-        openQueue.add(startNode);
-
-        AStarNode bestNode = startNode;
-        int nodesExplored = 0;
-        int maxN = PATH_MAX_NODES;
-
-        while (!openQueue.isEmpty() && nodesExplored < maxN) {
-            AStarNode current = openQueue.poll();
-            long currentKey = current.pos.asLong();
-            if (closedSet.contains(currentKey)) continue;
-
-            closedSet.add(currentKey);
-            openMap.remove(currentKey);
-            nodesExplored++;
-
-            if (heuristic(current.pos, goalBlock) < heuristic(bestNode.pos, goalBlock)) {
-                bestNode = current;
-            }
-
-            if (current.pos.getManhattanDistance(goalBlock) <= res) {
-                currentPath = reconstructPath(current, safeGoal);
+        SearchResult bestResult = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            SearchResult result = searchPath(startBlock, goalBlock, safeGoal, createSearchBounds(startBlock, goalBlock, attempt));
+            if (result.path != null && result.complete) {
+                currentPath = result.path;
                 currentWaypointIndex = 0;
                 return;
             }
 
-            for (int dx = -res; dx <= res; dx += res) {
-                for (int dy = -res; dy <= res; dy += res) {
-                    for (int dz = -res; dz <= res; dz += res) {
-                        if (dx == 0 && dy == 0 && dz == 0) continue;
-
-                        BlockPos neighbor = current.pos.add(dx, dy, dz);
-                        long neighborKey = neighbor.asLong();
-
-                        if (closedSet.contains(neighborKey)) continue;
-                        if (!isNodeFlyable(neighbor)) continue;
-                        if (!isEdgeFlyable(current.pos, neighbor)) continue;
-
-                        double moveCost = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                        double g = current.g + moveCost + nodePenalty(neighbor) + turnPenalty(current, neighbor) + Math.abs(dy) * 0.18;
-                        double h = heuristic(neighbor, goalBlock);
-                        double f = g + h;
-
-                        AStarNode old = openMap.get(neighborKey);
-                        if (old != null && old.g <= g) continue;
-
-                        AStarNode next = new AStarNode(neighbor, current, g, f);
-                        openMap.put(neighborKey, next);
-                        openQueue.add(next);
-                    }
-                }
+            if (bestResult == null || result.bestGoalDistance < bestResult.bestGoalDistance) {
+                bestResult = result;
             }
         }
 
-        if (bestNode != startNode) {
-            currentPath = reconstructPath(bestNode, safeGoal);
+        if (bestResult != null && bestResult.path != null) {
+            currentPath = bestResult.path;
             currentWaypointIndex = 0;
         } else {
             currentPath.clear();
@@ -1050,6 +1037,7 @@ public class AutoWasp extends Module {
     }
 
     private boolean isNodeFlyable(BlockPos center) {
+        if (hasNetherFlightCap() && center.getY() > (int) NETHER_MAX_FLIGHT_Y) return false;
         Vec3d p = Vec3d.ofCenter(center);
         if (!hasPlayerClearance(p)) return false;
 
@@ -1075,6 +1063,168 @@ public class AutoWasp extends Module {
         return open;
     }
 
+    private SearchResult searchPath(BlockPos startBlock, BlockPos goalBlock, Vec3d safeGoal, SearchBounds bounds) {
+        Map<Long, AStarNode> openMap = new HashMap<>();
+        Set<Long> closedSet = new HashSet<>();
+        PriorityQueue<AStarNode> openQueue = new PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+
+        AStarNode startNode = new AStarNode(startBlock, null, 0, heuristic(startBlock, goalBlock));
+        openMap.put(startBlock.asLong(), startNode);
+        openQueue.add(startNode);
+
+        AStarNode bestNode = startNode;
+        double bestDistance = heuristic(startBlock, goalBlock);
+        int nodesExplored = 0;
+
+        while (!openQueue.isEmpty() && nodesExplored < PATH_MAX_NODES) {
+            AStarNode current = openQueue.poll();
+            long currentKey = current.pos.asLong();
+            if (closedSet.contains(currentKey)) continue;
+
+            closedSet.add(currentKey);
+            openMap.remove(currentKey);
+            nodesExplored++;
+
+            double currentDistance = heuristic(current.pos, goalBlock);
+            if (currentDistance < bestDistance) {
+                bestDistance = currentDistance;
+                bestNode = current;
+            }
+
+            if (current.pos.getManhattanDistance(goalBlock) <= PATH_RESOLUTION) {
+                return new SearchResult(reconstructPath(current, safeGoal), true, currentDistance);
+            }
+
+            for (NeighborStep step : NEIGHBOR_STEPS) {
+                BlockPos neighbor = current.pos.add(step.dx, step.dy, step.dz);
+                if (!bounds.contains(neighbor)) continue;
+
+                long neighborKey = neighbor.asLong();
+                if (closedSet.contains(neighborKey)) continue;
+                if (!isNodeFlyable(neighbor)) continue;
+                if (!isEdgeFlyable(current.pos, neighbor)) continue;
+
+                double g = current.g + step.cost + nodePenalty(neighbor) + turnPenalty(current, neighbor) + Math.abs(step.dy) * 0.18;
+                AStarNode old = openMap.get(neighborKey);
+                if (old != null && old.g <= g) continue;
+
+                double h = heuristic(neighbor, goalBlock);
+                AStarNode next = new AStarNode(neighbor, current, g, g + h);
+                openMap.put(neighborKey, next);
+                openQueue.add(next);
+            }
+        }
+
+        List<Vec3d> fallbackPath = bestNode != startNode ? reconstructPath(bestNode, safeGoal) : null;
+        return new SearchResult(fallbackPath, false, bestDistance);
+    }
+
+    private boolean handleMissingTarget() {
+        clearTargetState();
+
+        if (tryAcquireTarget(true)) {
+            info("New target: " + target.getName().getString());
+            return true;
+        }
+
+        if (keepSearching.get()) return false;
+
+        handleTargetLoss();
+        return false;
+    }
+
+    private boolean tryAcquireTarget(boolean useCooldown) {
+        if (useCooldown && targetSearchTimer > 0) return false;
+
+        findTarget();
+        targetSearchTimer = TARGET_SEARCH_TICKS;
+        return target != null;
+    }
+
+    private void clearTargetState() {
+        target = null;
+        currentPath.clear();
+        currentWaypointIndex = 0;
+        pathTimer = 0;
+        lastPathTarget = null;
+        stuckTicks = 0;
+    }
+
+    private void resetNavigationState() {
+        jumpTimer = 0;
+        incrementJumpTimer = false;
+        currentPath.clear();
+        currentWaypointIndex = 0;
+        pathTimer = 0;
+        lastPathTarget = null;
+        lastPlayerPos = mc.player != null ? mc.player.getPos() : null;
+        stuckTicks = 0;
+        adaptiveHorizontalCap = -1;
+        antiCheatSlowTicks = 0;
+        cacheSweepTicks = 0;
+        targetSearchTimer = 0;
+        clearCaches();
+    }
+
+    private boolean hasNetherFlightCap() {
+        return mc.world != null && mc.world.getRegistryKey() == World.NETHER;
+    }
+
+    private boolean shouldTrimCaches() {
+        return clearanceCache.size() > MAX_CACHE_ENTRIES
+            || floorDistanceCache.size() > MAX_CACHE_ENTRIES
+            || ceilingDistanceCache.size() > MAX_CACHE_ENTRIES;
+    }
+
+    private Vec3d clampToDimensionFlightCap(Vec3d pos) {
+        if (!hasNetherFlightCap() || pos.y <= NETHER_MAX_FLIGHT_Y) return pos;
+        return new Vec3d(pos.x, NETHER_MAX_FLIGHT_Y, pos.z);
+    }
+
+    private BlockPos clampToDimensionFlightCap(BlockPos pos) {
+        if (!hasNetherFlightCap() || pos.getY() <= (int) NETHER_MAX_FLIGHT_Y) return pos;
+        return new BlockPos(pos.getX(), (int) NETHER_MAX_FLIGHT_Y, pos.getZ());
+    }
+
+    private SearchBounds createSearchBounds(BlockPos start, BlockPos goal, int attempt) {
+        int dx = Math.abs(start.getX() - goal.getX());
+        int dy = Math.abs(start.getY() - goal.getY());
+        int dz = Math.abs(start.getZ() - goal.getZ());
+        int horizontalSpan = Math.max(dx, dz);
+
+        int horizontalMargin = attempt == 0
+            ? MathHelper.clamp(horizontalSpan / 3 + 8, 8, 20)
+            : MathHelper.clamp(horizontalSpan / 2 + 16, 18, 40);
+        int verticalMargin = attempt == 0
+            ? MathHelper.clamp(dy + 8, 8, 18)
+            : MathHelper.clamp(dy + 14, 14, 32);
+
+        int minX = Math.min(start.getX(), goal.getX()) - horizontalMargin;
+        int maxX = Math.max(start.getX(), goal.getX()) + horizontalMargin;
+        int minY = Math.min(start.getY(), goal.getY()) - verticalMargin;
+        int maxY = Math.max(start.getY(), goal.getY()) + verticalMargin;
+        int minZ = Math.min(start.getZ(), goal.getZ()) - horizontalMargin;
+        int maxZ = Math.max(start.getZ(), goal.getZ()) + horizontalMargin;
+
+        if (hasNetherFlightCap()) maxY = Math.min(maxY, (int) NETHER_MAX_FLIGHT_Y);
+        return new SearchBounds(minX, maxX, minY, maxY, minZ, maxZ);
+    }
+
+    private static NeighborStep[] createNeighborSteps() {
+        List<NeighborStep> steps = new ArrayList<>(26);
+
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    steps.add(new NeighborStep(dx, dy, dz, Math.sqrt(dx * dx + dy * dy + dz * dz)));
+                }
+            }
+        }
+
+        return steps.toArray(new NeighborStep[0]);
+    }
+
     private static class AStarNode {
         final BlockPos pos;
         final AStarNode parent;
@@ -1087,6 +1237,20 @@ public class AutoWasp extends Module {
             this.g = g;
             this.f = f;
         }
+    }
+
+    private record NeighborStep(int dx, int dy, int dz, double cost) {
+    }
+
+    private record SearchBounds(int minX, int maxX, int minY, int maxY, int minZ, int maxZ) {
+        boolean contains(BlockPos pos) {
+            return pos.getX() >= minX && pos.getX() <= maxX
+                && pos.getY() >= minY && pos.getY() <= maxY
+                && pos.getZ() >= minZ && pos.getZ() <= maxZ;
+        }
+    }
+
+    private record SearchResult(List<Vec3d> path, boolean complete, double bestGoalDistance) {
     }
 
     public enum Action {
