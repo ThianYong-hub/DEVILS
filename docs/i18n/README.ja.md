@@ -4,7 +4,7 @@
 
 ## ダウンロード
 
-- 現在のビルド（`v0.0.15`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.21/devils-addon-0.0.21.jar)
+- 現在のビルド（`v0.0.15`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.22/devils-addon-0.0.22.jar)
 - 最新リリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - すべてのリリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases)
 
