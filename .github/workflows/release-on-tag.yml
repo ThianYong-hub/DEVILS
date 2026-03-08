@@ -242,78 +242,103 @@ jobs:
                   return f"{', '.join(components)}: {cleaned}", components
               return cleaned, components
 
-          def build_player_highlight(kind, components, cleaned_subject):
+          def build_module_update(kind, component, cleaned_subject):
               lowered = cleaned_subject.lower()
-              primary = components[0] if components else ""
 
-              if primary == "AutoCev" and "cycle planning" in lowered and "instamine" in lowered:
-                  return (
-                      "More reliable cycle planning and instamine handling. "
-                      "This should reduce stalls during Cev sequences and make switching targets or bases cleaner."
-                  )
+              if component == "AutoCev" and "cycle planning" in lowered and "instamine" in lowered:
+                  return {
+                      "intro": "AutoCev got a reliability-focused update in this release.",
+                      "changes": "Cycle planning and instamine state handling were cleaned up.",
+                      "impact": "This should reduce stalls during Cev sequences and make switching targets or bases cleaner.",
+                      "result": "AutoCev should feel smoother and waste fewer openings mid-fight.",
+                  }
 
-              if primary == "AutoWasp" and "nether flight" in lowered and "pathfinding load" in lowered:
-                  return (
-                      "Stays below the Nether roof limit and uses lighter pathfinding. "
-                      "This should reduce upward-stuck behavior and route-calculation lag on weaker PCs."
-                  )
+              if component == "AutoWasp" and "nether flight" in lowered and "pathfinding load" in lowered:
+                  return {
+                      "intro": "AutoWasp got a stability and performance pass.",
+                      "changes": "It now respects the Nether roof limit and uses lighter pathfinding logic.",
+                      "impact": "This should reduce upward-stuck behavior and route-calculation lag on weaker PCs.",
+                      "result": "Pursuit should be more stable in the Nether and less expensive to run.",
+                  }
 
-              if primary == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
-                  return (
-                      "Handles junk cleanup and restocking more safely. "
-                      "This should reduce failed build cycles and inventory hiccups."
-                  )
-
-              if "reduce pathfinding load" in lowered:
-                  return (
-                      "Lighter pathfinding work. "
-                      "This should reduce route-calculation lag on weaker PCs."
-                  )
+              if component == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
+                  return {
+                      "intro": "HighwayBuilder got a reliability update.",
+                      "changes": "Junk cleanup and restocking flow were tightened up.",
+                      "impact": "This should reduce failed build cycles and inventory hiccups.",
+                      "result": "Highway runs should need less babysitting.",
+                  }
 
               if "instamine" in lowered:
-                  return (
-                      "Improved instamine handling. "
-                      "This should make block-breaking flow more reliable during combat."
-                  )
+                  return {
+                      "intro": f"{component} got a mining-flow update." if component else "This release includes a mining-flow update.",
+                      "changes": "Instamine handling was improved.",
+                      "impact": "This should make block-breaking flow more reliable during combat.",
+                      "result": "",
+                  }
+
+              if "reduce pathfinding load" in lowered:
+                  return {
+                      "intro": f"{component} got a performance-focused update." if component else "This release includes a performance-focused update.",
+                      "changes": "Pathfinding work was reduced.",
+                      "impact": "This should lower route-calculation lag on weaker PCs.",
+                      "result": "",
+                  }
 
               if kind == "fix":
-                  if primary:
-                      return "Bug fixes aimed at making the module more reliable in normal use."
-                  return "Bug fixes aimed at improving reliability during normal play."
+                  return {
+                      "intro": f"{component} got a bug-fix pass." if component else "This release includes bug fixes.",
+                      "changes": "Reliability issues were addressed.",
+                      "impact": "This should make normal use more consistent.",
+                      "result": "",
+                  }
 
               if kind in ("refactor", "perf"):
-                  if primary:
-                      return "Under-the-hood improvements aimed at better stability and smoother behavior."
-                  return "Under-the-hood improvements aimed at better stability and smoother behavior."
+                  return {
+                      "intro": f"{component} got an under-the-hood update." if component else "This release includes under-the-hood improvements.",
+                      "changes": "Internal logic was cleaned up for stability and smoother behavior.",
+                      "impact": "This should make the module feel more consistent during normal use.",
+                      "result": "",
+                  }
 
               if kind == "feat":
-                  if primary:
-                      return "New behavior or expanded functionality for the module."
-                  return "New behavior or expanded functionality in this release."
+                  return {
+                      "intro": f"{component} got new functionality in this release." if component else "This release adds new functionality.",
+                      "changes": "The module gained new behavior or expanded options.",
+                      "impact": "This should give you more flexibility in actual gameplay.",
+                      "result": "",
+                  }
 
-              return ""
+              return None
 
           def build_new_module_highlight(component, cleaned_subject):
-              lowered = cleaned_subject.lower()
               if component == "AutoCev":
-                  return (
-                      "New module or major module addition. "
-                      "Adds automated Cev-style pressure with obsidian, crystal, and instamine cycle handling."
-                  )
+                  return {
+                      "intro": "New module.",
+                      "changes": "Adds automated Cev-style pressure with obsidian, crystal, and instamine cycle handling.",
+                      "impact": "This gives you a ready-to-use aggressive Cev flow instead of doing the sequence manually.",
+                      "result": "",
+                  }
               if component == "AutoWasp":
-                  return (
-                      "New module or major module addition. "
-                      "Adds automated elytra pursuit with obstacle-aware routing."
-                  )
+                  return {
+                      "intro": "New module.",
+                      "changes": "Adds automated elytra pursuit with obstacle-aware routing.",
+                      "impact": "This is meant to keep pressure on moving targets without flying straight into terrain.",
+                      "result": "",
+                  }
               if component == "AntiWasp":
-                  return (
-                      "New module or major module addition. "
-                      "Adds evasive elytra movement patterns to make wasp-style pursuit less effective."
-                  )
-              return (
-                  f"New module added for {component}. "
-                  "See the technical notes below for the implementation details."
-              )
+                  return {
+                      "intro": "New module.",
+                      "changes": "Adds evasive elytra movement patterns to make wasp-style pursuit less effective.",
+                      "impact": "This is meant to make you harder to chase or line up in the air.",
+                      "result": "",
+                  }
+              return {
+                  "intro": "New module.",
+                  "changes": f"Adds {component} to the addon.",
+                  "impact": "See the technical notes below for the implementation details.",
+                  "result": "",
+              }
 
           def push_unique(grouped, key, value):
               if not value:
@@ -321,6 +346,29 @@ jobs:
               grouped.setdefault(key, [])
               if value not in grouped[key]:
                   grouped[key].append(value)
+
+          def render_update_section(lines, title, updates):
+              if not updates:
+                  return
+
+              lines.append(f"### {title}")
+              for component, entries in updates.items():
+                  lines.append(f"**{component}**")
+                  for entry in entries:
+                      intro = entry.get("intro", "").strip()
+                      changes = entry.get("changes", "").strip()
+                      impact = entry.get("impact", "").strip()
+                      result = entry.get("result", "").strip()
+
+                      if intro:
+                          lines.append(intro)
+                      if changes:
+                          lines.append(f"- What changed: {changes}")
+                      if impact:
+                          lines.append(f"- Why it matters: {impact}")
+                      if result:
+                          lines.append(f"- Overall: {result}")
+                      lines.append("")
 
           def normalize_kind(kind, cleaned_subject):
               lowered = cleaned_subject.lower()
@@ -395,7 +443,6 @@ jobs:
               inferred_components, new_modules = infer_components(changed_files)
               formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
               item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
-              player_highlight = build_player_highlight(kind, components, cleaned_subject)
 
               included_commits += 1
 
@@ -404,10 +451,11 @@ jobs:
                       push_unique(new_module_updates, component, build_new_module_highlight(component, cleaned_subject))
               elif components:
                   for component in components:
-                      push_unique(module_updates, component, player_highlight)
-              elif player_highlight:
-                  if player_highlight not in general_updates:
-                      general_updates.append(player_highlight)
+                      push_unique(module_updates, component, build_module_update(kind, component, cleaned_subject))
+              else:
+                  generic_update = build_module_update(kind, "", cleaned_subject)
+                  if generic_update and generic_update not in general_updates:
+                      general_updates.append(generic_update)
 
               if kind == "feat":
                   technical_groups["Features"].append(item)
@@ -432,33 +480,33 @@ jobs:
 
           if included_commits:
               lines.append("### Highlights")
-              lines.append(f"- Included commits: {included_commits}")
               if new_module_updates:
-                  lines.append(f"- New modules: {len(new_module_updates)}")
+                  lines.append(f"- New modules: {', '.join(new_module_updates.keys())}")
               if module_updates:
                   lines.append(f"- Updated modules: {', '.join(module_updates.keys())}")
+              lines.append(f"- Included commits: {included_commits}")
               lines.append("")
 
-          if new_module_updates:
-              lines.append("### New Modules")
-              for component, updates in new_module_updates.items():
-                  lines.append(f"**{component}**")
-                  for update in updates:
-                      lines.append(f"- {update}")
-                  lines.append("")
-
-          if module_updates:
-              lines.append("### Module Updates")
-              for component, updates in module_updates.items():
-                  lines.append(f"**{component}**")
-                  for update in updates:
-                      lines.append(f"- {update}")
-                  lines.append("")
+          render_update_section(lines, "New Modules", new_module_updates)
+          render_update_section(lines, "Module Updates", module_updates)
 
           if general_updates:
               lines.append("### General Improvements")
               for update in general_updates:
-                  lines.append(f"- {update}")
+                  intro = update.get("intro", "").strip()
+                  changes = update.get("changes", "").strip()
+                  impact = update.get("impact", "").strip()
+                  result = update.get("result", "").strip()
+
+                  if intro:
+                      lines.append(intro)
+                  if changes:
+                      lines.append(f"- What changed: {changes}")
+                  if impact:
+                      lines.append(f"- Why it matters: {impact}")
+                  if result:
+                      lines.append(f"- Overall: {result}")
+                  lines.append("")
               lines.append("")
 
           written_any = False
