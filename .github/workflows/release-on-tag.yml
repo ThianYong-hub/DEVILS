@@ -217,6 +217,58 @@ jobs:
                   return f"{', '.join(components)}: {cleaned}", components
               return cleaned, components
 
+          def build_player_highlight(kind, components, cleaned_subject):
+              lowered = cleaned_subject.lower()
+              primary = components[0] if components else ""
+              prefix = f"{primary}: " if primary else ""
+
+              if primary == "AutoCev" and "cycle planning" in lowered and "instamine" in lowered:
+                  return (
+                      f"{prefix}more reliable cycle planning and instamine handling, "
+                      f"so Cev flow should stall less often and switch targets/bases more cleanly."
+                  )
+
+              if primary == "AutoWasp" and "nether flight" in lowered and "pathfinding load" in lowered:
+                  return (
+                      f"{prefix}stays below the Nether roof limit and uses lighter pathfinding, "
+                      f"which should reduce upward-stuck behavior and lag spikes on weaker PCs."
+                  )
+
+              if primary == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
+                  return (
+                      f"{prefix}handles junk cleanup and restocking more safely, "
+                      f"which should reduce failed build cycles and inventory hiccups."
+                  )
+
+              if "reduce pathfinding load" in lowered:
+                  return (
+                      f"{prefix}lighter pathfinding work, "
+                      f"which should reduce route-calculation lag on weaker PCs."
+                  )
+
+              if "instamine" in lowered:
+                  return (
+                      f"{prefix}improved instamine handling, "
+                      f"which should make block-breaking flow more reliable during combat."
+                  )
+
+              if kind == "fix":
+                  if primary:
+                      return f"{prefix}bug fixes aimed at making the module more reliable in normal use."
+                  return "Bug fixes aimed at improving reliability during normal play."
+
+              if kind in ("refactor", "perf"):
+                  if primary:
+                      return f"{prefix}under-the-hood improvements aimed at better stability and smoother behavior."
+                  return "Under-the-hood improvements aimed at better stability and smoother behavior."
+
+              if kind == "feat":
+                  if primary:
+                      return f"{prefix}new behavior or expanded functionality for the module."
+                  return "New behavior or expanded functionality in this release."
+
+              return ""
+
           def normalize_kind(kind, cleaned_subject):
               lowered = cleaned_subject.lower()
               if kind == "feat" and lowered.startswith((
@@ -250,6 +302,7 @@ jobs:
               "Documentation": [],
               "Maintenance": []
           }
+          player_highlights = []
           component_counter = Counter()
           type_counter = Counter()
           included_commits = 0
@@ -288,10 +341,13 @@ jobs:
               inferred_components = infer_components(full_sha)
               formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
               item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
+              player_highlight = build_player_highlight(kind, components, cleaned_subject)
 
               included_commits += 1
               for component in components:
                   component_counter[component] += 1
+              if player_highlight:
+                  player_highlights.append(f"- {player_highlight}")
 
               if kind == "feat":
                   grouped["Features"].append(item)
@@ -341,6 +397,12 @@ jobs:
               if summary_parts:
                   lines.append(f"- Release summary: {', '.join(summary_parts)}")
               lines.append(f"- Included commits: {included_commits}")
+              lines.append("")
+
+          if player_highlights:
+              lines.append("### Player Highlights")
+              deduped_player_highlights = list(dict.fromkeys(player_highlights))
+              lines.extend(deduped_player_highlights)
               lines.append("")
 
           written_any = False
