@@ -119,7 +119,7 @@ jobs:
           import os
           import re
           import subprocess
-          from collections import Counter
+          from collections import OrderedDict
           from pathlib import Path
 
           current_tag = os.environ["CURRENT_TAG"]
@@ -160,27 +160,44 @@ jobs:
                   return raw
               return "".join(piece[:1].upper() + piece[1:] for piece in pieces)
 
-          def infer_components(full_sha):
+          def get_changed_files(full_sha):
               try:
-                  changed_files = run(["git", "show", "--name-only", "--format=", full_sha]).splitlines()
+                  raw_files = run(["git", "show", "--name-status", "--format=", full_sha]).splitlines()
               except subprocess.CalledProcessError:
-                  changed_files = []
+                  raw_files = []
 
-              components = []
-              for changed in changed_files:
-                  changed = changed.strip()
-                  if not changed:
+              changed_files = []
+              for entry in raw_files:
+                  entry = entry.strip()
+                  if not entry:
                       continue
 
-                  if changed.startswith("src/main/java/com/example/addon/modules/"):
-                      components.append(Path(changed).stem)
-                  elif changed.startswith("src/main/java/com/example/addon/mixin/"):
+                  parts = entry.split("\t")
+                  status = parts[0]
+                  path = parts[-1].strip() if len(parts) > 1 else ""
+                  if not path:
+                      continue
+                  changed_files.append((status, path))
+              return changed_files
+
+          def infer_components(changed_files):
+              components = []
+              new_modules = []
+              for changed in changed_files:
+                  status, path = changed
+
+                  if path.startswith("src/main/java/com/example/addon/modules/"):
+                      module_name = Path(path).stem
+                      components.append(module_name)
+                      if status.startswith("A"):
+                          new_modules.append(module_name)
+                  elif path.startswith("src/main/java/com/example/addon/mixin/"):
                       components.append("Mixins")
-                  elif changed.startswith(".github/workflows/"):
+                  elif path.startswith(".github/workflows/"):
                       components.append("Release workflow")
-                  elif changed.startswith("docs/") or changed == "README.md":
+                  elif path.startswith("docs/") or path == "README.md":
                       components.append("Documentation")
-                  elif changed.startswith("src/main/resources/"):
+                  elif path.startswith("src/main/resources/"):
                       components.append("Resources")
 
               unique = []
@@ -191,7 +208,15 @@ jobs:
                       continue
                   seen.add(pretty)
                   unique.append(pretty)
-              return unique
+              unique_new_modules = []
+              seen_new = set()
+              for component in new_modules:
+                  pretty = prettify_component(component)
+                  if not pretty or pretty in seen_new:
+                      continue
+                  seen_new.add(pretty)
+                  unique_new_modules.append(pretty)
+              return unique, unique_new_modules
 
           def trim_components(components):
               generic = {"Mixins", "Resources", "Documentation", "Release workflow"}
@@ -220,54 +245,82 @@ jobs:
           def build_player_highlight(kind, components, cleaned_subject):
               lowered = cleaned_subject.lower()
               primary = components[0] if components else ""
-              prefix = f"{primary}: " if primary else ""
 
               if primary == "AutoCev" and "cycle planning" in lowered and "instamine" in lowered:
                   return (
-                      f"{prefix}more reliable cycle planning and instamine handling, "
-                      f"so Cev flow should stall less often and switch targets/bases more cleanly."
+                      "More reliable cycle planning and instamine handling. "
+                      "This should reduce stalls during Cev sequences and make switching targets or bases cleaner."
                   )
 
               if primary == "AutoWasp" and "nether flight" in lowered and "pathfinding load" in lowered:
                   return (
-                      f"{prefix}stays below the Nether roof limit and uses lighter pathfinding, "
-                      f"which should reduce upward-stuck behavior and lag spikes on weaker PCs."
+                      "Stays below the Nether roof limit and uses lighter pathfinding. "
+                      "This should reduce upward-stuck behavior and route-calculation lag on weaker PCs."
                   )
 
               if primary == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
                   return (
-                      f"{prefix}handles junk cleanup and restocking more safely, "
-                      f"which should reduce failed build cycles and inventory hiccups."
+                      "Handles junk cleanup and restocking more safely. "
+                      "This should reduce failed build cycles and inventory hiccups."
                   )
 
               if "reduce pathfinding load" in lowered:
                   return (
-                      f"{prefix}lighter pathfinding work, "
-                      f"which should reduce route-calculation lag on weaker PCs."
+                      "Lighter pathfinding work. "
+                      "This should reduce route-calculation lag on weaker PCs."
                   )
 
               if "instamine" in lowered:
                   return (
-                      f"{prefix}improved instamine handling, "
-                      f"which should make block-breaking flow more reliable during combat."
+                      "Improved instamine handling. "
+                      "This should make block-breaking flow more reliable during combat."
                   )
 
               if kind == "fix":
                   if primary:
-                      return f"{prefix}bug fixes aimed at making the module more reliable in normal use."
+                      return "Bug fixes aimed at making the module more reliable in normal use."
                   return "Bug fixes aimed at improving reliability during normal play."
 
               if kind in ("refactor", "perf"):
                   if primary:
-                      return f"{prefix}under-the-hood improvements aimed at better stability and smoother behavior."
+                      return "Under-the-hood improvements aimed at better stability and smoother behavior."
                   return "Under-the-hood improvements aimed at better stability and smoother behavior."
 
               if kind == "feat":
                   if primary:
-                      return f"{prefix}new behavior or expanded functionality for the module."
+                      return "New behavior or expanded functionality for the module."
                   return "New behavior or expanded functionality in this release."
 
               return ""
+
+          def build_new_module_highlight(component, cleaned_subject):
+              lowered = cleaned_subject.lower()
+              if component == "AutoCev":
+                  return (
+                      "New module or major module addition. "
+                      "Adds automated Cev-style pressure with obsidian, crystal, and instamine cycle handling."
+                  )
+              if component == "AutoWasp":
+                  return (
+                      "New module or major module addition. "
+                      "Adds automated elytra pursuit with obstacle-aware routing."
+                  )
+              if component == "AntiWasp":
+                  return (
+                      "New module or major module addition. "
+                      "Adds evasive elytra movement patterns to make wasp-style pursuit less effective."
+                  )
+              return (
+                  f"New module added for {component}. "
+                  "See the technical notes below for the implementation details."
+              )
+
+          def push_unique(grouped, key, value):
+              if not value:
+                  return
+              grouped.setdefault(key, [])
+              if value not in grouped[key]:
+                  grouped[key].append(value)
 
           def normalize_kind(kind, cleaned_subject):
               lowered = cleaned_subject.lower()
@@ -295,16 +348,16 @@ jobs:
               r"^fix_readme_sync",
           ]
 
-          grouped = {
+          technical_groups = {
               "Features": [],
               "Fixes": [],
               "Improvements": [],
               "Documentation": [],
               "Maintenance": []
           }
-          player_highlights = []
-          component_counter = Counter()
-          type_counter = Counter()
+          module_updates = OrderedDict()
+          new_module_updates = OrderedDict()
+          general_updates = []
           included_commits = 0
 
           prefix_re = re.compile(
@@ -338,32 +391,34 @@ jobs:
 
               kind = normalize_kind(kind, cleaned_subject)
 
-              inferred_components = infer_components(full_sha)
+              changed_files = get_changed_files(full_sha)
+              inferred_components, new_modules = infer_components(changed_files)
               formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
               item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
               player_highlight = build_player_highlight(kind, components, cleaned_subject)
 
               included_commits += 1
-              for component in components:
-                  component_counter[component] += 1
-              if player_highlight:
-                  player_highlights.append(f"- {player_highlight}")
+
+              if new_modules:
+                  for component in new_modules:
+                      push_unique(new_module_updates, component, build_new_module_highlight(component, cleaned_subject))
+              elif components:
+                  for component in components:
+                      push_unique(module_updates, component, player_highlight)
+              elif player_highlight:
+                  if player_highlight not in general_updates:
+                      general_updates.append(player_highlight)
 
               if kind == "feat":
-                  grouped["Features"].append(item)
-                  type_counter["feature"] += 1
+                  technical_groups["Features"].append(item)
               elif kind == "fix":
-                  grouped["Fixes"].append(item)
-                  type_counter["fix"] += 1
+                  technical_groups["Fixes"].append(item)
               elif kind in ("refactor", "perf"):
-                  grouped["Improvements"].append(item)
-                  type_counter["improvement"] += 1
+                  technical_groups["Improvements"].append(item)
               elif kind == "docs":
-                  grouped["Documentation"].append(item)
-                  type_counter["documentation"] += 1
+                  technical_groups["Documentation"].append(item)
               else:
-                  grouped["Maintenance"].append(item)
-                  type_counter["maintenance"] += 1
+                  technical_groups["Maintenance"].append(item)
 
           lines = []
           lines.append(f"## {current_tag}")
@@ -377,41 +432,42 @@ jobs:
 
           if included_commits:
               lines.append("### Highlights")
-              if component_counter:
-                  ordered_components = [name for name, _count in component_counter.most_common()]
-                  lines.append(f"- Updated areas: {', '.join(ordered_components)}")
-
-              summary_parts = []
-              for key, singular, plural in (
-                  ("feature", "feature", "features"),
-                  ("fix", "fix", "fixes"),
-                  ("improvement", "improvement", "improvements"),
-                  ("documentation", "documentation change", "documentation changes"),
-                  ("maintenance", "maintenance change", "maintenance changes"),
-              ):
-                  count = type_counter.get(key, 0)
-                  if count:
-                      suffix = singular if count == 1 else plural
-                      summary_parts.append(f"{count} {suffix}")
-
-              if summary_parts:
-                  lines.append(f"- Release summary: {', '.join(summary_parts)}")
               lines.append(f"- Included commits: {included_commits}")
+              if new_module_updates:
+                  lines.append(f"- New modules: {len(new_module_updates)}")
+              if module_updates:
+                  lines.append(f"- Updated modules: {', '.join(module_updates.keys())}")
               lines.append("")
 
-          if player_highlights:
-              lines.append("### Player Highlights")
-              deduped_player_highlights = list(dict.fromkeys(player_highlights))
-              lines.extend(deduped_player_highlights)
+          if new_module_updates:
+              lines.append("### New Modules")
+              for component, updates in new_module_updates.items():
+                  lines.append(f"**{component}**")
+                  for update in updates:
+                      lines.append(f"- {update}")
+                  lines.append("")
+
+          if module_updates:
+              lines.append("### Module Updates")
+              for component, updates in module_updates.items():
+                  lines.append(f"**{component}**")
+                  for update in updates:
+                      lines.append(f"- {update}")
+                  lines.append("")
+
+          if general_updates:
+              lines.append("### General Improvements")
+              for update in general_updates:
+                  lines.append(f"- {update}")
               lines.append("")
 
           written_any = False
           for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
-              entries = grouped[title]
+              entries = technical_groups[title]
               if not entries:
                   continue
               written_any = True
-              lines.append(f"### {title}")
+              lines.append(f"### Technical Notes: {title}")
               lines.extend(entries)
               lines.append("")
 
