@@ -4,6 +4,7 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "ClientConnectionMixin",
+    "ClientPlayerInteractionManagerAccessor",
     "ExampleMixin",
     "AnvilScreenHandlerAccessor",
     "PlayerInteractEntityC2SPacketAccessor",

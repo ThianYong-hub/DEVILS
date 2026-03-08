@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.mixin.ClientPlayerInteractionManagerAccessor;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -23,12 +24,13 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
@@ -36,17 +38,15 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.shape.VoxelShape;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayDeque;
+import java.util.Deque;
 
 public class AutoCev extends Module {
     private static final Direction[] CARDINAL = { Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST };
     private static final int ROTATE_PRIORITY = 50;
-    private static final int CRYSTAL_RETRY_TICKS = 2;
-    private static final int VANILLA_POST_BREAK_WAIT_TICKS = 0;
-    private static final int INSTA_POST_BREAK_WAIT_TICKS = 0;
-    private static final double CRYSTAL_SEARCH_RADIUS_SQ = 9.0;
+    private static final int DEBUG_LOG_LIMIT = 40;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
 
@@ -72,36 +72,36 @@ public class AutoCev extends Module {
 
     private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
         .name("rotate")
-        .description("Rotate before place/mine/attack.")
+        .description("Rotate before place, mine and attack.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Boolean> swingHand = sgGeneral.add(new BoolSetting.Builder()
         .name("swing-hand")
-        .description("Swing hand while interacting.")
+        .description("Swing hand while placing or attacking.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Boolean> pauseOnEat = sgGeneral.add(new BoolSetting.Builder()
         .name("pause-on-eat")
-        .description("Pauses while eating/drinking or using items.")
+        .description("Pause while eating, drinking or using items.")
         .defaultValue(true)
         .build()
     );
 
     private final Setting<Boolean> pauseOnSword = sgGeneral.add(new BoolSetting.Builder()
         .name("pause-on-sword")
-        .description("Pauses while holding a sword.")
+        .description("Pause while holding a sword.")
         .defaultValue(false)
         .build()
     );
 
     private final Setting<MineMode> mineMode = sgGeneral.add(new EnumSetting.Builder<MineMode>()
         .name("mine-mode")
-        .description("Vanilla: mines obsidian itself. Insta: sends one start-mine per block and waits for external instamine.")
-        .defaultValue(MineMode.Vanilla)
+        .description("Vanilla mines the block itself. Insta only starts mining for an external instamine.")
+        .defaultValue(MineMode.Insta)
         .build()
     );
 
@@ -112,35 +112,35 @@ public class AutoCev extends Module {
         .build()
     );
 
+    private final Setting<Boolean> debugClipboard = sgGeneral.add(new BoolSetting.Builder()
+        .name("debug-clipboard")
+        .description("Copies important AutoCev actions to the clipboard.")
+        .defaultValue(false)
+        .build()
+    );
+
     private PlayerEntity target;
     private String targetId;
     private BlockPos activeBase;
-    private boolean activeFallback;
-
-    private BlockPos preferredBase;
-    private boolean preferredFallback;
-
-    private boolean crystalPlacedInCycle;
-    private int crystalRetryTicks;
-    private int postBreakTicks;
-
-    private BlockPos instaMarksBase;
-    private final Set<BlockPos> instaMinedBlocks = new HashSet<>();
-    private MineMode lastMineMode;
+    private PlanType activeType;
+    private BlockPos lockedFaceBase;
+    private BlockPos lockedHeadMineBase;
+    private BlockPos instaMinePos;
+    private final Deque<String> debugLines = new ArrayDeque<>();
+    private int debugCounter;
 
     public AutoCev() {
-        super(AddonTemplate.CATEGORY, "auto-cev", "Automatically places obsidian, end crystals and breaks the base to damage nearby players.");
+        super(AddonTemplate.CATEGORY, "auto-cev", "Places obsidian and crystals for a simple, aggressive cev cycle.");
     }
 
     @Override
     public void onActivate() {
-        lastMineMode = mineMode.get();
-        resetAll();
+        resetState();
     }
 
     @Override
     public void onDeactivate() {
-        resetAll();
+        resetState();
     }
 
     @EventHandler
@@ -152,41 +152,68 @@ public class AutoCev extends Module {
         if (mc.player == null || mc.world == null || mc.interactionManager == null) return;
         if (PlayerUtils.shouldPause(false, pauseOnEat.get(), pauseOnEat.get())) return;
         if (pauseOnSword.get() && mc.player.getMainHandStack().isIn(ItemTags.SWORDS)) return;
-        if (lastMineMode != mineMode.get()) {
-            clearInstaState();
-            lastMineMode = mineMode.get();
-        }
 
         target = selectTarget();
         if (target == null) {
-            resetAll();
+            debug("no target -> reset");
+            resetState();
             return;
         }
 
         String id = target.getUuidAsString();
-        if (targetId == null || !targetId.equals(id)) {
+        if (!id.equals(targetId)) {
+            debug("target changed -> " + target.getName().getString());
             targetId = id;
-            preferredBase = null;
-            preferredFallback = false;
-            clearInstaState();
-            resetCycle();
+            activeBase = null;
+            activeType = null;
+            lockedFaceBase = null;
+            lockedHeadMineBase = null;
+            instaMinePos = null;
         }
 
-        if (activeBase != null && tickCycle()) return;
-
-        BaseChoice choice = chooseBase(target);
-        if (choice == null) return;
-
-        BlockState state = mc.world.getBlockState(choice.pos());
-        if (state.isOf(Blocks.OBSIDIAN)) {
-            startCycle(choice);
-            tickCycle();
+        CyclePlan head = chooseHeadPlan(target);
+        CyclePlan plan = choosePlan(target);
+        if (plan == null) {
+            if ((activeType == PlanType.HEAD || activeType == PlanType.HEAD_CLEAR || activeType == PlanType.HEAD_BLOCKER) && lockedHeadMineBase != null) {
+                debug("no plan -> keep head lock " + formatPos(lockedHeadMineBase));
+                return;
+            }
+            debug("no plan for " + target.getName().getString() + " head=" + planSummary(head));
+            activeBase = null;
+            activeType = null;
+            lockedFaceBase = null;
+            lockedHeadMineBase = null;
+            instaMinePos = null;
             return;
         }
 
-        if (state.isAir() || state.isReplaceable()) {
-            placeObsidian(choice);
+        if (plan.type() == PlanType.FACE && head != null && head.type() == PlanType.HEAD_BLOCKER) {
+            if (lockedFaceBase == null || !lockedFaceBase.equals(plan.pos())) instaMinePos = null;
+            lockedFaceBase = plan.pos().toImmutable();
+            debug("lock face base -> " + formatPos(lockedFaceBase) + " head=" + planSummary(head));
+        } else if (plan.type() == PlanType.HEAD) {
+            if (lockedFaceBase != null) debug("unlock face base -> head open");
+            lockedFaceBase = null;
         }
+
+        boolean keepsHeadMineLock = (plan.type() == PlanType.HEAD || plan.type() == PlanType.HEAD_CLEAR || plan.type() == PlanType.HEAD_BLOCKER)
+            && lockedHeadMineBase != null
+            && lockedHeadMineBase.equals(plan.pos());
+        if (!keepsHeadMineLock) {
+            if (lockedHeadMineBase != null) {
+                debug("unlock head mine -> " + formatPos(lockedHeadMineBase));
+            }
+            lockedHeadMineBase = null;
+        }
+
+        if (activeBase == null || !activeBase.equals(plan.pos())) {
+            if (instaMinePos != null) debug("clear insta pos -> active base changed from " + formatPos(activeBase) + " to " + formatPos(plan.pos()));
+            instaMinePos = null;
+        }
+        activeBase = plan.pos();
+        activeType = plan.type();
+        debug("plan -> " + planSummary(plan));
+        executePlan(plan);
     }
 
     private PlayerEntity selectTarget() {
@@ -195,185 +222,247 @@ public class AutoCev extends Module {
             if (player == mc.player) return false;
             if (player.isDead() || player.getHealth() <= 0) return false;
             if (Friends.get().isFriend(player)) return false;
+            if (isPlayerInBlocks(player)) return false;
             return mc.player.distanceTo(player) <= targetRange.get();
         }, SortPriority.LowestDistance);
     }
 
-    private boolean tickCycle() {
-        if (activeBase == null || target == null) {
-            resetCycle();
-            return false;
+    private CyclePlan choosePlan(PlayerEntity player) {
+        CyclePlan head = chooseHeadPlan(player);
+        CyclePlan active = getActivePlan(player);
+        CyclePlan lockedHead = getLockedHeadPlan(player);
+        CyclePlan openFace = chooseOpenFacePlan(player);
+        CyclePlan lockedFace = getLockedFacePlan(player);
+
+        if (lockedHead != null) return lockedHead;
+        if (head != null && head.type() == PlanType.HEAD_CLEAR) return head;
+        if (head != null && head.type() == PlanType.HEAD_BLOCKER) {
+            if (lockedFace != null) return lockedFace;
+            if (openFace != null) return preferActive(openFace, active);
+            if (lockedFaceBase != null) debug("clear face lock -> no open face, use head blocker");
+            lockedFaceBase = null;
+            return head;
         }
+        if (lockedFace != null) return lockedFace;
 
-        if (activeFallback) {
-            BaseChoice topChoice = chooseTopPriorityBase(target);
-            if (topChoice != null && !topChoice.pos().equals(activeBase)) {
-                resetCycle();
-                return trySwitchToBase(topChoice);
-            }
-        }
-
-        BlockState state = mc.world.getBlockState(activeBase);
-        EndCrystalEntity crystal = findCrystalAt(activeBase);
-
-        if (state.isOf(Blocks.OBSIDIAN)) {
-            postBreakTicks = 0;
-
-            if (crystal != null) {
-                crystalPlacedInCycle = true;
-                crystalRetryTicks = 0;
-
-                if (!antiSuicide(crystal.getPos())) return true;
-
-                if (mineMode.get() == MineMode.Vanilla) mineObsidian(activeBase);
-                else tickInstaMine(activeBase);
-                return true;
-            }
-
-            if (crystalRetryTicks > 0) {
-                crystalRetryTicks--;
-                return true;
-            }
-
-            if (!canPlaceCrystalAt(activeBase)) {
-                BlockerType blockerType = getBlockerType(activeBase);
-
-                if (blockerType == BlockerType.Obsidian) {
-                    if (!activeFallback && isTopBase(activeBase, target)) {
-                        BaseChoice openFace = chooseOpenFaceBase(target, activeBase);
-                        if (openFace != null && trySwitchToBase(openFace)) return true;
-                    }
-
-                    mineCrystalBlocker(activeBase);
-                    return true;
-                }
-
-                // Keep strict head priority: if current base is top and there is no obsidian blocker,
-                // do not switch to face on temporary crystal-space conflicts.
-                if (!activeFallback && isTopBase(activeBase, target)) {
-                    if (blockerType == BlockerType.Other) {
-                        BaseChoice alternative = chooseUnblockedBase(target, activeBase);
-                        if (alternative != null && trySwitchToBase(alternative)) return true;
-                    }
-                    return true;
-                }
-
-                BaseChoice alternative = chooseUnblockedBase(target, activeBase);
-                if (alternative != null && trySwitchToBase(alternative)) return true;
-
-                resetCycle();
-                return false;
-            }
-
-            if (!antiSuicide(crystalCenter(activeBase))) return true;
-
-            if (placeCrystal(activeBase)) {
-                crystalPlacedInCycle = true;
-                crystalRetryTicks = CRYSTAL_RETRY_TICKS;
-
-                if (mineMode.get() == MineMode.Vanilla) mineObsidian(activeBase);
-                else tickInstaMine(activeBase);
-            } else {
-                crystalRetryTicks = CRYSTAL_RETRY_TICKS;
-            }
-
-            return true;
-        }
-
-        if (state.isAir() || state.isReplaceable()) {
-            if (crystal != null) {
-                if (antiSuicide(crystal.getPos())) {
-                    crystalPlacedInCycle = true;
-                    postBreakTicks = 0;
-                    attackCrystal(crystal);
-                }
-                return true;
-            }
-
-            if (!crystalPlacedInCycle) {
-                resetCycle();
-                return false;
-            }
-
-            int waitTicks = mineMode.get() == MineMode.Insta ? INSTA_POST_BREAK_WAIT_TICKS : VANILLA_POST_BREAK_WAIT_TICKS;
-            if (postBreakTicks < waitTicks) {
-                postBreakTicks++;
-                return true;
-            }
-
-            resetCycle();
-            return false;
-        }
-
-        resetCycle();
-        return false;
-    }
-
-    private BaseChoice chooseBase(PlayerEntity player) {
-        if (player == null || mc.player == null || mc.world == null) return null;
-
-        BaseChoice topChoice = chooseTopPriorityBase(player);
-        if (topChoice != null) return topChoice;
-
-        BaseChoice preferred = choosePreferredBase(player);
-        if (preferred != null) return preferred;
-
-        BlockPos fallback = chooseFallbackBase(player);
-        if (fallback != null) return new BaseChoice(fallback, true);
-
+        if (head != null && head.type() == PlanType.HEAD) return preferActive(head, active);
+        if (active != null && active.type() == PlanType.FACE) return active;
+        if (openFace != null) return preferActive(openFace, active);
+        if (head != null && head.type() == PlanType.HEAD_BLOCKER) return head;
         return null;
     }
 
-    private BaseChoice chooseTopPriorityBase(PlayerEntity player) {
-        if (player == null || mc.player == null || mc.world == null) return null;
+    private CyclePlan chooseHeadPlan(PlayerEntity player) {
+        BlockPos pos = getTopBase(player);
+        if (pos == null) return null;
 
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int headY = MathHelper.floor(player.getBoundingBox().maxY);
-        BlockPos top = new BlockPos(x, headY + 1, z);
-
-        if (!isUsableBase(top, player, false)) return null;
-        BlockerType blockerType = getBlockerType(top);
-        if (blockerType == BlockerType.Other) return null;
-        if (blockerType == BlockerType.Obsidian && chooseOpenFaceBase(player, null) != null) return null;
-        return new BaseChoice(top, false);
+        SpaceState state = getSpaceStateForBase(pos, player);
+        if (state == SpaceState.OPEN) return new CyclePlan(pos.toImmutable(), PlanType.HEAD, score(pos));
+        if (state == SpaceState.OBSIDIAN_BLOCKER) return new CyclePlan(pos.toImmutable(), PlanType.HEAD_BLOCKER, score(pos));
+        if (state == SpaceState.ITEM_BLOCKER && mc.world != null && mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) {
+            return new CyclePlan(pos.toImmutable(), PlanType.HEAD_CLEAR, score(pos));
+        }
+        return null;
     }
 
-    private BaseChoice choosePreferredBase(PlayerEntity player) {
-        if (player == null || mc.player == null || mc.world == null) return null;
-        if (preferredBase == null) return null;
+    private CyclePlan getActivePlan(PlayerEntity player) {
+        if (activeBase == null || activeType == null) return null;
 
-        if (!isPreferredStillRelevant(preferredBase, player)) {
-            preferredBase = null;
-            preferredFallback = false;
-            return null;
-        }
-
-        if (!(isUsableBase(preferredBase, player, true) || isBlockedObsidianBase(preferredBase, player))) {
-            preferredBase = null;
-            preferredFallback = false;
-            return null;
-        }
-
-        if (preferredFallback && isBlockedObsidianBase(preferredBase, player) && chooseOpenFaceBase(player, preferredBase) != null) {
-            preferredBase = null;
-            preferredFallback = false;
-            return null;
-        }
-
-        return new BaseChoice(preferredBase, preferredFallback);
+        return switch (activeType) {
+            case HEAD -> {
+                CyclePlan head = chooseHeadPlan(player);
+                yield head != null && head.type() == PlanType.HEAD && head.pos().equals(activeBase) ? head : null;
+            }
+            case HEAD_CLEAR -> {
+                CyclePlan head = chooseHeadPlan(player);
+                yield head != null && head.type() == PlanType.HEAD_CLEAR && head.pos().equals(activeBase) ? head : null;
+            }
+            case FACE -> {
+                SpaceState state = getSpaceStateForBase(activeBase, player);
+                yield state == SpaceState.OPEN ? new CyclePlan(activeBase.toImmutable(), PlanType.FACE, score(activeBase) - 1e-3) : null;
+            }
+            case HEAD_BLOCKER -> {
+                CyclePlan head = chooseHeadPlan(player);
+                yield head != null && head.type() == PlanType.HEAD_BLOCKER && head.pos().equals(activeBase) ? head : null;
+            }
+        };
     }
 
-    private boolean isPreferredStillRelevant(BlockPos pos, PlayerEntity player) {
-        if (pos == null || player == null) return false;
+    private CyclePlan getLockedFacePlan(PlayerEntity player) {
+        if (lockedFaceBase == null || player == null || mc.world == null) return null;
+        if (!isRelevantBase(lockedFaceBase, player)) {
+            lockedFaceBase = null;
+            return null;
+        }
 
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int headY = MathHelper.floor(player.getBoundingBox().maxY);
-        if (pos.equals(new BlockPos(x, headY + 1, z))) return true;
+        BlockState state = mc.world.getBlockState(lockedFaceBase);
+        if (state.isOf(Blocks.BEDROCK) || (!state.isOf(Blocks.OBSIDIAN) && !state.isAir() && !state.isReplaceable())) {
+            lockedFaceBase = null;
+            return null;
+        }
+
+        return new CyclePlan(lockedFaceBase.toImmutable(), PlanType.FACE, score(lockedFaceBase) - 1e-3);
+    }
+
+    private CyclePlan getLockedHeadPlan(PlayerEntity player) {
+        if (lockedHeadMineBase == null || player == null || mc.world == null) return null;
+        if (activeType != PlanType.HEAD && activeType != PlanType.HEAD_CLEAR && activeType != PlanType.HEAD_BLOCKER) return null;
+        if (!isTopBase(lockedHeadMineBase, player)) return null;
+
+        BlockState state = mc.world.getBlockState(lockedHeadMineBase);
+        if (state.isOf(Blocks.BEDROCK) || (!state.isOf(Blocks.OBSIDIAN) && !state.isAir() && !state.isReplaceable())) return null;
+
+        CyclePlan head = chooseHeadPlan(player);
+        if (head != null && head.pos().equals(lockedHeadMineBase)) {
+            return new CyclePlan(lockedHeadMineBase.toImmutable(), head.type(), score(lockedHeadMineBase) - 1e-3);
+        }
+
+        return new CyclePlan(lockedHeadMineBase.toImmutable(), PlanType.HEAD, score(lockedHeadMineBase) - 1e-3);
+    }
+
+    private CyclePlan chooseOpenFacePlan(PlayerEntity player) {
+        if (player == null || mc.player == null || mc.world == null) return null;
 
         int faceY = MathHelper.floor(player.getEyeY());
-        BlockPos center = new BlockPos(x, faceY, z);
+        BlockPos center = new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
+
+        CyclePlan best = null;
+        for (Direction dir : CARDINAL) {
+            BlockPos pos = center.offset(dir);
+            if (!isFreshFaceBase(pos)) continue;
+            SpaceState state = getSpaceStateForBase(pos, player);
+            if (state != SpaceState.OPEN) continue;
+
+            CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, score(pos));
+
+            if (best == null || plan.score() < best.score()) best = plan;
+        }
+
+        return best;
+    }
+
+    private CyclePlan preferActive(CyclePlan candidate, CyclePlan active) {
+        if (candidate == null) return active;
+        if (active == null) return candidate;
+        if (!candidate.pos().equals(active.pos())) return candidate;
+        return active;
+    }
+
+    private SpaceState getSpaceStateForBase(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null || mc.player == null || mc.world == null) return SpaceState.INVALID;
+        if (!isRelevantBase(pos, player)) return SpaceState.INVALID;
+        if (!canOccupyBase(pos, player)) return SpaceState.INVALID;
+
+        BlockState state = mc.world.getBlockState(pos);
+        if (state.isOf(Blocks.BEDROCK)) return SpaceState.INVALID;
+        if (!(state.isOf(Blocks.OBSIDIAN) || state.isAir() || state.isReplaceable())) return SpaceState.INVALID;
+
+        return getSpaceState(pos);
+    }
+
+    private double score(BlockPos pos) {
+        if (mc.player == null || pos == null) return Double.MAX_VALUE;
+        double score = mc.player.squaredDistanceTo(Vec3d.ofCenter(pos));
+        if (activeBase != null && activeBase.equals(pos)) score -= 1e-3;
+        return score;
+    }
+
+    private boolean baseNeedsPlacement(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isAir() || state.isReplaceable();
+    }
+
+    private boolean isFreshFaceBase(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
+        if (lockedFaceBase != null && lockedFaceBase.equals(pos)) return true;
+
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isAir() || state.isReplaceable();
+    }
+
+    private void executePlan(CyclePlan plan) {
+        if (plan == null || mc.player == null || mc.world == null) return;
+
+        switch (plan.type()) {
+            case HEAD, FACE -> executeCyclePlan(plan);
+            case HEAD_CLEAR -> executeHeadClearPlan(plan);
+            case HEAD_BLOCKER -> executeHeadBlockerPlan(plan);
+        }
+    }
+
+    private void executeHeadClearPlan(CyclePlan plan) {
+        if (plan == null || mc.world == null) return;
+        if (!mc.world.getBlockState(plan.pos()).isOf(Blocks.OBSIDIAN)) return;
+
+        if (mineMode.get() == MineMode.Insta && lockedHeadMineBase != null && lockedHeadMineBase.equals(plan.pos())) {
+            debug("head clear -> keep external mine " + formatPos(plan.pos()));
+            return;
+        }
+
+        debug("head clear -> mine base " + formatPos(plan.pos()));
+        mineBase(plan.pos());
+    }
+
+    private void executeCyclePlan(CyclePlan plan) {
+        if (plan == null || mc.player == null || mc.world == null) return;
+
+        BlockState state = mc.world.getBlockState(plan.pos());
+        EndCrystalEntity crystal = findCrystalAt(plan.pos());
+
+        if (state.isOf(Blocks.OBSIDIAN)) {
+            if (crystal != null) {
+                if (antiSuicide(crystal.getPos())) mineBase(plan.pos());
+                return;
+            }
+
+            if (!antiSuicide(crystalCenter(plan.pos()))) return;
+
+            if (placeCrystal(plan.pos())) mineBase(plan.pos());
+            return;
+        }
+
+        if (!state.isAir() && !state.isReplaceable()) return;
+
+        if (crystal != null) {
+            if (antiSuicide(crystal.getPos())) attackCrystal(crystal);
+            return;
+        }
+
+        if (getSpaceStateForBase(plan.pos(), target) != SpaceState.OPEN) return;
+        if (placeObsidian(plan.pos())) tryContinueCycleSameTick(plan);
+    }
+
+    private void executeHeadBlockerPlan(CyclePlan plan) {
+        if (plan == null || mc.world == null || target == null) return;
+
+        if (mineCrystalBlocker(plan.pos())) return;
+
+        if (baseNeedsPlacement(plan.pos())) {
+            debug("head blocker setup -> place obsidian " + formatPos(plan.pos()));
+            if (placeObsidian(plan.pos())) {
+                tryContinueCycleSameTick(new CyclePlan(plan.pos(), PlanType.HEAD, score(plan.pos())));
+            }
+            return;
+        }
+    }
+
+    private BlockPos getTopBase(PlayerEntity player) {
+        if (player == null) return null;
+        return new BlockPos(player.getBlockX(), MathHelper.floor(player.getBoundingBox().maxY) + 1, player.getBlockZ());
+    }
+
+    private boolean isTopBase(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return false;
+        return pos.equals(getTopBase(player));
+    }
+
+    private boolean isRelevantBase(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return false;
+        if (isTopBase(pos, player)) return true;
+
+        int faceY = MathHelper.floor(player.getEyeY());
+        BlockPos center = new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
         for (Direction dir : CARDINAL) {
             if (pos.equals(center.offset(dir))) return true;
         }
@@ -381,147 +470,9 @@ public class AutoCev extends Module {
         return false;
     }
 
-    private boolean isTopBase(BlockPos pos, PlayerEntity player) {
-        if (pos == null || player == null) return false;
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int headY = MathHelper.floor(player.getBoundingBox().maxY);
-        return pos.equals(new BlockPos(x, headY + 1, z));
-    }
-
-    private BlockPos chooseFallbackBase(PlayerEntity player) {
-        if (player == null || mc.player == null || mc.world == null) return null;
-
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int faceY = MathHelper.floor(player.getEyeY());
-
-        BlockPos center = new BlockPos(x, faceY, z);
-        BlockPos bestOpen = null;
-        double bestOpenScore = Double.MAX_VALUE;
-        BlockPos bestBlocked = null;
-        double bestBlockedScore = Double.MAX_VALUE;
-        boolean preferSticky = preferredBase != null && preferredFallback && isPreferredStillRelevant(preferredBase, player);
-
-        for (Direction dir : CARDINAL) {
-            BlockPos candidate = center.offset(dir);
-            boolean open = isUsableBase(candidate, player, true);
-            boolean blocked = !open && isBlockedObsidianBase(candidate, player);
-            if (!open && !blocked) continue;
-
-            double score = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
-            if (preferSticky && candidate.equals(preferredBase)) score -= 1e-3;
-
-            if (open) {
-                if (score < bestOpenScore) {
-                    bestOpenScore = score;
-                    bestOpen = candidate;
-                }
-            } else if (score < bestBlockedScore) {
-                bestBlockedScore = score;
-                bestBlocked = candidate;
-            }
-        }
-
-        return bestOpen != null ? bestOpen : bestBlocked;
-    }
-
-    private BaseChoice chooseUnblockedBase(PlayerEntity player, BlockPos exclude) {
-        if (player == null || mc.player == null || mc.world == null) return null;
-
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int headY = MathHelper.floor(player.getBoundingBox().maxY);
-        BlockPos top = new BlockPos(x, headY + 1, z);
-        if (!top.equals(exclude) && isUsableBase(top, player, true)) return new BaseChoice(top, false);
-
-        if (preferredBase != null
-            && !preferredBase.equals(exclude)
-            && isPreferredStillRelevant(preferredBase, player)
-            && isUsableBase(preferredBase, player, true)) {
-            return new BaseChoice(preferredBase, preferredFallback);
-        }
-
-        int faceY = MathHelper.floor(player.getEyeY());
-        BlockPos center = new BlockPos(x, faceY, z);
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-
-        for (Direction dir : CARDINAL) {
-            BlockPos candidate = center.offset(dir);
-            if (candidate.equals(exclude)) continue;
-            if (!isUsableBase(candidate, player, true)) continue;
-
-            double distance = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = candidate;
-            }
-        }
-
-        if (best != null) return new BaseChoice(best, true);
-        return null;
-    }
-
-    private BaseChoice chooseOpenFaceBase(PlayerEntity player, BlockPos exclude) {
-        if (player == null || mc.player == null || mc.world == null) return null;
-
-        int x = player.getBlockX();
-        int z = player.getBlockZ();
-        int faceY = MathHelper.floor(player.getEyeY());
-        BlockPos center = new BlockPos(x, faceY, z);
-
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-
-        for (Direction dir : CARDINAL) {
-            BlockPos candidate = center.offset(dir);
-            if (exclude != null && candidate.equals(exclude)) continue;
-            if (!isUsableBase(candidate, player, true)) continue;
-
-            double distance = mc.player.squaredDistanceTo(Vec3d.ofCenter(candidate));
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                best = candidate;
-            }
-        }
-
-        if (best != null) return new BaseChoice(best, true);
-        return null;
-    }
-
-    private boolean trySwitchToBase(BaseChoice choice) {
-        if (choice == null || mc.world == null) return false;
-
-        BlockState state = mc.world.getBlockState(choice.pos());
-        if (state.isOf(Blocks.OBSIDIAN)) {
-            startCycle(choice);
-            tickCycle();
-            return true;
-        }
-
-        if (state.isAir() || state.isReplaceable()) {
-            return placeObsidian(choice);
-        }
-
-        return false;
-    }
-
-    private boolean isBlockedObsidianBase(BlockPos pos, PlayerEntity player) {
-        if (pos == null || player == null || mc.world == null) return false;
-
-        return mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)
-            && isUsableBase(pos, player, false)
-            && getBlockerType(pos) != BlockerType.Other;
-    }
-
-    private boolean isUsableBase(BlockPos pos, PlayerEntity player, boolean requireCrystalSpace) {
+    private boolean canOccupyBase(BlockPos pos, PlayerEntity player) {
         if (pos == null || player == null || mc.player == null || mc.world == null) return false;
         if (mc.world.isOutOfHeightLimit(pos.getY()) || mc.world.isOutOfHeightLimit(pos.getY() + 2)) return false;
-
-        BlockState state = mc.world.getBlockState(pos);
-        if (state.isOf(Blocks.BEDROCK)) return false;
-        if (!(state.isOf(Blocks.OBSIDIAN) || state.isAir() || state.isReplaceable())) return false;
 
         Box blockBox = new Box(pos);
         if (player.getBoundingBox().intersects(blockBox)) return false;
@@ -532,17 +483,32 @@ public class AutoCev extends Module {
             return false;
         }
 
-        return !requireCrystalSpace || hasCrystalSpace(pos);
+        return true;
     }
 
-    private boolean hasCrystalSpace(BlockPos base) {
-        if (base == null || mc.world == null) return false;
-        if (!mc.world.getBlockState(base.up()).isAir()) return false;
-        if (!mc.world.getBlockState(base.up(2)).isAir()) return false;
+    private SpaceState getSpaceState(BlockPos base) {
+        if (base == null || mc.world == null) return SpaceState.INVALID;
+        if (findCrystalAt(base) != null) return SpaceState.OPEN;
+
+        BlockState up1 = mc.world.getBlockState(base.up());
+        BlockState up2 = mc.world.getBlockState(base.up(2));
+
+        boolean obsidianBlocker = false;
+        boolean itemBlocker = false;
+
+        if (!up1.isAir()) {
+            if (up1.isOf(Blocks.OBSIDIAN)) obsidianBlocker = true;
+            else return SpaceState.OTHER_BLOCKER;
+        }
+
+        if (!up2.isAir()) {
+            if (up2.isOf(Blocks.OBSIDIAN)) obsidianBlocker = true;
+            else return SpaceState.OTHER_BLOCKER;
+        }
 
         Box crystalBox = new Box(
             base.getX(),
-            base.getY() + 1,
+            base.getY() + 1.0,
             base.getZ(),
             base.getX() + 1.0,
             base.getY() + 3.0,
@@ -552,14 +518,19 @@ public class AutoCev extends Module {
         for (Entity entity : mc.world.getOtherEntities(null, crystalBox)) {
             if (entity instanceof EndCrystalEntity) continue;
             if (entity.isRemoved()) continue;
-            return false;
+            if (entity instanceof ItemEntity) {
+                itemBlocker = true;
+                continue;
+            }
+            return SpaceState.OTHER_BLOCKER;
         }
 
-        return true;
+        if (itemBlocker) return SpaceState.ITEM_BLOCKER;
+        return obsidianBlocker ? SpaceState.OBSIDIAN_BLOCKER : SpaceState.OPEN;
     }
 
-    private boolean placeObsidian(BaseChoice choice) {
-        if (choice == null || mc.player == null || mc.world == null) return false;
+    private boolean placeObsidian(BlockPos pos) {
+        if (pos == null || mc.player == null || mc.world == null) return false;
 
         FindItemResult obsidian = InvUtils.findInHotbar(Items.OBSIDIAN);
         if (!obsidian.found()) {
@@ -568,8 +539,9 @@ public class AutoCev extends Module {
             return false;
         }
 
+        debug("place obsidian attempt -> " + formatPos(pos));
         boolean placed = BlockUtils.place(
-            choice.pos(),
+            pos,
             obsidian,
             rotate.get(),
             rotate.get() ? ROTATE_PRIORITY : 0,
@@ -577,85 +549,15 @@ public class AutoCev extends Module {
             true,
             swapMode.get() == SwapMode.Silent
         );
-
-        if (placed) startCycle(choice);
+        debug("place obsidian result -> " + formatPos(pos) + " success=" + placed);
         return placed;
     }
 
-    private void startCycle(BaseChoice choice) {
-        if (choice == null) return;
-        activeBase = choice.pos().toImmutable();
-        activeFallback = choice.fallback();
-        preferredBase = activeBase;
-        preferredFallback = activeFallback;
-        crystalPlacedInCycle = findCrystalAt(activeBase) != null;
-        crystalRetryTicks = 0;
-        postBreakTicks = 0;
-        syncInstaMarks(activeBase);
-    }
+    private void tryContinueCycleSameTick(CyclePlan plan) {
+        if (plan == null || mc.world == null || target == null) return;
+        if (!mc.world.getBlockState(plan.pos()).isOf(Blocks.OBSIDIAN)) return;
 
-    private void mineObsidian(BlockPos pos) {
-        if (pos == null || mc.world == null) return;
-        if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return;
-        mineBlock(pos);
-    }
-
-    private boolean mineCrystalBlocker(BlockPos base) {
-        if (base == null) return false;
-        if (mineBlockingBlock(base.up())) return true;
-        return mineBlockingBlock(base.up(2));
-    }
-
-    private boolean mineBlockingBlock(BlockPos pos) {
-        if (pos == null || mc.world == null) return false;
-        BlockState state = mc.world.getBlockState(pos);
-        if (state.isAir() || state.isReplaceable()) return false;
-        if (!state.isOf(Blocks.OBSIDIAN)) return false;
-        if (mineMode.get() == MineMode.Insta) return instaMineOnce(pos);
-        mineBlock(pos);
-        return true;
-    }
-
-    private void mineBlock(BlockPos pos) {
-        Runnable mine = () -> {
-            if (mc.interactionManager == null) return;
-            mc.interactionManager.attackBlock(pos, Direction.UP);
-            swing(Hand.MAIN_HAND);
-        };
-
-        if (rotate.get()) {
-            Vec3d center = Vec3d.ofCenter(pos);
-            Rotations.rotate(Rotations.getYaw(center), Rotations.getPitch(center), ROTATE_PRIORITY, mine);
-        } else {
-            mine.run();
-        }
-    }
-
-    private void tickInstaMine(BlockPos pos) {
-        if (pos == null || mc.world == null) return;
-        if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return;
-        instaMineOnce(pos);
-    }
-
-    private boolean instaMineOnce(BlockPos pos) {
-        if (pos == null) return false;
-        BlockPos immutable = pos.toImmutable();
-        if (instaMinedBlocks.contains(immutable)) return false;
-
-        mineBlock(immutable);
-        instaMinedBlocks.add(immutable);
-        return true;
-    }
-
-    private void syncInstaMarks(BlockPos base) {
-        if (base == null) return;
-        if (mineMode.get() != MineMode.Insta) return;
-
-        BlockPos immutable = base.toImmutable();
-        if (instaMarksBase == null || !instaMarksBase.equals(immutable)) {
-            instaMarksBase = immutable;
-            instaMinedBlocks.clear();
-        }
+        if (plan.type() == PlanType.HEAD || plan.type() == PlanType.FACE) executeCyclePlan(plan);
     }
 
     private boolean placeCrystal(BlockPos base) {
@@ -679,29 +581,26 @@ public class AutoCev extends Module {
             boolean switched = false;
 
             if (hand == null) {
-                if (!InvUtils.swap(crystal.slot(), false)) return;
+                if (!InvUtils.swap(crystal.slot(), !silent)) return;
                 hand = Hand.MAIN_HAND;
                 switched = true;
             }
 
             if (!mc.player.getStackInHand(hand).isOf(Items.END_CRYSTAL)) {
-                if (switched && silent) InvUtils.swap(previousSlot, false);
+                if (switched) restoreSlot(previousSlot, silent);
                 return;
             }
 
-            Vec3d hitPos = crystalCenter(base);
-            BlockHitResult hit = new BlockHitResult(hitPos, Direction.UP, base, false);
+            BlockHitResult hit = new BlockHitResult(crystalCenter(base), Direction.UP, base, false);
+            ActionResult result = interactBlock(hand, hit);
 
-            if (mc.getNetworkHandler() != null) {
-                mc.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(hand, hit, 0));
-                success[0] = true;
+            success[0] = result.isAccepted();
+            if (success[0]) {
+                debug("place crystal -> " + formatPos(base));
                 swing(hand);
-            } else if (mc.interactionManager != null) {
-                success[0] = mc.interactionManager.interactBlock(mc.player, hand, hit).isAccepted();
-                if (success[0]) swing(hand);
             }
 
-            if (switched && silent) InvUtils.swap(previousSlot, false);
+            if (switched) restoreSlot(previousSlot, silent);
         };
 
         if (rotate.get()) {
@@ -714,11 +613,114 @@ public class AutoCev extends Module {
         return success[0];
     }
 
+    private void restoreSlot(int previousSlot, boolean silent) {
+        if (silent) InvUtils.swap(previousSlot, false);
+        else InvUtils.swapBack();
+    }
+
+    private ActionResult interactBlock(Hand hand, BlockHitResult hit) {
+        if (mc.player == null || mc.interactionManager == null) return ActionResult.PASS;
+
+        boolean wasSneaking = mc.player.isSneaking();
+        mc.player.setSneaking(false);
+
+        ActionResult result = mc.interactionManager.interactBlock(mc.player, hand, hit);
+
+        mc.player.setSneaking(wasSneaking);
+        return result;
+    }
+
+    private void mineBase(BlockPos pos) {
+        if (mineMode.get() == MineMode.Insta) {
+            if ((activeType == PlanType.HEAD || activeType == PlanType.HEAD_CLEAR || activeType == PlanType.HEAD_BLOCKER) && pos != null && pos.equals(lockedHeadMineBase)) {
+                debug("skip mineBase -> head lock owns " + formatPos(pos));
+                return;
+            }
+            ensureInstaMine(pos);
+        }
+        else {
+            debug("vanilla mine -> " + formatPos(pos));
+            mineBlock(pos);
+        }
+    }
+
+    private boolean mineCrystalBlocker(BlockPos base) {
+        if (base == null || mc.world == null) return false;
+        if (target != null && isTopBase(base, target) && chooseOpenFacePlan(target) != null) {
+            debug("skip head blocker mine -> face exists");
+            return false;
+        }
+        if (mineBlockingBlock(base.up())) return true;
+        return mineBlockingBlock(base.up(2));
+    }
+
+    private boolean mineBlockingBlock(BlockPos pos) {
+        if (pos == null || mc.world == null) return false;
+        if (!mc.world.getBlockState(pos).isOf(Blocks.OBSIDIAN)) return false;
+
+        if (mineMode.get() == MineMode.Insta) return ensureInstaMine(pos);
+        debug("vanilla mine blocker -> " + formatPos(pos));
+        mineBlock(pos);
+        return true;
+    }
+
+    private void mineBlock(BlockPos pos) {
+        Runnable mine = () -> {
+            if (mc.interactionManager == null) return;
+            debug("attack block -> " + formatPos(pos) + " dir=UP");
+            mc.interactionManager.attackBlock(pos, Direction.UP);
+            swing(Hand.MAIN_HAND);
+        };
+
+        if (rotate.get()) {
+            Vec3d center = Vec3d.ofCenter(pos);
+            Rotations.rotate(Rotations.getYaw(center), Rotations.getPitch(center), ROTATE_PRIORITY, mine);
+        } else {
+            mine.run();
+        }
+    }
+
+    private boolean ensureInstaMine(BlockPos pos) {
+        if (pos == null || mc.interactionManager == null) return false;
+        BlockPos immutable = pos.toImmutable();
+        if ((activeType == PlanType.HEAD || activeType == PlanType.HEAD_CLEAR || activeType == PlanType.HEAD_BLOCKER) && immutable.equals(lockedHeadMineBase)) {
+            debug("skip insta mine -> head locked " + formatPos(immutable));
+            return false;
+        }
+        if (immutable.equals(instaMinePos)) {
+            debug("skip insta mine -> insta pos already set " + formatPos(immutable));
+            return false;
+        }
+        if (isBreakingBlock(immutable)) {
+            debug("skip insta mine -> client already breaking " + formatPos(immutable));
+            return false;
+        }
+
+        Runnable mine = () -> {
+            if (mc.interactionManager == null) return;
+            debug("start insta mine -> " + formatPos(immutable) + " type=" + activeType);
+            debug("attack block -> " + formatPos(immutable) + " dir=" + BlockUtils.getDirection(immutable));
+            mc.interactionManager.attackBlock(immutable, BlockUtils.getDirection(immutable));
+        };
+
+        if (rotate.get()) {
+            Vec3d center = Vec3d.ofCenter(immutable);
+            Rotations.rotate(Rotations.getYaw(center), Rotations.getPitch(center), ROTATE_PRIORITY, mine);
+        } else {
+            mine.run();
+        }
+
+        if (activeType == PlanType.HEAD || activeType == PlanType.HEAD_CLEAR || activeType == PlanType.HEAD_BLOCKER) lockedHeadMineBase = immutable;
+        instaMinePos = immutable;
+        return true;
+    }
+
     private void attackCrystal(EndCrystalEntity crystal) {
         if (crystal == null || mc.player == null || mc.world == null) return;
 
         Runnable attack = () -> {
             if (mc.player == null) return;
+            debug("attack crystal -> " + formatPos(BlockPos.ofFloored(crystal.getPos())));
             if (mc.getNetworkHandler() != null) {
                 mc.getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(crystal, mc.player.isSneaking()));
             } else if (mc.interactionManager != null) {
@@ -737,33 +739,27 @@ public class AutoCev extends Module {
     private EndCrystalEntity findCrystalAt(BlockPos base) {
         if (base == null || mc.world == null) return null;
 
-        BlockPos exact = base.up();
-        for (Entity entity : mc.world.getEntities()) {
-            if (!(entity instanceof EndCrystalEntity crystal)) continue;
-            if (crystal.isRemoved()) continue;
-            if (crystal.getBlockPos().equals(exact)) return crystal;
-        }
-
         Vec3d center = new Vec3d(base.getX() + 0.5, base.getY() + 1.5, base.getZ() + 0.5);
         Box crystalBox = new Box(
-            base.getX(),
+            base.getX() + 1e-3,
             base.getY() + 1.0,
-            base.getZ(),
-            base.getX() + 1.0,
+            base.getZ() + 1e-3,
+            base.getX() + 1.0 - 1e-3,
             base.getY() + 3.0,
-            base.getZ() + 1.0
+            base.getZ() + 1.0 - 1e-3
         );
 
         EndCrystalEntity best = null;
-        double bestDist = CRYSTAL_SEARCH_RADIUS_SQ;
+        double bestDistance = Double.MAX_VALUE;
 
         for (Entity entity : mc.world.getOtherEntities(null, crystalBox)) {
             if (!(entity instanceof EndCrystalEntity crystal)) continue;
             if (crystal.isRemoved()) continue;
+            if (!BlockPos.ofFloored(crystal.getX(), crystal.getY() - 1.0, crystal.getZ()).equals(base)) continue;
 
-            double dist = crystal.squaredDistanceTo(center);
-            if (dist <= bestDist) {
-                bestDist = dist;
+            double distance = crystal.squaredDistanceTo(center);
+            if (distance < bestDistance) {
+                bestDistance = distance;
                 best = crystal;
             }
         }
@@ -771,36 +767,7 @@ public class AutoCev extends Module {
         return best;
     }
 
-    private boolean canPlaceCrystalAt(BlockPos base) {
-        if (base == null || mc.world == null) return false;
-        BlockState baseState = mc.world.getBlockState(base);
-        if (!(baseState.isOf(Blocks.OBSIDIAN) || baseState.isOf(Blocks.BEDROCK))) return false;
-        if (findCrystalAt(base) != null) return false;
-        return hasCrystalSpace(base);
-    }
-
-    private BlockerType getBlockerType(BlockPos base) {
-        if (base == null || mc.world == null) return BlockerType.Other;
-        BlockState up1 = mc.world.getBlockState(base.up());
-        BlockState up2 = mc.world.getBlockState(base.up(2));
-
-        boolean hasObsidian = false;
-
-        if (!up1.isAir() && !up1.isReplaceable()) {
-            if (up1.isOf(Blocks.OBSIDIAN)) hasObsidian = true;
-            else return BlockerType.Other;
-        }
-
-        if (!up2.isAir() && !up2.isReplaceable()) {
-            if (up2.isOf(Blocks.OBSIDIAN)) hasObsidian = true;
-            else return BlockerType.Other;
-        }
-
-        return hasObsidian ? BlockerType.Obsidian : BlockerType.None;
-    }
-
     private Vec3d crystalCenter(BlockPos base) {
-        if (base == null) return Vec3d.ZERO;
         return new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
     }
 
@@ -813,6 +780,7 @@ public class AutoCev extends Module {
 
     private void swing(Hand hand) {
         if (mc.player == null) return;
+        debug("swing -> " + hand.name() + " client=" + swingHand.get());
         if (swingHand.get()) {
             mc.player.swingHand(hand);
         } else if (mc.getNetworkHandler() != null) {
@@ -820,36 +788,65 @@ public class AutoCev extends Module {
         }
     }
 
-    private void clearInstaState() {
-        instaMarksBase = null;
-        instaMinedBlocks.clear();
+    private boolean isBreakingBlock(BlockPos pos) {
+        if (pos == null || mc.interactionManager == null) return false;
+        ClientPlayerInteractionManagerAccessor accessor = (ClientPlayerInteractionManagerAccessor) mc.interactionManager;
+        return accessor.isBreakingBlock() && pos.equals(accessor.getCurrentBreakingPos());
     }
 
-    private void resetCycle() {
-        activeBase = null;
-        activeFallback = false;
-        crystalPlacedInCycle = false;
-        crystalRetryTicks = 0;
-        postBreakTicks = 0;
+    private boolean isPlayerInBlocks(PlayerEntity player) {
+        if (player == null || mc.world == null) return false;
+
+        Box box = player.getBoundingBox().contract(1e-3);
+        int minX = MathHelper.floor(box.minX);
+        int minY = MathHelper.floor(box.minY);
+        int minZ = MathHelper.floor(box.minZ);
+        int maxX = MathHelper.floor(box.maxX);
+        int maxY = MathHelper.floor(box.maxY);
+        int maxZ = MathHelper.floor(box.maxZ);
+
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
+
+        for (int x = minX; x <= maxX; x++) {
+            for (int y = minY; y <= maxY; y++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    mutable.set(x, y, z);
+
+                    BlockState state = mc.world.getBlockState(mutable);
+                    if (state.isAir() || state.isReplaceable()) continue;
+
+                    VoxelShape shape = state.getCollisionShape(mc.world, mutable);
+                    if (shape.isEmpty()) continue;
+
+                    for (Box shapeBox : shape.getBoundingBoxes()) {
+                        if (shapeBox.offset(mutable).intersects(box)) return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
-    private void resetAll() {
+    private void resetState() {
         target = null;
         targetId = null;
-        preferredBase = null;
-        preferredFallback = false;
-        clearInstaState();
-        resetCycle();
+        activeBase = null;
+        activeType = null;
+        lockedFaceBase = null;
+        lockedHeadMineBase = null;
+        instaMinePos = null;
+        clearDebug();
     }
 
     @Override
     public String getInfoString() {
         if (target == null) return null;
         if (activeBase == null) return target.getName().getString();
-        return target.getName().getString() + (activeFallback ? " F" : " T");
+        return target.getName().getString() + (activeType == PlanType.FACE ? " F" : " T");
     }
 
-    private record BaseChoice(BlockPos pos, boolean fallback) {
+    private record CyclePlan(BlockPos pos, PlanType type, double score) {
     }
 
     public enum SwapMode {
@@ -862,9 +859,52 @@ public class AutoCev extends Module {
         Insta
     }
 
-    private enum BlockerType {
-        None,
-        Obsidian,
-        Other
+    private enum SpaceState {
+        OPEN,
+        OBSIDIAN_BLOCKER,
+        ITEM_BLOCKER,
+        OTHER_BLOCKER,
+        INVALID
+    }
+
+    private enum PlanType {
+        HEAD,
+        HEAD_CLEAR,
+        FACE,
+        HEAD_BLOCKER
+    }
+
+    private void debug(String message) {
+        if (!debugClipboard.get() || mc == null || mc.keyboard == null) return;
+
+        debugCounter++;
+        debugLines.addLast(String.format("%03d %s | target=%s active=%s/%s insta=%s faceLock=%s headLock=%s",
+            debugCounter,
+            message,
+            target == null ? "-" : target.getName().getString(),
+            activeType == null ? "-" : activeType.name(),
+            formatPos(activeBase),
+            formatPos(instaMinePos),
+            formatPos(lockedFaceBase),
+            formatPos(lockedHeadMineBase)
+        ));
+
+        while (debugLines.size() > DEBUG_LOG_LIMIT) debugLines.removeFirst();
+        mc.keyboard.setClipboard(String.join(System.lineSeparator(), debugLines));
+    }
+
+    private void clearDebug() {
+        debugLines.clear();
+        debugCounter = 0;
+    }
+
+    private String planSummary(CyclePlan plan) {
+        if (plan == null) return "null";
+        return plan.type().name() + "@" + formatPos(plan.pos());
+    }
+
+    private String formatPos(BlockPos pos) {
+        if (pos == null) return "-";
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 }
