@@ -4,7 +4,7 @@
 
 ## Завантажити
 
-- Поточна збірка (`v0.0.22`): [Завантажити jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.22/devils-addon-0.0.22.jar)
+- Поточна збірка (`v0.0.23`): [Завантажити jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.23/devils-addon-0.0.23.jar)
 - Останній реліз: [Відкрити](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Усі релізи: [Відкрити](https://github.com/ThianYong-hub/DEVILS/releases)
 
