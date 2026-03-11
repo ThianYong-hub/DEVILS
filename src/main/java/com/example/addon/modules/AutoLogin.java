@@ -3,6 +3,10 @@ package com.example.addon.modules;
 import com.example.addon.AddonTemplate;
 import com.example.addon.gui.screens.settings.AutoLoginEditScreen;
 import com.example.addon.util.CrashGuard;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;
@@ -40,10 +44,19 @@ import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 import net.minecraft.network.packet.s2c.play.ProfilelessChatMessageS2CPacket;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -51,6 +64,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 import static meteordevelopment.meteorclient.MeteorClient.mc;
@@ -66,18 +80,34 @@ public class AutoLogin extends Module {
     private static final Pattern HEX_COLOR_CODE_PATTERN = Pattern.compile("(?i)&#[0-9a-f]{6}");
     private static final long RECEIVE_FALLBACK_WINDOW_MS = 120_000;
     private static final long RECEIVE_FALLBACK_ONLINE_WAIT_MS = 5_000;
+    private static final long SYNC_PROBLEM_LOG_COOLDOWN_MS = 20_000;
+    private static final long SYNC_AUTH_BACKOFF_MS = 30_000;
+    private static final long SYNC_NETWORK_BACKOFF_MS = 10_000;
+    private static final String SYNC_PULL_PATH = "/pull";
+    private static final String SYNC_PUSH_PATH = "/push";
+    private static final int SYNC_ERROR_DETAIL_MAX = 120;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgSync = settings.createGroup("Sync");
 
     private final Setting<Boolean> autoSave = sgGeneral.add(new BoolSetting.Builder().name("auto-save").description("Save credentials automatically when you manually use /login or /reg.").defaultValue(true).build());
     private final Setting<Integer> newEntryDelay = sgGeneral.add(new IntSetting.Builder().name("new-entry-delay").description("Default delay in ticks for newly saved entries.").defaultValue(40).min(0).sliderRange(0, 200).build());
     private final Setting<Boolean> onlyMultiplayer = sgGeneral.add(new BoolSetting.Builder().name("only-multiplayer").description("Only auto-login on multiplayer servers.").defaultValue(true).build());
     private final Setting<Boolean> debugClipboard = sgGeneral.add(new BoolSetting.Builder().name("debug-clipboard").description("Copies auth-like incoming message diagnostics to the clipboard.").defaultValue(false).build());
+    private final Setting<Boolean> syncEnabled = sgSync.add(new BoolSetting.Builder().name("enabled").description("Sync AutoLogin profiles between clients through remote API.").defaultValue(false).build());
+    private final Setting<String> syncBaseUrl = sgSync.add(new StringSetting.Builder().name("base-url").description("Base URL for sync API. Endpoints: /pull and /push.").defaultValue("").build());
+    private final Setting<String> syncToken = sgSync.add(new StringSetting.Builder().name("token").description("Bearer token for sync API authorization.").defaultValue("").build());
+    private final Setting<String> syncDeviceId = sgSync.add(new StringSetting.Builder().name("device-id").description("Stable ID for this client device.").defaultValue(UUID.randomUUID().toString()).build());
+    private final Setting<Integer> syncIntervalSec = sgSync.add(new IntSetting.Builder().name("interval-sec").description("How often to run pull/push synchronization.").defaultValue(15).min(5).sliderRange(5, 120).build());
+    private final Setting<Integer> syncRequestTimeoutSec = sgSync.add(new IntSetting.Builder().name("request-timeout-sec").description("HTTP timeout per sync request.").defaultValue(10).min(3).sliderRange(3, 60).build());
+    private final Setting<Boolean> syncAllowInsecureHttp = sgSync.add(new BoolSetting.Builder().name("allow-http").description("Allow plain HTTP for sync endpoint (unsafe).").defaultValue(false).build());
+    private final Setting<Boolean> syncVerbose = sgSync.add(new BoolSetting.Builder().name("verbose-log").description("Show sync lifecycle messages in chat.").defaultValue(false).build());
 
     private final List<AutoLoginProfile> profiles = new ArrayList<>();
     private final ArrayDeque<DebugChatPacketSnapshot> recentChatPackets = new ArrayDeque<>();
     private final Map<UUID, String> knownPlayers = new HashMap<>();
     private final List<String> debugCaptureLines = new ArrayList<>();
+    private final HttpClient syncHttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
     private boolean sentThisJoin;
     private boolean sendingAutoCommand;
@@ -91,6 +121,16 @@ public class AutoLogin extends Module {
     private long joinTimeMs;
     private String pendingFallbackMessage;
     private long pendingFallbackCapturedAtMs;
+    private boolean syncInFlight;
+    private long lastSyncAttemptMs;
+    private long lastSyncSuccessMs;
+    private long lastKnownSyncRevision = -1;
+    private String lastSyncedFingerprint = "";
+    private String lastSyncStatus = "idle";
+    private String lastSyncProblemSignature = "";
+    private long lastSyncProblemLogMs;
+    private int lastSyncProblemSuppressed;
+    private long syncBackoffUntilMs;
 
     public AutoLogin() {
         super(AddonTemplate.CATEGORY, "auto-login", "Automatically sends saved /login or /reg commands matched by current username and server.");
@@ -99,12 +139,16 @@ public class AutoLogin extends Module {
     @Override
     public void onActivate() {
         resetJoinState();
+        resetSyncState();
         ensureJoinContextInitialized("activate");
         if (debugClipboard.get() && mc.player != null && mc.world != null) startDebugSession();
     }
 
     @Override
-    public void onDeactivate() { resetJoinState(); }
+    public void onDeactivate() {
+        resetJoinState();
+        resetSyncState();
+    }
 
     @Override
     public NbtCompound toTag() {
@@ -187,6 +231,7 @@ public class AutoLogin extends Module {
     @EventHandler private void onPacketReceive(PacketEvent.Receive event) { CrashGuard.run(this, "onPacketReceive", () -> handlePacketReceive(event)); }
 
     private void handleAutoLoginTick() {
+        handleSyncTick();
         ensureJoinContextInitialized("tick");
         if (!sentThisJoin) processPendingReceiveFallback();
         if (sentThisJoin || pendingProfile == null || mc.player == null || mc.world == null || mc.player.networkHandler == null) return;
@@ -351,6 +396,16 @@ public class AutoLogin extends Module {
         pendingFallbackCapturedAtMs = 0;
     }
 
+    private void resetSyncState() {
+        syncInFlight = false;
+        lastSyncAttemptMs = 0;
+        lastSyncSuccessMs = 0;
+        lastKnownSyncRevision = -1;
+        lastSyncStatus = "idle";
+        lastSyncedFingerprint = computeFingerprint(snapshotProfiles());
+        clearSyncProblemTracking();
+    }
+
     private void startDebugSession() {
         if (!debugClipboard.get()) return;
         debugCaptureLines.clear();
@@ -480,6 +535,10 @@ public class AutoLogin extends Module {
             + " promptWorldTime=" + promptWorldTime
             + " worldTime=" + (mc.world == null ? -1 : mc.world.getTime())
             + " joinAgeMs=" + joinAgeMs
+            + " syncEnabled=" + syncEnabled.get()
+            + " syncInFlight=" + syncInFlight
+            + " syncStatus=" + inlineValue(lastSyncStatus, 60)
+            + " syncRev=" + lastKnownSyncRevision
             + " clipboardWillCopy=true";
 
         info("%s", summary);
@@ -555,6 +614,558 @@ public class AutoLogin extends Module {
             names.add(normalizeKey(entry.getProfile().getName()));
         }
         return names;
+    }
+
+    private void handleSyncTick() {
+        if (!syncEnabled.get()) return;
+        if (syncInFlight) return;
+
+        String baseUrl = normalizeSyncBaseUrl(syncBaseUrl.get());
+        if (baseUrl.isBlank()) {
+            lastSyncStatus = "skip:no-base-url";
+            return;
+        }
+        if (!syncAllowInsecureHttp.get() && baseUrl.startsWith("http://")) {
+            lastSyncStatus = "skip:http-disabled";
+            return;
+        }
+
+        String deviceId = syncDeviceId.get() == null ? "" : syncDeviceId.get().trim();
+        if (deviceId.isBlank()) {
+            deviceId = UUID.randomUUID().toString();
+            syncDeviceId.set(deviceId);
+        }
+
+        long now = System.currentTimeMillis();
+        long intervalMs = Math.max(5, syncIntervalSec.get()) * 1000L;
+        if (lastSyncAttemptMs > 0 && now - lastSyncAttemptMs < intervalMs) return;
+        if (syncBackoffUntilMs > now) return;
+
+        List<SyncProfileData> localSnapshot = snapshotProfiles();
+        String localFingerprint = computeFingerprint(localSnapshot);
+        boolean localChanged = !localFingerprint.equals(lastSyncedFingerprint);
+
+        lastSyncAttemptMs = now;
+        syncInFlight = true;
+        runSyncCycleAsync(baseUrl, deviceId, syncToken.get(), Math.max(3, syncRequestTimeoutSec.get()), lastKnownSyncRevision, localSnapshot, localFingerprint, localChanged);
+    }
+
+    private void runSyncCycleAsync(
+        String baseUrl,
+        String deviceId,
+        String token,
+        int timeoutSec,
+        long knownRevision,
+        List<SyncProfileData> localSnapshot,
+        String localFingerprint,
+        boolean localChanged
+    ) {
+        CompletableFuture.runAsync(() -> {
+            SyncPullResult pullResult = null;
+            SyncPushResult pushResult = null;
+            boolean remoteApplied = false;
+            String error = null;
+
+            try {
+                pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, knownRevision);
+                if (pullResult.ok()
+                    && pullResult.revision() > knownRevision
+                    && pullResult.profiles() != null) {
+                    applyRemoteProfilesBlocking(pullResult.profiles(), pullResult.revision(), pullResult.lastWriter());
+                    remoteApplied = true;
+                }
+            } catch (Throwable t) {
+                error = formatSyncException("pull-error", t);
+            }
+
+            if (error == null && localChanged && !remoteApplied) {
+                try {
+                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, localSnapshot);
+                } catch (Throwable t) {
+                    error = formatSyncException("push-error", t);
+                }
+            }
+
+            SyncCycleResult result = new SyncCycleResult(pullResult, pushResult, remoteApplied, localChanged, localFingerprint, error);
+            mc.execute(() -> finishSyncCycle(result));
+        });
+    }
+
+    private void finishSyncCycle(SyncCycleResult result) {
+        syncInFlight = false;
+
+        if (result.error() != null) {
+            lastSyncStatus = result.error();
+            logSyncProblem("failed", result.error());
+            return;
+        }
+
+        if (result.pullResult() != null && result.pullResult().revision() >= 0) {
+            lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pullResult().revision());
+        }
+
+        if (result.remoteApplied()) {
+            lastSyncStatus = "pull-applied";
+            lastSyncSuccessMs = System.currentTimeMillis();
+            clearSyncProblemTracking();
+            return;
+        }
+
+        if (result.pushResult() != null) {
+            if (result.pushResult().ok()) {
+                if (result.pushResult().revision() >= 0) lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pushResult().revision());
+                lastSyncedFingerprint = result.localFingerprint();
+                lastSyncSuccessMs = System.currentTimeMillis();
+                lastSyncStatus = "push-ok";
+                clearSyncProblemTracking();
+                logSync("AutoLogin sync push ok (rev=%d).", lastKnownSyncRevision);
+
+                if (result.pushResult().profiles() != null) {
+                    applyRemoteProfiles(result.pushResult().profiles(), result.pushResult().revision(), syncDeviceId.get());
+                }
+            } else {
+                lastSyncStatus = "push-rejected:" + result.pushResult().error();
+                logSyncProblem("push rejected", result.pushResult().error());
+            }
+            return;
+        }
+
+        if (!result.localChanged()) {
+            lastSyncedFingerprint = result.localFingerprint();
+            lastSyncStatus = "noop";
+            clearSyncProblemTracking();
+            return;
+        }
+
+        lastSyncStatus = "local-change-pending";
+    }
+
+    private void logSyncProblem(String context, String error) {
+        String safeError = error == null ? "unknown" : error;
+        String signature = (context + "|" + safeError).toLowerCase(Locale.ROOT);
+        long now = System.currentTimeMillis();
+
+        if (signature.equals(lastSyncProblemSignature) && (now - lastSyncProblemLogMs) < SYNC_PROBLEM_LOG_COOLDOWN_MS) {
+            lastSyncProblemSuppressed++;
+            return;
+        }
+
+        if (signature.equals(lastSyncProblemSignature) && lastSyncProblemSuppressed > 0) {
+            logSync("AutoLogin sync note: same error repeated %d times.", lastSyncProblemSuppressed);
+        }
+
+        lastSyncProblemSignature = signature;
+        lastSyncProblemLogMs = now;
+        lastSyncProblemSuppressed = 0;
+
+        logSync("AutoLogin sync %s: %s", context, safeError);
+        String normalized = safeError.toLowerCase(Locale.ROOT);
+        if (isLikelyAuthError(normalized)) {
+            syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_AUTH_BACKOFF_MS);
+            logSync("AutoLogin sync hint: check token (must match SYNC_TOKEN on server).");
+            return;
+        }
+        if (isLikelyNetworkError(normalized)) {
+            syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_NETWORK_BACKOFF_MS);
+            logSync("AutoLogin sync hint: check base-url, port/firewall and server reachability.");
+        }
+    }
+
+    private void clearSyncProblemTracking() {
+        lastSyncProblemSignature = "";
+        lastSyncProblemLogMs = 0;
+        lastSyncProblemSuppressed = 0;
+        syncBackoffUntilMs = 0;
+    }
+
+    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision) throws Exception {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("deviceId", deviceId);
+        payload.addProperty("knownRevision", knownRevision);
+        payload.addProperty("module", "auto-login");
+
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, timeoutSec);
+        HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return parsePullResponse(response);
+    }
+
+    private SyncPushResult sendPushRequest(
+        String baseUrl,
+        String deviceId,
+        String token,
+        int timeoutSec,
+        long knownRevision,
+        List<SyncProfileData> profilesSnapshot
+    ) throws Exception {
+        JsonObject payload = new JsonObject();
+        payload.addProperty("deviceId", deviceId);
+        payload.addProperty("baseRevision", knownRevision);
+        payload.addProperty("module", "auto-login");
+        payload.add("profiles", toJsonArray(profilesSnapshot));
+
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, timeoutSec);
+        HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return parsePushResponse(response);
+    }
+
+    private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, int timeoutSec) {
+        URI uri = URI.create(baseUrl + path);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+            .timeout(Duration.ofSeconds(Math.max(3, timeoutSec)))
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("User-Agent", "Devils-AutoLoginSync/1.0");
+        if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token.trim());
+        return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
+    }
+
+    private SyncPullResult parsePullResponse(HttpResponse<String> response) {
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            return new SyncPullResult(false, -1, null, parseHttpError(response), "");
+        }
+        if (response.body() == null || response.body().isBlank()) {
+            return new SyncPullResult(true, -1, null, "", "");
+        }
+
+        JsonObject json = parseJsonObject(response.body());
+        if (json == null) return new SyncPullResult(false, -1, null, "bad-json", "");
+
+        boolean ok = readBoolean(json, "ok", true);
+        long revision = readLong(json, "revision", readLong(json, "rev", -1));
+        List<SyncProfileData> remoteProfiles = readProfiles(json);
+        String error = readString(json, "error", "");
+        String lastWriter = readString(json, "lastWriter", readString(json, "last_writer", ""));
+        return new SyncPullResult(ok, revision, remoteProfiles, error, lastWriter);
+    }
+
+    private SyncPushResult parsePushResponse(HttpResponse<String> response) {
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            return new SyncPushResult(false, -1, null, parseHttpError(response));
+        }
+        if (response.body() == null || response.body().isBlank()) {
+            return new SyncPushResult(true, -1, null, "");
+        }
+
+        JsonObject json = parseJsonObject(response.body());
+        if (json == null) return new SyncPushResult(false, -1, null, "bad-json");
+
+        boolean ok = readBoolean(json, "ok", true);
+        long revision = readLong(json, "revision", readLong(json, "rev", -1));
+        List<SyncProfileData> remoteProfiles = readProfiles(json);
+        String error = readString(json, "error", "");
+        return new SyncPushResult(ok, revision, remoteProfiles, error);
+    }
+
+    private String parseHttpError(HttpResponse<String> response) {
+        String base = "http-" + response.statusCode();
+        if (response == null || response.body() == null || response.body().isBlank()) return base;
+        JsonObject json = parseJsonObject(response.body());
+        if (json == null) return base;
+        String error = readString(json, "error", "").trim();
+        return error.isEmpty() ? base : (base + "-" + error);
+    }
+
+    private JsonArray toJsonArray(List<SyncProfileData> snapshot) {
+        JsonArray array = new JsonArray();
+        for (SyncProfileData data : snapshot) {
+            JsonObject item = new JsonObject();
+            item.addProperty("enabled", data.enabled());
+            item.addProperty("username", data.username());
+            item.addProperty("server", data.server());
+            item.addProperty("mode", data.mode().name());
+            item.addProperty("password", data.password());
+            item.addProperty("delay", data.delay());
+            array.add(item);
+        }
+        return array;
+    }
+
+    private List<SyncProfileData> readProfiles(JsonObject json) {
+        JsonArray array = null;
+        if (json.has("profiles") && json.get("profiles").isJsonArray()) array = json.getAsJsonArray("profiles");
+        if (array == null && json.has("entries") && json.get("entries").isJsonArray()) array = json.getAsJsonArray("entries");
+        if (array == null && json.has("data") && json.get("data").isJsonArray()) array = json.getAsJsonArray("data");
+        if (array == null) return null;
+
+        ArrayList<SyncProfileData> list = new ArrayList<>();
+        for (JsonElement element : array) {
+            if (!element.isJsonObject()) continue;
+            JsonObject item = element.getAsJsonObject();
+            boolean enabled = readBoolean(item, "enabled", true);
+            String username = readString(item, "username", "").trim();
+            String server = readString(item, "server", "").trim();
+            String modeRaw = readString(item, "mode", "LOGIN").trim();
+            LoginMode mode = "REGISTER".equalsIgnoreCase(modeRaw) || "REG".equalsIgnoreCase(modeRaw) ? LoginMode.REGISTER : LoginMode.LOGIN;
+            String password = readString(item, "password", "");
+            int delay = (int) Math.max(0, readLong(item, "delay", newEntryDelay.get()));
+            list.add(new SyncProfileData(enabled, username, server, mode, password, delay));
+        }
+        return list;
+    }
+
+    private void applyRemoteProfilesBlocking(List<SyncProfileData> remoteProfiles, long revision, String sourceWriter) {
+        CompletableFuture<Void> applied = new CompletableFuture<>();
+        mc.execute(() -> {
+            try {
+                applyRemoteProfiles(remoteProfiles, revision, sourceWriter);
+                applied.complete(null);
+            } catch (Throwable t) {
+                applied.completeExceptionally(t);
+            }
+        });
+        applied.join();
+    }
+
+    private void applyRemoteProfiles(List<SyncProfileData> remoteProfiles, long revision, String sourceWriter) {
+        List<SyncProfileData> previousProfiles = snapshotProfiles();
+        profiles.clear();
+        for (SyncProfileData data : remoteProfiles) {
+            AutoLoginProfile profile = new AutoLoginProfile();
+            profile.enabled.set(data.enabled());
+            profile.username.set(data.username());
+            profile.server.set(data.server());
+            profile.mode.set(data.mode());
+            profile.password.set(data.password());
+            profile.delay.set(Math.max(0, data.delay()));
+            profiles.add(profile);
+        }
+        if (revision >= 0) lastKnownSyncRevision = Math.max(lastKnownSyncRevision, revision);
+        lastSyncedFingerprint = computeFingerprint(snapshotProfiles());
+        lastSyncSuccessMs = System.currentTimeMillis();
+        lastSyncStatus = "pull-applied(" + remoteProfiles.size() + ")";
+        String writer = formatSyncWriter(sourceWriter);
+        logSync("AutoLogin sync pull applied %d profiles (rev=%d, by=%s).", remoteProfiles.size(), lastKnownSyncRevision, writer);
+        logSyncProfileDiff(previousProfiles, remoteProfiles, writer);
+    }
+
+    private void logSyncProfileDiff(List<SyncProfileData> previousProfiles, List<SyncProfileData> remoteProfiles, String writer) {
+        Map<String, SyncProfileData> previousByKey = indexProfilesByIdentity(previousProfiles);
+        Map<String, SyncProfileData> remoteByKey = indexProfilesByIdentity(remoteProfiles);
+
+        ArrayList<SyncProfileData> added = new ArrayList<>();
+        ArrayList<SyncProfileData> removed = new ArrayList<>();
+        ArrayList<String> changed = new ArrayList<>();
+
+        for (Map.Entry<String, SyncProfileData> entry : remoteByKey.entrySet()) {
+            SyncProfileData previous = previousByKey.get(entry.getKey());
+            SyncProfileData current = entry.getValue();
+            if (previous == null) {
+                added.add(current);
+                continue;
+            }
+
+            String changedFields = describeChangedFields(previous, current);
+            if (!changedFields.isEmpty()) changed.add(formatProfileRef(current) + " {" + changedFields + "}");
+        }
+
+        for (Map.Entry<String, SyncProfileData> entry : previousByKey.entrySet()) {
+            if (!remoteByKey.containsKey(entry.getKey())) removed.add(entry.getValue());
+        }
+
+        if (added.isEmpty() && removed.isEmpty() && changed.isEmpty()) return;
+
+        added.sort(Comparator.comparing(this::formatProfileRef));
+        removed.sort(Comparator.comparing(this::formatProfileRef));
+        changed.sort(String::compareToIgnoreCase);
+
+        logSync("AutoLogin sync delta (rev=%d, by=%s): +%d -%d ~%d.", lastKnownSyncRevision, writer, added.size(), removed.size(), changed.size());
+        if (!added.isEmpty()) {
+            logSync("AutoLogin sync added by: %s", writer);
+            logSync("AutoLogin sync added usernames: %s", formatUsernameList(added, 10));
+        }
+        if (!removed.isEmpty()) {
+            logSync("AutoLogin sync removed by: %s", writer);
+            logSync("AutoLogin sync removed usernames: %s", formatUsernameList(removed, 10));
+        }
+        if (!changed.isEmpty()) {
+            logSync("AutoLogin sync updated by: %s", writer);
+            logSync("AutoLogin sync updated: %s", formatTextList(changed, 6));
+        }
+    }
+
+    private static Map<String, SyncProfileData> indexProfilesByIdentity(List<SyncProfileData> snapshot) {
+        HashMap<String, SyncProfileData> indexed = new HashMap<>();
+        for (SyncProfileData data : snapshot) indexed.put(profileIdentityKey(data), data);
+        return indexed;
+    }
+
+    private static String profileIdentityKey(SyncProfileData data) {
+        return normalizeKey(data.username()) + "|" + normalizeServerKey(data.server());
+    }
+
+    private String formatProfileRef(SyncProfileData data) {
+        return displayValue(data.username(), "<empty-user>") + "@" + displayValue(data.server(), "<empty-server>");
+    }
+
+    private static String displayValue(String value, String fallback) {
+        if (value == null) return fallback;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? fallback : trimmed;
+    }
+
+    private static String describeChangedFields(SyncProfileData previous, SyncProfileData current) {
+        ArrayList<String> fields = new ArrayList<>();
+        if (previous.enabled() != current.enabled()) fields.add("enabled");
+        if (previous.mode() != current.mode()) fields.add("mode");
+        if (previous.delay() != current.delay()) fields.add("delay");
+        if (!stringsEqual(previous.password(), current.password())) fields.add("password");
+        return String.join("/", fields);
+    }
+
+    private static boolean stringsEqual(String a, String b) {
+        if (a == null) return b == null;
+        return a.equals(b);
+    }
+
+    private String formatUsernameList(List<SyncProfileData> list, int limit) {
+        LinkedHashSet<String> usernames = new LinkedHashSet<>();
+        for (SyncProfileData data : list) usernames.add(displayValue(data.username(), "<empty-user>"));
+        return formatTextList(new ArrayList<>(usernames), limit);
+    }
+
+    private String formatSyncWriter(String sourceWriter) {
+        String writer = sourceWriter == null ? "" : sourceWriter.trim();
+        if (writer.isBlank()) return "<unknown-device>";
+
+        String currentDevice = syncDeviceId.get() == null ? "" : syncDeviceId.get().trim();
+        if (!currentDevice.isBlank() && writer.equalsIgnoreCase(currentDevice)) return "this-device";
+        return writer;
+    }
+
+    private static String formatTextList(List<String> values, int limit) {
+        if (values.isEmpty()) return "<none>";
+        int safeLimit = Math.max(1, limit);
+        int take = Math.min(safeLimit, values.size());
+        String joined = String.join(", ", values.subList(0, take));
+        int hidden = values.size() - take;
+        return hidden > 0 ? joined + " +" + hidden + " more" : joined;
+    }
+
+    private List<SyncProfileData> snapshotProfiles() {
+        ArrayList<SyncProfileData> snapshot = new ArrayList<>();
+        for (AutoLoginProfile profile : profiles) {
+            snapshot.add(new SyncProfileData(
+                profile.enabled.get(),
+                profile.username.get(),
+                profile.server.get(),
+                profile.mode.get(),
+                profile.password.get(),
+                profile.delay.get()
+            ));
+        }
+        return snapshot;
+    }
+
+    private String computeFingerprint(List<SyncProfileData> snapshot) {
+        try {
+            ArrayList<String> lines = new ArrayList<>();
+            for (SyncProfileData data : snapshot) {
+                lines.add(
+                    normalizeKey(data.username()) + "|" +
+                    normalizeServerKey(data.server()) + "|" +
+                    data.mode().name() + "|" +
+                    data.password() + "|" +
+                    data.delay() + "|" +
+                    data.enabled()
+                );
+            }
+            lines.sort(Comparator.naturalOrder());
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (String line : lines) {
+                digest.update(line.getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) '\n');
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (Throwable t) {
+            return Integer.toHexString(snapshot.hashCode());
+        }
+    }
+
+    private String normalizeSyncBaseUrl(String rawUrl) {
+        if (rawUrl == null) return "";
+        String trimmed = rawUrl.trim();
+        while (trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
+        return trimmed;
+    }
+
+    private JsonObject parseJsonObject(String raw) {
+        try {
+            JsonElement parsed = JsonParser.parseString(raw);
+            return parsed != null && parsed.isJsonObject() ? parsed.getAsJsonObject() : null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String readString(JsonObject object, String key, String fallback) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) return fallback;
+        try {
+            return object.get(key).getAsString();
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static long readLong(JsonObject object, String key, long fallback) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) return fallback;
+        try {
+            return object.get(key).getAsLong();
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean readBoolean(JsonObject object, String key, boolean fallback) {
+        if (object == null || key == null || !object.has(key) || object.get(key).isJsonNull()) return fallback;
+        try {
+            return object.get(key).getAsBoolean();
+        } catch (Throwable ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean isLikelyAuthError(String normalized) {
+        return normalized.contains("401") || normalized.contains("unauthorized") || normalized.contains("forbidden");
+    }
+
+    private static boolean isLikelyNetworkError(String normalized) {
+        return normalized.contains("timeout")
+            || normalized.contains("connect")
+            || normalized.contains("ioexception")
+            || normalized.contains("connection")
+            || normalized.contains("refused")
+            || normalized.contains("reset")
+            || normalized.contains("unreachable")
+            || normalized.contains("unknownhost")
+            || normalized.contains("noroutetohost");
+    }
+
+    private static String formatSyncException(String prefix, Throwable throwable) {
+        if (throwable == null) return prefix + ":unknown";
+
+        Throwable root = throwable;
+        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+
+        String type = root.getClass().getSimpleName();
+        if (type == null || type.isBlank()) type = root.getClass().getName();
+        type = type.toLowerCase(Locale.ROOT);
+
+        String detail = compactSyncErrorMessage(root.getMessage());
+        if (detail.isEmpty()) return prefix + ":" + type;
+        return prefix + ":" + type + ":" + detail;
+    }
+
+    private static String compactSyncErrorMessage(String raw) {
+        if (raw == null) return "";
+        String compact = raw.replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+        if (compact.isEmpty()) return "";
+        if (compact.length() > SYNC_ERROR_DETAIL_MAX) return compact.substring(0, SYNC_ERROR_DETAIL_MAX) + "...";
+        return compact;
+    }
+
+    private void logSync(String format, Object... args) {
+        if (!syncVerbose.get()) return;
+        info(format, args);
     }
 
     static ParsedCommand parseCredentialCommand(String rawCommand) {
@@ -859,6 +1470,17 @@ public class AutoLogin extends Module {
         };
     }
 
+    private record SyncProfileData(boolean enabled, String username, String server, LoginMode mode, String password, int delay) {}
+    private record SyncPullResult(boolean ok, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}
+    private record SyncPushResult(boolean ok, long revision, List<SyncProfileData> profiles, String error) {}
+    private record SyncCycleResult(
+        SyncPullResult pullResult,
+        SyncPushResult pushResult,
+        boolean remoteApplied,
+        boolean localChanged,
+        String localFingerprint,
+        String error
+    ) {}
     private record DebugChatPacketSnapshot(String packetType, String message, String sender, Boolean senderInTab, Boolean overlay, boolean trustedAuthOrigin, String extra) {}
     public record ParsedCommand(LoginMode mode, String password) {}
     public enum LoginMode { LOGIN, REGISTER }
