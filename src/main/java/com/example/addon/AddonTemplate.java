@@ -2,6 +2,7 @@ package com.example.addon;
 
 import com.example.addon.commands.AutoAnvilRenameCommand;
 import com.example.addon.commands.CommandExample;
+import com.example.addon.config.AddonModulesConfig;
 import com.example.addon.hud.HudExample;
 import com.example.addon.modules.AntiWasp;
 import com.example.addon.modules.AutoAnvilRename;
@@ -39,6 +40,7 @@ public class AddonTemplate extends MeteorAddon {
     @Override
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
+        AddonModulesConfig.init();
 
         SettingsWidgetFactory.registerCustomFactory(TrackerPlayersSetting.class, theme -> (table, setting) -> {
             WTable rulesTable = table.add(theme.table()).expandX().widget();
