@@ -219,7 +219,13 @@ public class AutoLogin extends Module {
                 mc.setScreen(screen);
             };
             WButton copy = table.add(theme.button(COPY)).widget();
-            copy.action = () -> { profiles.add(profiles.indexOf(profile), profile.copy()); fillWidget(theme, list); };
+            copy.action = () -> {
+                AutoLoginProfile duplicate = profile.copy();
+                int index = profiles.indexOf(profile);
+                if (index < 0 || index > profiles.size()) profiles.add(duplicate);
+                else profiles.add(index, duplicate);
+                fillWidget(theme, list);
+            };
             WMinus remove = table.add(theme.minus()).widget();
             remove.action = () -> { profiles.remove(profile); fillWidget(theme, list); };
             table.row();
@@ -318,13 +324,12 @@ public class AutoLogin extends Module {
 
     private DebugChatPacketSnapshot captureChatPacketSnapshot(PacketEvent.Receive event) {
         ensureDebugSessionStarted();
-        Set<String> onlinePlayerNames = getKnownOnlinePlayerNamesNormalized();
         if (event.packet instanceof GameMessageS2CPacket packet) {
             if (packet.overlay()) return null;
-            return recordChatPacket(new DebugChatPacketSnapshot(event.packet.getClass().getSimpleName(), packet.content().getString(), null, null, packet.overlay(), isTrustedAuthPacketMessage(packet.content().getString(), onlinePlayerNames), null));
+            return recordChatPacket(new DebugChatPacketSnapshot(event.packet.getClass().getSimpleName(), packet.content().getString(), null, null, packet.overlay(), isTrustedSystemAuthPacketMessage(packet.content().getString()), null));
         }
         if (event.packet instanceof ProfilelessChatMessageS2CPacket packet) {
-            return recordChatPacket(new DebugChatPacketSnapshot(event.packet.getClass().getSimpleName(), packet.message().getString(), null, null, null, isTrustedAuthPacketMessage(packet.message().getString(), onlinePlayerNames), String.valueOf(packet.chatType())));
+            return recordChatPacket(new DebugChatPacketSnapshot(event.packet.getClass().getSimpleName(), packet.message().getString(), null, null, null, isTrustedSystemAuthPacketMessage(packet.message().getString()), String.valueOf(packet.chatType())));
         }
         if (event.packet instanceof ChatMessageS2CPacket packet) {
             String packetMessage = packet.unsignedContent() != null && !packet.unsignedContent().getString().isBlank() ? packet.unsignedContent().getString() : packet.body().content();
@@ -1552,6 +1557,13 @@ public class AutoLogin extends Module {
         String relayPrefix = extractRelayPrefix(stripped);
         if (relayPrefix != null && onlineNames.contains(normalizeKey(relayPrefix))) return false;
         return true;
+    }
+
+    static boolean isTrustedSystemAuthPacketMessage(String message) {
+        if (!looksLikeAuthPrompt(message)) return false;
+        String normalized = normalizeMessage(message);
+        String stripped = stripLeadingAngleTags(normalized);
+        return !stripped.isEmpty() && containsAuthContextNormalized(stripped);
     }
 
     public static String[] getAccountOptions() {
