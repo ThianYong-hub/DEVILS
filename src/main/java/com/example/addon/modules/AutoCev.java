@@ -45,6 +45,8 @@ import java.util.Deque;
 
 public class AutoCev extends Module {
     private static final Direction[] CARDINAL = { Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST };
+    private static final int FACE_SEARCH_RADIUS = 2;
+    private static final double FACE_WIDE_SEARCH_DISTANCE = 5.0;
     private static final int ROTATE_PRIORITY = 50;
     private static final int DEBUG_LOG_LIMIT = 40;
 
@@ -232,7 +234,7 @@ public class AutoCev extends Module {
         CyclePlan head = chooseHeadPlan(player);
         CyclePlan active = getActivePlan(player);
         CyclePlan lockedHead = getLockedHeadPlan(player);
-        CyclePlan face = chooseFacePlan(player);
+        CyclePlan face = chooseFacePlan(player, shouldUseWideFaceSearch(player, head));
         CyclePlan lockedFace = getLockedFacePlan(player);
 
         if (lockedHead != null) return lockedHead;
@@ -330,24 +332,45 @@ public class AutoCev extends Module {
         return new CyclePlan(lockedHeadMineBase.toImmutable(), PlanType.HEAD, score(lockedHeadMineBase) - 1e-3);
     }
 
-    private CyclePlan chooseFacePlan(PlayerEntity player) {
+    private CyclePlan chooseFacePlan(PlayerEntity player, boolean wideSearch) {
         if (player == null || mc.player == null || mc.world == null) return null;
 
-        int faceY = MathHelper.floor(player.getEyeY());
-        BlockPos center = new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
+        BlockPos center = getFaceCenter(player);
+        if (center == null) return null;
 
         CyclePlan bestOpen = null;
         CyclePlan bestBlocker = null;
-        for (Direction dir : CARDINAL) {
-            BlockPos pos = center.offset(dir);
-            if (!isFreshFaceBase(pos)) continue;
-            SpaceState state = getSpaceStateForBase(pos, player);
-            if (state == SpaceState.OPEN) {
-                CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, score(pos));
-                if (bestOpen == null || plan.score() < bestOpen.score()) bestOpen = plan;
-            } else if (state == SpaceState.OBSIDIAN_BLOCKER) {
-                CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE_BLOCKER, score(pos));
-                if (bestBlocker == null || plan.score() < bestBlocker.score()) bestBlocker = plan;
+        if (!wideSearch) {
+            for (Direction dir : CARDINAL) {
+                BlockPos pos = center.offset(dir);
+                if (!isFreshFaceBase(pos)) continue;
+
+                SpaceState state = getSpaceStateForBase(pos, player);
+                if (state == SpaceState.OPEN) {
+                    CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, faceScore(pos, player));
+                    if (bestOpen == null || plan.score() < bestOpen.score()) bestOpen = plan;
+                } else if (state == SpaceState.OBSIDIAN_BLOCKER) {
+                    CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE_BLOCKER, faceScore(pos, player));
+                    if (bestBlocker == null || plan.score() < bestBlocker.score()) bestBlocker = plan;
+                }
+            }
+        } else {
+            for (int x = -FACE_SEARCH_RADIUS; x <= FACE_SEARCH_RADIUS; x++) {
+                for (int z = -FACE_SEARCH_RADIUS; z <= FACE_SEARCH_RADIUS; z++) {
+                    if (x == 0 && z == 0) continue;
+
+                    BlockPos pos = center.add(x, 0, z);
+                    if (!isFreshFaceBase(pos)) continue;
+
+                    SpaceState state = getSpaceStateForBase(pos, player);
+                    if (state == SpaceState.OPEN) {
+                        CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE, faceScore(pos, player));
+                        if (bestOpen == null || plan.score() < bestOpen.score()) bestOpen = plan;
+                    } else if (state == SpaceState.OBSIDIAN_BLOCKER) {
+                        CyclePlan plan = new CyclePlan(pos.toImmutable(), PlanType.FACE_BLOCKER, faceScore(pos, player));
+                        if (bestBlocker == null || plan.score() < bestBlocker.score()) bestBlocker = plan;
+                    }
+                }
             }
         }
 
@@ -378,6 +401,25 @@ public class AutoCev extends Module {
         double score = mc.player.squaredDistanceTo(Vec3d.ofCenter(pos));
         if (activeBase != null && activeBase.equals(pos)) score -= 1e-3;
         return score;
+    }
+
+    private double faceScore(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return Double.MAX_VALUE;
+
+        double score = score(pos);
+        score -= DamageUtils.crystalDamage(player, crystalCenter(pos)) * 100.0;
+        return score;
+    }
+
+    private boolean shouldUseWideFaceSearch(PlayerEntity player, CyclePlan head) {
+        if (player == null || mc.player == null) return false;
+        if (mc.player.distanceTo(player) > FACE_WIDE_SEARCH_DISTANCE) return true;
+        if (head != null && head.type() == PlanType.HEAD_BLOCKER) return true;
+        if (activeType == PlanType.FACE_BLOCKER) return true;
+        if (lockedFaceBase == null) return false;
+
+        SpaceState state = getSpaceStateForBase(lockedFaceBase, player);
+        return state == SpaceState.OBSIDIAN_BLOCKER;
     }
 
     private boolean baseNeedsPlacement(BlockPos pos) {
@@ -488,17 +530,28 @@ public class AutoCev extends Module {
         return pos.equals(getTopBase(player));
     }
 
+    private BlockPos getFaceCenter(PlayerEntity player) {
+        if (player == null) return null;
+        int faceY = MathHelper.floor(player.getEyeY());
+        return new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
+    }
+
     private boolean isRelevantBase(BlockPos pos, PlayerEntity player) {
         if (pos == null || player == null) return false;
         if (isTopBase(pos, player)) return true;
 
-        int faceY = MathHelper.floor(player.getEyeY());
-        BlockPos center = new BlockPos(player.getBlockX(), faceY, player.getBlockZ());
-        for (Direction dir : CARDINAL) {
-            if (pos.equals(center.offset(dir))) return true;
-        }
+        return isFaceCandidate(pos, player);
+    }
 
-        return false;
+    private boolean isFaceCandidate(BlockPos pos, PlayerEntity player) {
+        if (pos == null || player == null) return false;
+
+        BlockPos center = getFaceCenter(player);
+        if (center == null || pos.getY() != center.getY()) return false;
+
+        int dx = Math.abs(pos.getX() - center.getX());
+        int dz = Math.abs(pos.getZ() - center.getZ());
+        return (dx != 0 || dz != 0) && dx <= FACE_SEARCH_RADIUS && dz <= FACE_SEARCH_RADIUS;
     }
 
     private boolean canOccupyBase(BlockPos pos, PlayerEntity player) {
@@ -678,7 +731,7 @@ public class AutoCev extends Module {
 
     private boolean mineCrystalBlocker(BlockPos base) {
         if (base == null || mc.world == null) return false;
-        if (target != null && isTopBase(base, target) && chooseFacePlan(target) != null) {
+        if (target != null && isTopBase(base, target) && chooseFacePlan(target, shouldUseWideFaceSearch(target, chooseHeadPlan(target))) != null) {
             debug("skip head blocker mine -> face exists");
             return false;
         }

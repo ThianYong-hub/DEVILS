@@ -34,6 +34,7 @@ bin/
 # fabric
 
 run/
+src/test/
 
 # local refs and root icons
 icon.png

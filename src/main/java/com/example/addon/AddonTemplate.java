@@ -5,6 +5,7 @@ import com.example.addon.commands.CommandExample;
 import com.example.addon.hud.HudExample;
 import com.example.addon.modules.AntiWasp;
 import com.example.addon.modules.AutoAnvilRename;
+import com.example.addon.modules.AutoLogin;
 import com.example.addon.modules.AutoPearl;
 import com.example.addon.modules.AutoWasp;
 import com.example.addon.modules.DiscordRPC;
@@ -46,6 +47,7 @@ public class AddonTemplate extends MeteorAddon {
 
         Modules.get().add(new AutoPearl());
         Modules.get().add(new AutoAnvilRename());
+        Modules.get().add(new AutoLogin());
         Modules.get().add(new AntiWasp());
         Modules.get().add(new AutoWasp());
         Modules.get().add(new DiscordRPC());
