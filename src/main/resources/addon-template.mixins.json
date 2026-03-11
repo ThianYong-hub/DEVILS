@@ -9,7 +9,8 @@
     "AnvilScreenHandlerAccessor",
     "PlayerInteractEntityC2SPacketAccessor",
     "ItemListSettingScreenMixin",
-    "ModulesScreenIconsMixin"
+    "ModulesScreenIconsMixin",
+    "ModulesNameCollisionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

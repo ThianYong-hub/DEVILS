@@ -45,12 +45,16 @@ import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 import net.minecraft.network.packet.s2c.play.ProfilelessChatMessageS2CPacket;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -58,6 +62,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -83,9 +88,14 @@ public class AutoLogin extends Module {
     private static final long SYNC_PROBLEM_LOG_COOLDOWN_MS = 20_000;
     private static final long SYNC_AUTH_BACKOFF_MS = 30_000;
     private static final long SYNC_NETWORK_BACKOFF_MS = 10_000;
+    private static final long SYNC_CONFIG_BACKOFF_MS = 30_000;
+    private static final long SYNC_STREAM_RECONNECT_MS = 5_000;
     private static final String SYNC_PULL_PATH = "/pull";
     private static final String SYNC_PUSH_PATH = "/push";
+    private static final String SYNC_STREAM_PATH = "/v1/sync/stream";
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
+    private static final int SYNC_FIXED_STREAM_WAIT_MS = 25_000;
+    private static final int SYNC_FIXED_TIMEOUT_SEC = 15;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgSync = settings.createGroup("Sync");
@@ -98,8 +108,7 @@ public class AutoLogin extends Module {
     private final Setting<String> syncBaseUrl = sgSync.add(new StringSetting.Builder().name("base-url").description("Base URL for sync API. Endpoints: /pull and /push.").defaultValue("").build());
     private final Setting<String> syncToken = sgSync.add(new StringSetting.Builder().name("token").description("Bearer token for sync API authorization.").defaultValue("").build());
     private final Setting<String> syncDeviceId = sgSync.add(new StringSetting.Builder().name("device-id").description("Stable ID for this client device.").defaultValue(UUID.randomUUID().toString()).build());
-    private final Setting<Integer> syncIntervalSec = sgSync.add(new IntSetting.Builder().name("interval-sec").description("How often to run pull/push synchronization.").defaultValue(15).min(5).sliderRange(5, 120).build());
-    private final Setting<Integer> syncRequestTimeoutSec = sgSync.add(new IntSetting.Builder().name("request-timeout-sec").description("HTTP timeout per sync request.").defaultValue(10).min(3).sliderRange(3, 60).build());
+    private final Setting<Boolean> syncUseStream = sgSync.add(new BoolSetting.Builder().name("use-stream").description("Use server-push stream when backend supports it.").defaultValue(true).build());
     private final Setting<Boolean> syncAllowInsecureHttp = sgSync.add(new BoolSetting.Builder().name("allow-http").description("Allow plain HTTP for sync endpoint (unsafe).").defaultValue(false).build());
     private final Setting<Boolean> syncVerbose = sgSync.add(new BoolSetting.Builder().name("verbose-log").description("Show sync lifecycle messages in chat.").defaultValue(false).build());
 
@@ -122,7 +131,6 @@ public class AutoLogin extends Module {
     private String pendingFallbackMessage;
     private long pendingFallbackCapturedAtMs;
     private boolean syncInFlight;
-    private long lastSyncAttemptMs;
     private long lastSyncSuccessMs;
     private long lastKnownSyncRevision = -1;
     private String lastSyncedFingerprint = "";
@@ -131,6 +139,16 @@ public class AutoLogin extends Module {
     private long lastSyncProblemLogMs;
     private int lastSyncProblemSuppressed;
     private long syncBackoffUntilMs;
+    private CompletableFuture<Void> syncStreamFuture;
+    private volatile boolean syncStreamStopRequested;
+    private volatile boolean syncStreamConnecting;
+    private volatile boolean syncStreamConnected;
+    private volatile boolean syncStreamUpdatePending;
+    private volatile long syncStreamPendingRevision = -1;
+    private volatile long syncStreamReconnectAtMs;
+    private volatile long syncStreamLastReadyRevision = -1;
+    private volatile String syncStreamConnectionKey = "";
+    private boolean syncInitialSyncPending = true;
 
     public AutoLogin() {
         super(AddonTemplate.CATEGORY, "auto-login", "Automatically sends saved /login or /reg commands matched by current username and server.");
@@ -397,13 +415,18 @@ public class AutoLogin extends Module {
     }
 
     private void resetSyncState() {
+        stopSyncStream();
         syncInFlight = false;
-        lastSyncAttemptMs = 0;
         lastSyncSuccessMs = 0;
         lastKnownSyncRevision = -1;
         lastSyncStatus = "idle";
         lastSyncedFingerprint = computeFingerprint(snapshotProfiles());
+        syncStreamUpdatePending = false;
+        syncStreamPendingRevision = -1;
+        syncStreamReconnectAtMs = 0;
+        syncStreamLastReadyRevision = -1;
         clearSyncProblemTracking();
+        syncInitialSyncPending = true;
     }
 
     private void startDebugSession() {
@@ -537,6 +560,10 @@ public class AutoLogin extends Module {
             + " joinAgeMs=" + joinAgeMs
             + " syncEnabled=" + syncEnabled.get()
             + " syncInFlight=" + syncInFlight
+            + " syncStreamConnected=" + syncStreamConnected
+            + " syncStreamConnecting=" + syncStreamConnecting
+            + " syncStreamPending=" + syncStreamUpdatePending
+            + " syncStreamRev=" + syncStreamPendingRevision
             + " syncStatus=" + inlineValue(lastSyncStatus, 60)
             + " syncRev=" + lastKnownSyncRevision
             + " clipboardWillCopy=true";
@@ -617,16 +644,29 @@ public class AutoLogin extends Module {
     }
 
     private void handleSyncTick() {
-        if (!syncEnabled.get()) return;
+        if (!syncEnabled.get()) {
+            stopSyncStream();
+            return;
+        }
         if (syncInFlight) return;
 
         String baseUrl = normalizeSyncBaseUrl(syncBaseUrl.get());
         if (baseUrl.isBlank()) {
             lastSyncStatus = "skip:no-base-url";
+            stopSyncStream();
+            return;
+        }
+
+        String baseUrlValidationError = validateSyncBaseUrl(baseUrl);
+        if (baseUrlValidationError != null) {
+            lastSyncStatus = "skip:bad-base-url";
+            logSyncProblem("invalid base-url", baseUrlValidationError);
+            stopSyncStream();
             return;
         }
         if (!syncAllowInsecureHttp.get() && baseUrl.startsWith("http://")) {
             lastSyncStatus = "skip:http-disabled";
+            stopSyncStream();
             return;
         }
 
@@ -636,18 +676,36 @@ public class AutoLogin extends Module {
             syncDeviceId.set(deviceId);
         }
 
+        if (syncUseStream.get()) ensureSyncStream(baseUrl, deviceId, syncToken.get(), SYNC_FIXED_TIMEOUT_SEC);
+        else stopSyncStream();
+
         long now = System.currentTimeMillis();
-        long intervalMs = Math.max(5, syncIntervalSec.get()) * 1000L;
-        if (lastSyncAttemptMs > 0 && now - lastSyncAttemptMs < intervalMs) return;
         if (syncBackoffUntilMs > now) return;
 
         List<SyncProfileData> localSnapshot = snapshotProfiles();
         String localFingerprint = computeFingerprint(localSnapshot);
         boolean localChanged = !localFingerprint.equals(lastSyncedFingerprint);
+        boolean streamTriggeredPull = consumePendingStreamPullSignal();
+        boolean shouldBootstrapPull = !syncUseStream.get() && lastKnownSyncRevision < 0;
+        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull;
+        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull;
+        if (!shouldRun) return;
 
-        lastSyncAttemptMs = now;
+        boolean initialSync = syncInitialSyncPending;
         syncInFlight = true;
-        runSyncCycleAsync(baseUrl, deviceId, syncToken.get(), Math.max(3, syncRequestTimeoutSec.get()), lastKnownSyncRevision, localSnapshot, localFingerprint, localChanged);
+        runSyncCycleAsync(
+            baseUrl,
+            deviceId,
+            syncToken.get(),
+            SYNC_FIXED_TIMEOUT_SEC,
+            SYNC_FIXED_STREAM_WAIT_MS,
+            lastKnownSyncRevision,
+            localSnapshot,
+            localFingerprint,
+            localChanged,
+            shouldPull,
+            initialSync
+        );
     }
 
     private void runSyncCycleAsync(
@@ -655,38 +713,80 @@ public class AutoLogin extends Module {
         String deviceId,
         String token,
         int timeoutSec,
+        int pullWaitMs,
         long knownRevision,
         List<SyncProfileData> localSnapshot,
         String localFingerprint,
-        boolean localChanged
+        boolean localChanged,
+        boolean doPull,
+        boolean initialSync
     ) {
         CompletableFuture.runAsync(() -> {
             SyncPullResult pullResult = null;
             SyncPushResult pushResult = null;
             boolean remoteApplied = false;
             String error = null;
+            long pushBaseRevision = knownRevision;
+            String effectiveFingerprint = localFingerprint;
+            List<SyncProfileData> pushSnapshot = localSnapshot;
+            boolean pushRequestedByInitialMerge = false;
 
-            try {
-                pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, knownRevision);
-                if (pullResult.ok()
-                    && pullResult.revision() > knownRevision
-                    && pullResult.profiles() != null) {
-                    applyRemoteProfilesBlocking(pullResult.profiles(), pullResult.revision(), pullResult.lastWriter());
-                    remoteApplied = true;
+            if (doPull) {
+                try {
+                    pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, pullWaitMs);
+                    if (pullResult.revision() >= 0) pushBaseRevision = pullResult.revision();
+                    List<SyncProfileData> remoteSnapshot = pullResult.profiles() == null ? List.of() : pullResult.profiles();
+                    boolean remoteIsNewer = pullResult.ok() && pullResult.revision() > knownRevision && pullResult.profiles() != null;
+
+                    if (initialSync && !localSnapshot.isEmpty() && pullResult.ok() && pullResult.revision() >= 0) {
+                        List<SyncProfileData> merged = mergeProfilesPreferLocal(remoteSnapshot, localSnapshot);
+                        String remoteFingerprint = computeFingerprint(remoteSnapshot);
+                        String mergedFingerprint = computeFingerprint(merged);
+
+                        if (!mergedFingerprint.equals(remoteFingerprint)) {
+                            pushSnapshot = merged;
+                            effectiveFingerprint = mergedFingerprint;
+                            pushBaseRevision = pullResult.revision();
+                            pushRequestedByInitialMerge = true;
+                            logSync("AutoLogin sync bootstrap: merged local profiles into remote candidate (%d -> %d).", remoteSnapshot.size(), merged.size());
+                        } else if (remoteIsNewer) {
+                            applyRemoteProfilesBlocking(remoteSnapshot, pullResult.revision(), pullResult.lastWriter());
+                            remoteApplied = true;
+                        }
+                    } else if (remoteIsNewer) {
+                        applyRemoteProfilesBlocking(remoteSnapshot, pullResult.revision(), pullResult.lastWriter());
+                        remoteApplied = true;
+                    }
+                } catch (Throwable t) {
+                    error = formatSyncException("pull-error", t);
                 }
-            } catch (Throwable t) {
-                error = formatSyncException("pull-error", t);
             }
 
-            if (error == null && localChanged && !remoteApplied) {
+            if (error == null && !remoteApplied && (localChanged || pushRequestedByInitialMerge)) {
                 try {
-                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, localSnapshot);
+                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, pushBaseRevision, pushSnapshot);
+                    if (pushResult.ok()
+                        && pushResult.conflict()
+                        && initialSync
+                        && !localSnapshot.isEmpty()
+                        && pushResult.profiles() != null
+                        && pushResult.revision() >= 0) {
+                        List<SyncProfileData> conflictMerged = mergeProfilesPreferLocal(pushResult.profiles(), localSnapshot);
+                        String conflictRemoteFingerprint = computeFingerprint(pushResult.profiles());
+                        String conflictMergedFingerprint = computeFingerprint(conflictMerged);
+                        if (!conflictMergedFingerprint.equals(conflictRemoteFingerprint)) {
+                            pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, pushResult.revision(), conflictMerged);
+                            if (pushResult.ok() && pushResult.applied()) {
+                                effectiveFingerprint = conflictMergedFingerprint;
+                            }
+                        }
+                    }
                 } catch (Throwable t) {
                     error = formatSyncException("push-error", t);
                 }
             }
 
-            SyncCycleResult result = new SyncCycleResult(pullResult, pushResult, remoteApplied, localChanged, localFingerprint, error);
+            SyncCycleResult result = new SyncCycleResult(pullResult, pushResult, remoteApplied, localChanged, effectiveFingerprint, error);
             mc.execute(() -> finishSyncCycle(result));
         });
     }
@@ -698,6 +798,10 @@ public class AutoLogin extends Module {
             lastSyncStatus = result.error();
             logSyncProblem("failed", result.error());
             return;
+        }
+
+        if (result.remoteApplied() || (result.pushResult() != null && result.pushResult().ok())) {
+            syncInitialSyncPending = false;
         }
 
         if (result.pullResult() != null && result.pullResult().revision() >= 0) {
@@ -712,7 +816,7 @@ public class AutoLogin extends Module {
         }
 
         if (result.pushResult() != null) {
-            if (result.pushResult().ok()) {
+            if (result.pushResult().ok() && result.pushResult().applied()) {
                 if (result.pushResult().revision() >= 0) lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pushResult().revision());
                 lastSyncedFingerprint = result.localFingerprint();
                 lastSyncSuccessMs = System.currentTimeMillis();
@@ -723,6 +827,13 @@ public class AutoLogin extends Module {
                 if (result.pushResult().profiles() != null) {
                     applyRemoteProfiles(result.pushResult().profiles(), result.pushResult().revision(), syncDeviceId.get());
                 }
+            } else if (result.pushResult().ok() && result.pushResult().conflict()) {
+                lastSyncStatus = "push-conflict";
+                if (result.pushResult().profiles() != null) {
+                    applyRemoteProfiles(result.pushResult().profiles(), result.pushResult().revision(), result.pushResult().lastWriter());
+                }
+                clearSyncProblemTracking();
+                logSync("AutoLogin sync push conflict resolved by remote revision (rev=%d).", result.pushResult().revision());
             } else {
                 lastSyncStatus = "push-rejected:" + result.pushResult().error();
                 logSyncProblem("push rejected", result.pushResult().error());
@@ -738,6 +849,159 @@ public class AutoLogin extends Module {
         }
 
         lastSyncStatus = "local-change-pending";
+    }
+
+    private boolean consumePendingStreamPullSignal() {
+        if (!syncStreamUpdatePending) return false;
+        syncStreamUpdatePending = false;
+        if (syncStreamPendingRevision >= 0 && syncStreamPendingRevision <= lastKnownSyncRevision) return false;
+        return true;
+    }
+
+    private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec) {
+        String tokenValue = token == null ? "" : token.trim();
+        String connectionKey = baseUrl + "|" + deviceId + "|" + Integer.toHexString(tokenValue.hashCode());
+        if ((syncStreamConnected || syncStreamConnecting) && !connectionKey.equals(syncStreamConnectionKey)) stopSyncStream();
+        if (syncStreamConnected || syncStreamConnecting) return;
+        if (syncStreamReconnectAtMs > System.currentTimeMillis()) return;
+
+        syncStreamStopRequested = false;
+        syncStreamConnecting = true;
+        syncStreamConnectionKey = connectionKey;
+
+        long knownRevision = Math.max(-1, lastKnownSyncRevision);
+        int waitMs = Math.max(1_000, SYNC_FIXED_STREAM_WAIT_MS);
+        int requestTimeout = Math.max(10, timeoutSec + 30);
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, waitMs));
+    }
+
+    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+        String streamError = null;
+        try {
+            HttpRequest request = buildSyncStreamRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, waitMs);
+            HttpResponse<InputStream> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                String errorBody = "";
+                try (InputStream input = response.body()) {
+                    if (input != null) errorBody = new String(input.readNBytes(512), StandardCharsets.UTF_8);
+                }
+                throw new IllegalStateException(parseHttpError(response.statusCode(), errorBody));
+            }
+
+            mc.execute(() -> {
+                syncStreamConnecting = false;
+                syncStreamConnected = true;
+                syncStreamReconnectAtMs = 0;
+                logSync("AutoLogin sync stream connected.");
+            });
+
+            try (InputStream input = response.body();
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                String line;
+                String eventType = "";
+                StringBuilder data = new StringBuilder();
+                while (!syncStreamStopRequested && (line = reader.readLine()) != null) {
+                    if (line.startsWith("event:")) {
+                        eventType = line.substring(6).trim();
+                        continue;
+                    }
+                    if (line.startsWith("data:")) {
+                        String row = line.length() > 5 ? line.substring(5).stripLeading() : "";
+                        if (data.length() > 0) data.append('\n');
+                        data.append(row);
+                        continue;
+                    }
+                    if (!line.isEmpty()) continue;
+                    if (data.length() == 0) {
+                        eventType = "";
+                        continue;
+                    }
+                    String payload = data.toString();
+                    String finalEventType = eventType;
+                    mc.execute(() -> handleSyncStreamEvent(finalEventType, payload));
+                    eventType = "";
+                    data.setLength(0);
+                }
+            }
+        } catch (Throwable t) {
+            if (!syncStreamStopRequested) streamError = formatSyncException("stream-error", t);
+        } finally {
+            String finalStreamError = streamError;
+            mc.execute(() -> {
+                syncStreamConnected = false;
+                syncStreamConnecting = false;
+                syncStreamFuture = null;
+                if (!syncStreamStopRequested) {
+                    long reconnectDelay = SYNC_STREAM_RECONNECT_MS;
+                    if (finalStreamError != null && !finalStreamError.isBlank()) {
+                        String normalized = finalStreamError.toLowerCase(Locale.ROOT);
+                        if (isLikelyAuthError(normalized)) reconnectDelay = SYNC_AUTH_BACKOFF_MS;
+                        else if (isLikelyBaseUrlError(normalized) || isLikelyTlsCertError(normalized)) reconnectDelay = SYNC_CONFIG_BACKOFF_MS;
+                        else if (isLikelyNetworkError(normalized)) reconnectDelay = SYNC_NETWORK_BACKOFF_MS;
+                    }
+                    syncStreamReconnectAtMs = System.currentTimeMillis() + reconnectDelay;
+                    if (finalStreamError != null && !finalStreamError.isBlank()) logSync("AutoLogin sync stream disconnected: %s", finalStreamError);
+                }
+            });
+        }
+    }
+
+    private void handleSyncStreamEvent(String eventType, String payload) {
+        if (payload == null || payload.isBlank()) return;
+        JsonObject json = parseJsonObject(payload);
+        if (json == null) return;
+
+        long revision = readLong(json, "revision", -1);
+        if (revision < 0) return;
+
+        syncStreamLastReadyRevision = revision;
+        String writer = readString(json, "lastWriter", readString(json, "last_writer", ""));
+        if (revision > lastKnownSyncRevision) {
+            syncStreamPendingRevision = revision;
+            syncStreamUpdatePending = true;
+            logSync("AutoLogin sync stream event %s (rev=%d, by=%s).", eventType == null || eventType.isBlank() ? "<none>" : eventType, revision, formatSyncWriter(writer));
+        }
+    }
+
+    private void stopSyncStream() {
+        syncStreamStopRequested = true;
+        syncStreamConnecting = false;
+        syncStreamConnected = false;
+        syncStreamUpdatePending = false;
+        syncStreamPendingRevision = -1;
+        syncStreamReconnectAtMs = 0;
+        syncStreamLastReadyRevision = -1;
+        syncStreamConnectionKey = "";
+
+        CompletableFuture<Void> future = syncStreamFuture;
+        syncStreamFuture = null;
+        if (future != null) future.cancel(true);
+    }
+
+    private HttpRequest buildSyncStreamRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+        URI uri = buildSyncStreamUri(baseUrl, deviceId, knownRevision, waitMs);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
+            .timeout(Duration.ofSeconds(Math.max(10, timeoutSec)))
+            .header("Accept", "text/event-stream")
+            .header("Cache-Control", "no-cache")
+            .header("User-Agent", "Devils-AutoLoginSync/1.0")
+            .GET();
+        if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token);
+        return builder.build();
+    }
+
+    private URI buildSyncStreamUri(String baseUrl, String deviceId, long knownRevision, int waitMs) {
+        String query =
+            "deviceId=" + encodeQueryValue(deviceId)
+                + "&module=auto-login"
+                + "&knownRevision=" + knownRevision
+                + "&waitMs=" + Math.max(1_000, waitMs);
+        return URI.create(baseUrl + SYNC_STREAM_PATH + "?" + query);
+    }
+
+    private static String encodeQueryValue(String value) {
+        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
     }
 
     private void logSyncProblem(String context, String error) {
@@ -765,6 +1029,16 @@ public class AutoLogin extends Module {
             logSync("AutoLogin sync hint: check token (must match SYNC_TOKEN on server).");
             return;
         }
+        if (isLikelyBaseUrlError(normalized)) {
+            syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_CONFIG_BACKOFF_MS);
+            logSync("AutoLogin sync hint: base-url must include scheme, e.g. http://host:7878 or https://host.");
+            return;
+        }
+        if (isLikelyTlsCertError(normalized)) {
+            syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_CONFIG_BACKOFF_MS);
+            logSync("AutoLogin sync hint: HTTPS certificate doesn't match URL. Use domain cert or switch to http + allow-http.");
+            return;
+        }
         if (isLikelyNetworkError(normalized)) {
             syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_NETWORK_BACKOFF_MS);
             logSync("AutoLogin sync hint: check base-url, port/firewall and server reachability.");
@@ -778,10 +1052,11 @@ public class AutoLogin extends Module {
         syncBackoffUntilMs = 0;
     }
 
-    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision) throws Exception {
+    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) throws Exception {
         JsonObject payload = new JsonObject();
         payload.addProperty("deviceId", deviceId);
         payload.addProperty("knownRevision", knownRevision);
+        if (waitMs > 0) payload.addProperty("waitMs", waitMs);
         payload.addProperty("module", "auto-login");
 
         HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, timeoutSec);
@@ -840,26 +1115,34 @@ public class AutoLogin extends Module {
 
     private SyncPushResult parsePushResponse(HttpResponse<String> response) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            return new SyncPushResult(false, -1, null, parseHttpError(response));
+            return new SyncPushResult(false, false, false, -1, null, parseHttpError(response), "");
         }
         if (response.body() == null || response.body().isBlank()) {
-            return new SyncPushResult(true, -1, null, "");
+            return new SyncPushResult(true, true, false, -1, null, "", "");
         }
 
         JsonObject json = parseJsonObject(response.body());
-        if (json == null) return new SyncPushResult(false, -1, null, "bad-json");
+        if (json == null) return new SyncPushResult(false, false, false, -1, null, "bad-json", "");
 
         boolean ok = readBoolean(json, "ok", true);
+        boolean conflict = readBoolean(json, "conflict", false);
+        boolean applied = readBoolean(json, "applied", ok && !conflict);
         long revision = readLong(json, "revision", readLong(json, "rev", -1));
         List<SyncProfileData> remoteProfiles = readProfiles(json);
         String error = readString(json, "error", "");
-        return new SyncPushResult(ok, revision, remoteProfiles, error);
+        String lastWriter = readString(json, "lastWriter", readString(json, "last_writer", ""));
+        return new SyncPushResult(ok, applied, conflict, revision, remoteProfiles, error, lastWriter);
     }
 
     private String parseHttpError(HttpResponse<String> response) {
-        String base = "http-" + response.statusCode();
-        if (response == null || response.body() == null || response.body().isBlank()) return base;
-        JsonObject json = parseJsonObject(response.body());
+        if (response == null) return "http-unknown";
+        return parseHttpError(response.statusCode(), response.body());
+    }
+
+    private String parseHttpError(int statusCode, String body) {
+        String base = "http-" + statusCode;
+        if (body == null || body.isBlank()) return base;
+        JsonObject json = parseJsonObject(body);
         if (json == null) return base;
         String error = readString(json, "error", "").trim();
         return error.isEmpty() ? base : (base + "-" + error);
@@ -989,6 +1272,13 @@ public class AutoLogin extends Module {
         return indexed;
     }
 
+    private List<SyncProfileData> mergeProfilesPreferLocal(List<SyncProfileData> remoteProfiles, List<SyncProfileData> localProfiles) {
+        LinkedHashMap<String, SyncProfileData> merged = new LinkedHashMap<>();
+        for (SyncProfileData data : remoteProfiles) merged.put(profileIdentityKey(data), data);
+        for (SyncProfileData data : localProfiles) merged.put(profileIdentityKey(data), data);
+        return new ArrayList<>(merged.values());
+    }
+
     private static String profileIdentityKey(SyncProfileData data) {
         return normalizeKey(data.username()) + "|" + normalizeServerKey(data.server());
     }
@@ -1025,7 +1315,7 @@ public class AutoLogin extends Module {
 
     private String formatSyncWriter(String sourceWriter) {
         String writer = sourceWriter == null ? "" : sourceWriter.trim();
-        if (writer.isBlank()) return "<unknown-device>";
+        if (writer.isBlank()) return "<remote>";
 
         String currentDevice = syncDeviceId.get() == null ? "" : syncDeviceId.get().trim();
         if (!currentDevice.isBlank() && writer.equalsIgnoreCase(currentDevice)) return "this-device";
@@ -1088,6 +1378,27 @@ public class AutoLogin extends Module {
         return trimmed;
     }
 
+    private String validateSyncBaseUrl(String baseUrl) {
+        try {
+            URI uri = URI.create(baseUrl);
+            String scheme = uri.getScheme();
+            if (scheme == null || scheme.isBlank()) return "uri with undefined scheme";
+
+            String normalizedScheme = scheme.toLowerCase(Locale.ROOT);
+            if (!normalizedScheme.equals("http") && !normalizedScheme.equals("https")) {
+                return "unsupported scheme: " + normalizedScheme;
+            }
+
+            if (uri.getHost() == null || uri.getHost().isBlank()) {
+                return "uri with undefined host";
+            }
+
+            return null;
+        } catch (IllegalArgumentException e) {
+            return formatSyncException("bad-base-url", e);
+        }
+    }
+
     private JsonObject parseJsonObject(String raw) {
         try {
             JsonElement parsed = JsonParser.parseString(raw);
@@ -1128,10 +1439,27 @@ public class AutoLogin extends Module {
         return normalized.contains("401") || normalized.contains("unauthorized") || normalized.contains("forbidden");
     }
 
+    private static boolean isLikelyBaseUrlError(String normalized) {
+        return normalized.contains("undefined scheme")
+            || normalized.contains("bad-base-url")
+            || normalized.contains("unsupported scheme")
+            || normalized.contains("uri with undefined host");
+    }
+
+    private static boolean isLikelyTlsCertError(String normalized) {
+        return normalized.contains("certificateexception")
+            || normalized.contains("sslhandshakeexception")
+            || normalized.contains("pkix")
+            || normalized.contains("subject alternative names");
+    }
+
     private static boolean isLikelyNetworkError(String normalized) {
         return normalized.contains("timeout")
             || normalized.contains("connect")
             || normalized.contains("ioexception")
+            || normalized.contains("eofexception")
+            || normalized.contains("eof reached while reading")
+            || normalized.contains("unexpected end of file")
             || normalized.contains("connection")
             || normalized.contains("refused")
             || normalized.contains("reset")
@@ -1472,7 +1800,7 @@ public class AutoLogin extends Module {
 
     private record SyncProfileData(boolean enabled, String username, String server, LoginMode mode, String password, int delay) {}
     private record SyncPullResult(boolean ok, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}
-    private record SyncPushResult(boolean ok, long revision, List<SyncProfileData> profiles, String error) {}
+    private record SyncPushResult(boolean ok, boolean applied, boolean conflict, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}
     private record SyncCycleResult(
         SyncPullResult pullResult,
         SyncPushResult pushResult,
