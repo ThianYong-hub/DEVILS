@@ -152,12 +152,22 @@ jobs:
               "release",
           }
 
+          known_modules = {}
+          modules_dir = Path("src/main/java/com/example/addon/modules")
+          if modules_dir.exists():
+              for module_file in modules_dir.glob("*.java"):
+                  stem = module_file.stem.strip()
+                  if stem:
+                      known_modules[stem.lower()] = stem
+
           def prettify_component(raw):
               raw = raw.strip()
               if not raw:
                   return ""
 
               lowered = raw.lower()
+              if lowered in known_modules:
+                  return known_modules[lowered]
               if lowered in component_aliases:
                   return component_aliases[lowered]
 
@@ -213,17 +223,23 @@ jobs:
               seen = set()
               for component in components:
                   pretty = prettify_component(component)
-                  if not pretty or pretty in seen:
+                  if not pretty:
                       continue
-                  seen.add(pretty)
+                  key = pretty.lower()
+                  if key in seen:
+                      continue
+                  seen.add(key)
                   unique.append(pretty)
               unique_new_modules = []
               seen_new = set()
               for component in new_modules:
                   pretty = prettify_component(component)
-                  if not pretty or pretty in seen_new:
+                  if not pretty:
                       continue
-                  seen_new.add(pretty)
+                  key = pretty.lower()
+                  if key in seen_new:
+                      continue
+                  seen_new.add(key)
                   unique_new_modules.append(pretty)
               return unique, unique_new_modules
 
@@ -236,15 +252,24 @@ jobs:
           def format_commit_line(subject, scope, inferred_components):
               cleaned = sentence_case(subject)
               components = []
+              seen_components = set()
+
+              def add_component(value):
+                  if not value:
+                      return
+                  key = value.lower()
+                  if key in seen_components:
+                      return
+                  seen_components.add(key)
+                  components.append(value)
 
               if scope and not (inferred_components and scope.strip().lower() in generic_scopes):
                   pretty_scope = prettify_component(scope)
                   if pretty_scope:
-                      components.append(pretty_scope)
+                      add_component(pretty_scope)
 
               for component in inferred_components:
-                  if component not in components:
-                      components.append(component)
+                  add_component(component)
 
               components = trim_components(components)
               if components:
