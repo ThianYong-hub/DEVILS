@@ -119,7 +119,6 @@ jobs:
           import os
           import re
           import subprocess
-          from collections import OrderedDict
           from pathlib import Path
 
           current_tag = os.environ["CURRENT_TAG"]
@@ -127,317 +126,41 @@ jobs:
           commit_range = os.environ["RANGE"]
           repo_url = os.environ["REPO_URL"]
 
-          def run(cmd):
-              return subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace")
+          def run_lines(cmd):
+              return subprocess.check_output(
+                  cmd,
+                  text=True,
+                  encoding="utf-8",
+                  errors="replace",
+              ).splitlines()
 
-          def sentence_case(text):
+          def sentence(text):
               text = re.sub(r"\s+", " ", text).strip()
               if not text:
-                  return text
-              return text[0].upper() + text[1:]
-
-          component_aliases = {
-              "auto-cev": "AutoCev",
-              "auto-wasp": "AutoWasp",
-              "anti-wasp": "AntiWasp",
-              "highwaybuilder": "HighwayBuilder",
-          }
-          generic_scopes = {
-              "addon",
-              "addons",
-              "combat",
-              "misc",
-              "module",
-              "modules",
-              "release",
-          }
-
-          known_modules = {}
-          modules_dir = Path("src/main/java/com/example/addon/modules")
-          if modules_dir.exists():
-              for module_file in modules_dir.glob("*.java"):
-                  stem = module_file.stem.strip()
-                  if stem:
-                      known_modules[stem.lower()] = stem
-
-          def prettify_component(raw):
-              raw = raw.strip()
-              if not raw:
                   return ""
+              text = text[0].upper() + text[1:]
+              if not text.endswith("."):
+                  text += "."
+              return text
 
-              lowered = raw.lower()
-              if lowered in known_modules:
-                  return known_modules[lowered]
-              if lowered in component_aliases:
-                  return component_aliases[lowered]
-
-              if any(ch.isupper() for ch in raw[1:]):
-                  return raw
-
-              pieces = [p for p in re.split(r"[^a-zA-Z0-9]+", raw) if p]
-              if not pieces:
-                  return raw
-              return "".join(piece[:1].upper() + piece[1:] for piece in pieces)
-
-          def get_changed_files(full_sha):
-              try:
-                  raw_files = run(["git", "show", "--name-status", "--format=", full_sha]).splitlines()
-              except subprocess.CalledProcessError:
-                  raw_files = []
-
-              changed_files = []
-              for entry in raw_files:
-                  entry = entry.strip()
-                  if not entry:
-                      continue
-
-                  parts = entry.split("\t")
-                  status = parts[0]
-                  path = parts[-1].strip() if len(parts) > 1 else ""
-                  if not path:
-                      continue
-                  changed_files.append((status, path))
-              return changed_files
-
-          def infer_components(changed_files):
-              components = []
-              new_modules = []
-              for changed in changed_files:
-                  status, path = changed
-
-                  if path.startswith("src/main/java/com/example/addon/modules/"):
-                      module_name = Path(path).stem
-                      components.append(module_name)
-                      if status.startswith("A"):
-                          new_modules.append(module_name)
-                  elif path.startswith("src/main/java/com/example/addon/mixin/"):
-                      components.append("Mixins")
-                  elif path.startswith(".github/workflows/"):
-                      components.append("Release workflow")
-                  elif path.startswith("docs/") or path == "README.md":
-                      components.append("Documentation")
-                  elif path.startswith("src/main/resources/"):
-                      components.append("Resources")
-
-              unique = []
-              seen = set()
-              for component in components:
-                  pretty = prettify_component(component)
-                  if not pretty:
-                      continue
-                  key = pretty.lower()
-                  if key in seen:
-                      continue
-                  seen.add(key)
-                  unique.append(pretty)
-              unique_new_modules = []
-              seen_new = set()
-              for component in new_modules:
-                  pretty = prettify_component(component)
-                  if not pretty:
-                      continue
-                  key = pretty.lower()
-                  if key in seen_new:
-                      continue
-                  seen_new.add(key)
-                  unique_new_modules.append(pretty)
-              return unique, unique_new_modules
-
-          def trim_components(components):
-              generic = {"Mixins", "Resources", "Documentation", "Release workflow"}
-              if any(component not in generic for component in components):
-                  return [component for component in components if component not in generic]
-              return components
-
-          def format_commit_line(subject, scope, inferred_components):
-              cleaned = sentence_case(subject)
-              components = []
-              seen_components = set()
-
-              def add_component(value):
-                  if not value:
-                      return
-                  key = value.lower()
-                  if key in seen_components:
-                      return
-                  seen_components.add(key)
-                  components.append(value)
-
-              if scope and not (inferred_components and scope.strip().lower() in generic_scopes):
-                  pretty_scope = prettify_component(scope)
-                  if pretty_scope:
-                      add_component(pretty_scope)
-
-              for component in inferred_components:
-                  add_component(component)
-
-              components = trim_components(components)
-              if components:
-                  return f"{', '.join(components)}: {cleaned}", components
-              return cleaned, components
-
-          def build_module_update(kind, component, cleaned_subject):
-              lowered = cleaned_subject.lower()
-
-              if component == "AutoCev" and "cycle planning" in lowered and "instamine" in lowered:
-                  return {
-                      "intro": "AutoCev got a reliability-focused update in this release.",
-                      "changes": "Cycle planning and instamine state handling were cleaned up.",
-                      "impact": "This should reduce stalls during Cev sequences and make switching targets or bases cleaner.",
-                      "result": "AutoCev should feel smoother and waste fewer openings mid-fight.",
-                  }
-
-              if component == "AutoWasp" and "nether flight" in lowered and "pathfinding load" in lowered:
-                  return {
-                      "intro": "AutoWasp got a stability and performance pass.",
-                      "changes": "It now respects the Nether roof limit and uses lighter pathfinding logic.",
-                      "impact": "This should reduce upward-stuck behavior and route-calculation lag on weaker PCs.",
-                      "result": "Pursuit should be more stable in the Nether and less expensive to run.",
-                  }
-
-              if component == "AutoCev" and "auto-cev planning" in lowered:
-                  return {
-                      "intro": "AutoCev got a combat-flow update.",
-                      "changes": "Face and blocker planning were tightened up, including cleaner handling for blocked face cycles.",
-                      "impact": "This should make target selection and cycle continuation more reliable in cramped fights.",
-                      "result": "AutoCev should stall less and recover cleaner when a setup is partially blocked.",
-                  }
-
-              if component == "AutoWasp" and "auto-wasp swapping" in lowered:
-                  return {
-                      "intro": "AutoWasp got a close-range swap update.",
-                      "changes": "It can now tell AutoArmor to swap between elytra and chestplate when you are close enough to commit on stable ground.",
-                      "impact": "This should make bedrock-level pressure more practical without forcing awkward swaps while you are still flying over open space.",
-                      "result": "AutoWasp should transition into close-range fights more naturally.",
-                  }
-
-              if component == "HighwayBuilder" and "junk" in lowered and "restock" in lowered:
-                  return {
-                      "intro": "HighwayBuilder got a reliability update.",
-                      "changes": "Junk cleanup and restocking flow were tightened up.",
-                      "impact": "This should reduce failed build cycles and inventory hiccups.",
-                      "result": "Highway runs should need less babysitting.",
-                  }
-
-              if "instamine" in lowered:
-                  return {
-                      "intro": f"{component} got a mining-flow update." if component else "This release includes a mining-flow update.",
-                      "changes": "Instamine handling was improved.",
-                      "impact": "This should make block-breaking flow more reliable during combat.",
-                      "result": "",
-                  }
-
-              if "reduce pathfinding load" in lowered:
-                  return {
-                      "intro": f"{component} got a performance-focused update." if component else "This release includes a performance-focused update.",
-                      "changes": "Pathfinding work was reduced.",
-                      "impact": "This should lower route-calculation lag on weaker PCs.",
-                      "result": "",
-                  }
-
-              if kind == "fix":
-                  return {
-                      "intro": f"{component} got a bug-fix pass." if component else "This release includes bug fixes.",
-                      "changes": "Reliability issues were addressed.",
-                      "impact": "This should make normal use more consistent.",
-                      "result": "",
-                  }
-
-              if kind in ("refactor", "perf"):
-                  return {
-                      "intro": f"{component} got an under-the-hood update." if component else "This release includes under-the-hood improvements.",
-                      "changes": "Internal logic was cleaned up for stability and smoother behavior.",
-                      "impact": "This should make the module feel more consistent during normal use.",
-                      "result": "",
-                  }
-
-              if kind == "feat":
-                  return {
-                      "intro": f"{component} got new functionality in this release." if component else "This release adds new functionality.",
-                      "changes": "The module gained new behavior or expanded options.",
-                      "impact": "This should give you more flexibility in actual gameplay.",
-                      "result": "",
-                  }
-
-              return None
-
-          def build_new_module_highlight(component, cleaned_subject):
-              if component == "AutoCev":
-                  return {
-                      "intro": "New module.",
-                      "changes": "Adds automated Cev-style pressure with obsidian, crystal, and instamine cycle handling.",
-                      "impact": "This gives you a ready-to-use aggressive Cev flow instead of doing the sequence manually.",
-                      "result": "",
-                  }
-              if component == "AutoWasp":
-                  return {
-                      "intro": "New module.",
-                      "changes": "Adds automated elytra pursuit with obstacle-aware routing.",
-                      "impact": "This is meant to keep pressure on moving targets without flying straight into terrain.",
-                      "result": "",
-                  }
-              if component == "AntiWasp":
-                  return {
-                      "intro": "New module.",
-                      "changes": "Adds evasive elytra movement patterns to make wasp-style pursuit less effective.",
-                      "impact": "This is meant to make you harder to chase or line up in the air.",
-                      "result": "",
-                  }
-              return {
-                  "intro": "New module.",
-                  "changes": f"Adds {component} to the addon.",
-                  "impact": "See the technical notes below for the implementation details.",
-                  "result": "",
+          def prettify_scope(scope):
+              scope = scope.strip()
+              if not scope:
+                  return ""
+              aliases = {
+                  "auto-cev": "AutoCev",
+                  "auto-wasp": "AutoWasp",
+                  "anti-wasp": "AntiWasp",
+                  "chest-tracker": "ChestTracker",
+                  "sync-hub": "SyncHub",
               }
-
-          def push_unique(grouped, key, value):
-              if not value:
-                  return
-              grouped.setdefault(key, [])
-              if value not in grouped[key]:
-                  grouped[key].append(value)
-
-          def render_update_section(lines, title, updates):
-              if not updates:
-                  return
-
-              lines.append(f"### {title}")
-              for component, entries in updates.items():
-                  lines.append(f"**{component}**")
-                  for entry in entries:
-                      intro = entry.get("intro", "").strip()
-                      changes = entry.get("changes", "").strip()
-                      impact = entry.get("impact", "").strip()
-                      result = entry.get("result", "").strip()
-
-                      if intro:
-                          lines.append(intro)
-                      if changes:
-                          lines.append(f"- What changed: {changes}")
-                      if impact:
-                          lines.append(f"- Why it matters: {impact}")
-                      if result:
-                          lines.append(f"- Overall: {result}")
-                      lines.append("")
-
-          def normalize_kind(kind, cleaned_subject):
-              lowered = cleaned_subject.lower()
-              if kind == "feat" and lowered.startswith((
-                  "refactor ",
-                  "rework ",
-                  "improve ",
-                  "optimize ",
-                  "reduce ",
-                  "cleanup ",
-                  "clean up ",
-              )):
-                  return "refactor"
-              return kind
-
-          try:
-              raw = run(["git", "log", "--no-merges", "--pretty=%H%x09%h%x09%s", commit_range]).splitlines()
-          except subprocess.CalledProcessError:
-              raw = []
+              lowered = scope.lower()
+              if lowered in aliases:
+                  return aliases[lowered]
+              parts = [part for part in re.split(r"[^a-zA-Z0-9]+", scope) if part]
+              if not parts:
+                  return scope
+              return "".join(part[:1].upper() + part[1:] for part in parts)
 
           ignore_patterns = [
               r"^docs:\s*sync readme download link\b",
@@ -447,142 +170,86 @@ jobs:
               r"^ci\(release\):",
           ]
 
-          technical_groups = {
-              "Features": [],
-              "Fixes": [],
-              "Improvements": [],
-              "Documentation": [],
-              "Maintenance": []
-          }
-          module_updates = OrderedDict()
-          new_module_updates = OrderedDict()
-          general_updates = []
-          included_commits = 0
-
           prefix_re = re.compile(
-              r"^(?P<kind>feat|fix|refactor|perf|docs|build|ci|chore|test)(?:\((?P<scope>[^)]+)\))?:\s*(?P<subject>.+)$",
+              r"^(?P<kind>feat|fix|refactor|perf|docs|build|ci|chore|test)"
+              r"(?:\((?P<scope>[^)]+)\))?:\s*(?P<subject>.+)$",
               re.IGNORECASE
           )
 
-          for line in raw:
-              if line.count("\t") < 2:
-                  continue
+          try:
+              raw_subjects = run_lines(["git", "log", "--no-merges", "--pretty=%s", commit_range])
+          except subprocess.CalledProcessError:
+              raw_subjects = []
 
-              full_sha, short_sha, subject = line.split("\t", 2)
-              full_sha = full_sha.strip()
-              short_sha = short_sha.strip()
+          bullets = []
+          seen = set()
+
+          for subject in raw_subjects:
               subject = subject.strip()
-              if not full_sha or not short_sha or not subject:
+              if not subject:
                   continue
 
-              lowered = subject.lower()
+              lowered = subject.lower().strip()
               if any(re.search(p, lowered) for p in ignore_patterns):
                   continue
 
               match = prefix_re.match(subject)
+              kind = ""
               scope = ""
-              kind = "maintenance"
-              cleaned_subject = subject
+              body = subject
               if match:
-                  scope = (match.group("scope") or "").strip()
                   kind = match.group("kind").lower()
-                  cleaned_subject = match.group("subject").strip()
+                  scope = (match.group("scope") or "").strip()
+                  body = (match.group("subject") or "").strip()
 
-              kind = normalize_kind(kind, cleaned_subject)
-
-              changed_files = get_changed_files(full_sha)
-              inferred_components, new_modules = infer_components(changed_files)
-              if inferred_components and all(component in {"Documentation", "Release workflow"} for component in inferred_components):
+              body_sentence = sentence(body)
+              if not body_sentence:
                   continue
-              formatted, components = format_commit_line(cleaned_subject, scope, inferred_components)
-              item = f"- {formatted} ([{short_sha}]({repo_url}/commit/{full_sha}))"
 
-              included_commits += 1
+              scope_title = prettify_scope(scope)
+              body_no_dot = body_sentence[:-1]
+              kind_to_verb = {
+                  "feat": "Added",
+                  "fix": "Fixed",
+                  "refactor": "Improved",
+                  "perf": "Improved",
+                  "docs": "Updated",
+              }
 
-              if new_modules:
-                  for component in new_modules:
-                      push_unique(new_module_updates, component, build_new_module_highlight(component, cleaned_subject))
-              elif components:
-                  for component in components:
-                      push_unique(module_updates, component, build_module_update(kind, component, cleaned_subject))
+              if kind in ("build", "ci", "chore", "test"):
+                  continue
+
+              if kind in kind_to_verb:
+                  verb = kind_to_verb[kind]
+                  if scope_title:
+                      bullet = f"{verb} {scope_title}: {body_no_dot}."
+                  else:
+                      bullet = f"{verb}: {body_no_dot}."
               else:
-                  generic_update = build_module_update(kind, "", cleaned_subject)
-                  if generic_update and generic_update not in general_updates:
-                      general_updates.append(generic_update)
+                  bullet = body_sentence
 
-              if kind == "feat":
-                  technical_groups["Features"].append(item)
-              elif kind == "fix":
-                  technical_groups["Fixes"].append(item)
-              elif kind in ("refactor", "perf"):
-                  technical_groups["Improvements"].append(item)
-              elif kind == "docs":
-                  technical_groups["Documentation"].append(item)
-              else:
-                  technical_groups["Maintenance"].append(item)
+              normalized = re.sub(r"\s+", " ", bullet).strip().lower()
+              if not normalized or normalized in seen:
+                  continue
+              seen.add(normalized)
+              bullets.append(bullet)
 
-          lines = []
-          lines.append(f"## {current_tag}")
-          lines.append("")
+          max_bullets = 10
+          lines = [f"## What's New in {current_tag}", ""]
 
-          if prev_tag:
-              lines.append(f"Changes since **{prev_tag}**.")
-          else:
-              lines.append("Initial tagged release changes.")
-          lines.append("")
+          for bullet in bullets[:max_bullets]:
+              lines.append(f"- {bullet}")
 
-          rendered_player_sections = bool(new_module_updates or module_updates or general_updates)
+          if len(bullets) > max_bullets:
+              lines.append(f"- Plus {len(bullets) - max_bullets} additional internal change(s).")
 
-          if included_commits:
-              lines.append("### Highlights")
-              if new_module_updates:
-                  lines.append(f"- New modules: {', '.join(new_module_updates.keys())}")
-              if module_updates:
-                  lines.append(f"- Updated modules: {', '.join(module_updates.keys())}")
-              lines.append("")
-
-          render_update_section(lines, "New Modules", new_module_updates)
-          render_update_section(lines, "Module Updates", module_updates)
-
-          if general_updates:
-              lines.append("### General Improvements")
-              for update in general_updates:
-                  intro = update.get("intro", "").strip()
-                  changes = update.get("changes", "").strip()
-                  impact = update.get("impact", "").strip()
-                  result = update.get("result", "").strip()
-
-                  if intro:
-                      lines.append(intro)
-                  if changes:
-                      lines.append(f"- What changed: {changes}")
-                  if impact:
-                      lines.append(f"- Why it matters: {impact}")
-                  if result:
-                      lines.append(f"- Overall: {result}")
-                  lines.append("")
-              lines.append("")
-
-          should_render_technical = not (included_commits == 1 and rendered_player_sections)
-
-          written_any = False
-          if should_render_technical:
-              for title in ("Features", "Fixes", "Improvements", "Documentation", "Maintenance"):
-                  entries = technical_groups[title]
-                  if not entries:
-                      continue
-                  written_any = True
-                  lines.append(f"### Technical Notes: {title}")
-                  lines.extend(entries)
-                  lines.append("")
-
-          if not written_any and not rendered_player_sections:
-              lines.append("### Maintenance")
+          if not bullets:
               lines.append("- Maintenance release.")
-              lines.append("")
+
+          lines.append("")
 
           if prev_tag:
-              lines.append("### Full Changelog")
+              lines.append("## Full Changelog")
               lines.append(f"[{prev_tag}...{current_tag}]({repo_url}/compare/{prev_tag}...{current_tag})")
               lines.append("")
 
