@@ -14,6 +14,8 @@ import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
 import com.example.addon.modules.JoinWatcher;
 import com.example.addon.modules.LavaBucket;
+import com.example.addon.modules.Ping;
+import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.MaceSpoof;
 import com.example.addon.modules.VClip;
@@ -49,7 +51,9 @@ public class AddonTemplate extends MeteorAddon {
 
         Modules.get().add(new AutoPearl());
         Modules.get().add(new AutoAnvilRename());
+        Modules.get().add(new SyncHub());
         Modules.get().add(new AutoLogin());
+        Modules.get().add(new Ping());
         Modules.get().add(new AntiWasp());
         Modules.get().add(new AutoWasp());
         Modules.get().add(new DiscordRPC());

@@ -29,6 +29,7 @@ import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.accounts.Account;
 import meteordevelopment.meteorclient.systems.accounts.Accounts;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.misc.ISerializable;
 import meteordevelopment.orbit.EventHandler;
@@ -90,27 +91,19 @@ public class AutoLogin extends Module {
     private static final long SYNC_NETWORK_BACKOFF_MS = 10_000;
     private static final long SYNC_CONFIG_BACKOFF_MS = 30_000;
     private static final long SYNC_STREAM_RECONNECT_MS = 5_000;
+    private static final long SYNC_DELTA_LOG_WINDOW_MS = 1_200;
     private static final String SYNC_PULL_PATH = "/pull";
     private static final String SYNC_PUSH_PATH = "/push";
     private static final String SYNC_STREAM_PATH = "/v1/sync/stream";
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
-    private static final int SYNC_FIXED_STREAM_WAIT_MS = 25_000;
-    private static final int SYNC_FIXED_TIMEOUT_SEC = 15;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
-    private final SettingGroup sgSync = settings.createGroup("Sync");
 
     private final Setting<Boolean> autoSave = sgGeneral.add(new BoolSetting.Builder().name("auto-save").description("Save credentials automatically when you manually use /login or /reg.").defaultValue(true).build());
     private final Setting<Integer> newEntryDelay = sgGeneral.add(new IntSetting.Builder().name("new-entry-delay").description("Default delay in ticks for newly saved entries.").defaultValue(40).min(0).sliderRange(0, 200).build());
     private final Setting<Boolean> onlyMultiplayer = sgGeneral.add(new BoolSetting.Builder().name("only-multiplayer").description("Only auto-login on multiplayer servers.").defaultValue(true).build());
     private final Setting<Boolean> debugClipboard = sgGeneral.add(new BoolSetting.Builder().name("debug-clipboard").description("Copies auth-like incoming message diagnostics to the clipboard.").defaultValue(false).build());
-    private final Setting<Boolean> syncEnabled = sgSync.add(new BoolSetting.Builder().name("enabled").description("Sync AutoLogin profiles between clients through remote API.").defaultValue(false).build());
-    private final Setting<String> syncBaseUrl = sgSync.add(new StringSetting.Builder().name("base-url").description("Base URL for sync API. Endpoints: /pull and /push.").defaultValue("").build());
-    private final Setting<String> syncToken = sgSync.add(new StringSetting.Builder().name("token").description("Bearer token for sync API authorization.").defaultValue("").build());
-    private final Setting<String> syncDeviceId = sgSync.add(new StringSetting.Builder().name("device-id").description("Stable ID for this client device.").defaultValue(UUID.randomUUID().toString()).build());
-    private final Setting<Boolean> syncUseStream = sgSync.add(new BoolSetting.Builder().name("use-stream").description("Use server-push stream when backend supports it.").defaultValue(true).build());
-    private final Setting<Boolean> syncAllowInsecureHttp = sgSync.add(new BoolSetting.Builder().name("allow-http").description("Allow plain HTTP for sync endpoint (unsafe).").defaultValue(false).build());
-    private final Setting<Boolean> syncVerbose = sgSync.add(new BoolSetting.Builder().name("verbose-log").description("Show sync lifecycle messages in chat.").defaultValue(false).build());
+    private final Setting<Boolean> syncVerbose = sgGeneral.add(new BoolSetting.Builder().name("sync-verbose-log").description("Show AutoLogin sync lifecycle messages in chat.").defaultValue(false).build());
 
     private final List<AutoLoginProfile> profiles = new ArrayList<>();
     private final ArrayDeque<DebugChatPacketSnapshot> recentChatPackets = new ArrayDeque<>();
@@ -149,6 +142,16 @@ public class AutoLogin extends Module {
     private volatile long syncStreamLastReadyRevision = -1;
     private volatile String syncStreamConnectionKey = "";
     private boolean syncInitialSyncPending = true;
+    private boolean syncDeltaPending;
+    private long syncDeltaLastUpdateMs;
+    private long syncDeltaLastRevision = -1;
+    private String syncDeltaWriter = "";
+    private int syncDeltaAddedCount;
+    private int syncDeltaRemovedCount;
+    private int syncDeltaChangedCount;
+    private final LinkedHashSet<String> syncDeltaAddedUsers = new LinkedHashSet<>();
+    private final LinkedHashSet<String> syncDeltaRemovedUsers = new LinkedHashSet<>();
+    private final LinkedHashSet<String> syncDeltaChangedRefs = new LinkedHashSet<>();
 
     public AutoLogin() {
         super(AddonTemplate.CATEGORY, "auto-login", "Automatically sends saved /login or /reg commands matched by current username and server.");
@@ -256,6 +259,7 @@ public class AutoLogin extends Module {
 
     private void handleAutoLoginTick() {
         handleSyncTick();
+        flushPendingSyncDeltaLog(false);
         ensureJoinContextInitialized("tick");
         if (!sentThisJoin) processPendingReceiveFallback();
         if (sentThisJoin || pendingProfile == null || mc.player == null || mc.world == null || mc.player.networkHandler == null) return;
@@ -420,6 +424,8 @@ public class AutoLogin extends Module {
     }
 
     private void resetSyncState() {
+        flushPendingSyncDeltaLog(true);
+        clearSyncDeltaLogState();
         stopSyncStream();
         syncInFlight = false;
         lastSyncSuccessMs = 0;
@@ -563,7 +569,7 @@ public class AutoLogin extends Module {
             + " promptWorldTime=" + promptWorldTime
             + " worldTime=" + (mc.world == null ? -1 : mc.world.getTime())
             + " joinAgeMs=" + joinAgeMs
-            + " syncEnabled=" + syncEnabled.get()
+            + " syncEnabled=" + isAutoLoginSyncEnabled()
             + " syncInFlight=" + syncInFlight
             + " syncStreamConnected=" + syncStreamConnected
             + " syncStreamConnecting=" + syncStreamConnecting
@@ -648,14 +654,45 @@ public class AutoLogin extends Module {
         return names;
     }
 
+    private SyncRuntimeConfig resolveSyncRuntimeConfig() {
+        Modules modules = Modules.get();
+        if (modules == null) return null;
+
+        SyncHub syncHub = modules.get(SyncHub.class);
+        if (syncHub == null || !syncHub.isFeatureEnabled(SyncHub.SyncFeature.AUTO_LOGIN)) return null;
+
+        String deviceId = syncHub.getOrCreateDeviceId();
+        if (deviceId.isBlank()) return null;
+
+        return new SyncRuntimeConfig(
+            syncHub.getBaseUrl(),
+            syncHub.getToken(),
+            deviceId,
+            syncHub.useStream(),
+            syncHub.allowHttp(),
+            Math.max(3, syncHub.requestTimeoutSec()),
+            Math.max(1_000, syncHub.streamWaitMs())
+        );
+    }
+
+    private String currentSyncDeviceId() {
+        SyncRuntimeConfig config = resolveSyncRuntimeConfig();
+        return config == null ? "" : config.deviceId();
+    }
+
+    private boolean isAutoLoginSyncEnabled() {
+        return resolveSyncRuntimeConfig() != null;
+    }
+
     private void handleSyncTick() {
-        if (!syncEnabled.get()) {
+        SyncRuntimeConfig sync = resolveSyncRuntimeConfig();
+        if (sync == null) {
             stopSyncStream();
             return;
         }
         if (syncInFlight) return;
 
-        String baseUrl = normalizeSyncBaseUrl(syncBaseUrl.get());
+        String baseUrl = normalizeSyncBaseUrl(sync.baseUrl());
         if (baseUrl.isBlank()) {
             lastSyncStatus = "skip:no-base-url";
             stopSyncStream();
@@ -669,19 +706,15 @@ public class AutoLogin extends Module {
             stopSyncStream();
             return;
         }
-        if (!syncAllowInsecureHttp.get() && baseUrl.startsWith("http://")) {
+        if (!sync.allowHttp() && baseUrl.startsWith("http://")) {
             lastSyncStatus = "skip:http-disabled";
             stopSyncStream();
             return;
         }
 
-        String deviceId = syncDeviceId.get() == null ? "" : syncDeviceId.get().trim();
-        if (deviceId.isBlank()) {
-            deviceId = UUID.randomUUID().toString();
-            syncDeviceId.set(deviceId);
-        }
+        String deviceId = sync.deviceId();
 
-        if (syncUseStream.get()) ensureSyncStream(baseUrl, deviceId, syncToken.get(), SYNC_FIXED_TIMEOUT_SEC);
+        if (sync.useStream()) ensureSyncStream(baseUrl, deviceId, sync.token(), sync.timeoutSec(), sync.streamWaitMs());
         else stopSyncStream();
 
         long now = System.currentTimeMillis();
@@ -691,7 +724,7 @@ public class AutoLogin extends Module {
         String localFingerprint = computeFingerprint(localSnapshot);
         boolean localChanged = !localFingerprint.equals(lastSyncedFingerprint);
         boolean streamTriggeredPull = consumePendingStreamPullSignal();
-        boolean shouldBootstrapPull = !syncUseStream.get() && lastKnownSyncRevision < 0;
+        boolean shouldBootstrapPull = !sync.useStream() && lastKnownSyncRevision < 0;
         boolean shouldPull = streamTriggeredPull || shouldBootstrapPull;
         boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull;
         if (!shouldRun) return;
@@ -701,9 +734,9 @@ public class AutoLogin extends Module {
         runSyncCycleAsync(
             baseUrl,
             deviceId,
-            syncToken.get(),
-            SYNC_FIXED_TIMEOUT_SEC,
-            SYNC_FIXED_STREAM_WAIT_MS,
+            sync.token(),
+            sync.timeoutSec(),
+            sync.streamWaitMs(),
             lastKnownSyncRevision,
             localSnapshot,
             localFingerprint,
@@ -830,7 +863,7 @@ public class AutoLogin extends Module {
                 logSync("AutoLogin sync push ok (rev=%d).", lastKnownSyncRevision);
 
                 if (result.pushResult().profiles() != null) {
-                    applyRemoteProfiles(result.pushResult().profiles(), result.pushResult().revision(), syncDeviceId.get());
+                    applyRemoteProfiles(result.pushResult().profiles(), result.pushResult().revision(), currentSyncDeviceId());
                 }
             } else if (result.pushResult().ok() && result.pushResult().conflict()) {
                 lastSyncStatus = "push-conflict";
@@ -863,9 +896,17 @@ public class AutoLogin extends Module {
         return true;
     }
 
-    private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec) {
+    private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec, int waitMs) {
         String tokenValue = token == null ? "" : token.trim();
-        String connectionKey = baseUrl + "|" + deviceId + "|" + Integer.toHexString(tokenValue.hashCode());
+        String connectionKey = baseUrl
+            + "|"
+            + deviceId
+            + "|"
+            + timeoutSec
+            + "|"
+            + waitMs
+            + "|"
+            + Integer.toHexString(tokenValue.hashCode());
         if ((syncStreamConnected || syncStreamConnecting) && !connectionKey.equals(syncStreamConnectionKey)) stopSyncStream();
         if (syncStreamConnected || syncStreamConnecting) return;
         if (syncStreamReconnectAtMs > System.currentTimeMillis()) return;
@@ -875,9 +916,9 @@ public class AutoLogin extends Module {
         syncStreamConnectionKey = connectionKey;
 
         long knownRevision = Math.max(-1, lastKnownSyncRevision);
-        int waitMs = Math.max(1_000, SYNC_FIXED_STREAM_WAIT_MS);
+        int safeWaitMs = Math.max(1_000, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
-        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, waitMs));
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, safeWaitMs));
     }
 
     private void runSyncStreamLoop(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
@@ -965,7 +1006,9 @@ public class AutoLogin extends Module {
         if (revision > lastKnownSyncRevision) {
             syncStreamPendingRevision = revision;
             syncStreamUpdatePending = true;
-            logSync("AutoLogin sync stream event %s (rev=%d, by=%s).", eventType == null || eventType.isBlank() ? "<none>" : eventType, revision, formatSyncWriter(writer));
+            if (revision > lastKnownSyncRevision + 1) {
+                logSync("AutoLogin sync stream catch-up %s (rev=%d, by=%s).", eventType == null || eventType.isBlank() ? "<none>" : eventType, revision, formatSyncWriter(writer));
+            }
         }
     }
 
@@ -1222,7 +1265,6 @@ public class AutoLogin extends Module {
         lastSyncSuccessMs = System.currentTimeMillis();
         lastSyncStatus = "pull-applied(" + remoteProfiles.size() + ")";
         String writer = formatSyncWriter(sourceWriter);
-        logSync("AutoLogin sync pull applied %d profiles (rev=%d, by=%s).", remoteProfiles.size(), lastKnownSyncRevision, writer);
         logSyncProfileDiff(previousProfiles, remoteProfiles, writer);
     }
 
@@ -1251,24 +1293,67 @@ public class AutoLogin extends Module {
         }
 
         if (added.isEmpty() && removed.isEmpty() && changed.isEmpty()) return;
+        queueSyncDeltaLog(writer, lastKnownSyncRevision, added, removed, changed);
+    }
 
-        added.sort(Comparator.comparing(this::formatProfileRef));
-        removed.sort(Comparator.comparing(this::formatProfileRef));
-        changed.sort(String::compareToIgnoreCase);
+    private void queueSyncDeltaLog(String writer, long revision, List<SyncProfileData> added, List<SyncProfileData> removed, List<String> changed) {
+        if (!syncVerbose.get()) return;
+        long now = System.currentTimeMillis();
 
-        logSync("AutoLogin sync delta (rev=%d, by=%s): +%d -%d ~%d.", lastKnownSyncRevision, writer, added.size(), removed.size(), changed.size());
-        if (!added.isEmpty()) {
-            logSync("AutoLogin sync added by: %s", writer);
-            logSync("AutoLogin sync added usernames: %s", formatUsernameList(added, 10));
+        boolean sameWriter = stringsEqual(syncDeltaWriter, writer);
+        boolean sameWindow = syncDeltaPending && sameWriter && now - syncDeltaLastUpdateMs <= SYNC_DELTA_LOG_WINDOW_MS;
+        if (!sameWindow) {
+            flushPendingSyncDeltaLog(true);
+            clearSyncDeltaLogState();
+            syncDeltaPending = true;
+            syncDeltaWriter = writer == null ? "" : writer;
         }
-        if (!removed.isEmpty()) {
-            logSync("AutoLogin sync removed by: %s", writer);
-            logSync("AutoLogin sync removed usernames: %s", formatUsernameList(removed, 10));
-        }
-        if (!changed.isEmpty()) {
-            logSync("AutoLogin sync updated by: %s", writer);
-            logSync("AutoLogin sync updated: %s", formatTextList(changed, 6));
-        }
+
+        syncDeltaLastRevision = Math.max(syncDeltaLastRevision, revision);
+        syncDeltaLastUpdateMs = now;
+        syncDeltaAddedCount += added.size();
+        syncDeltaRemovedCount += removed.size();
+        syncDeltaChangedCount += changed.size();
+
+        for (SyncProfileData data : added) syncDeltaAddedUsers.add(displayValue(data.username(), "<empty-user>"));
+        for (SyncProfileData data : removed) syncDeltaRemovedUsers.add(displayValue(data.username(), "<empty-user>"));
+        syncDeltaChangedRefs.addAll(changed);
+    }
+
+    private void flushPendingSyncDeltaLog(boolean force) {
+        if (!syncDeltaPending) return;
+        if (!force && System.currentTimeMillis() - syncDeltaLastUpdateMs < SYNC_DELTA_LOG_WINDOW_MS) return;
+
+        String addedUsers = syncDeltaAddedCount > 0 ? formatTextList(new ArrayList<>(syncDeltaAddedUsers), 8) : "<none>";
+        String removedUsers = syncDeltaRemovedCount > 0 ? formatTextList(new ArrayList<>(syncDeltaRemovedUsers), 8) : "<none>";
+        String updatedRefs = syncDeltaChangedCount > 0 ? formatTextList(new ArrayList<>(syncDeltaChangedRefs), 5) : "<none>";
+
+        logSync(
+            "AutoLogin sync delta (rev=%d, by=%s): +%d [%s] -%d [%s] ~%d [%s].",
+            syncDeltaLastRevision,
+            displayValue(syncDeltaWriter, "<remote>"),
+            syncDeltaAddedCount,
+            addedUsers,
+            syncDeltaRemovedCount,
+            removedUsers,
+            syncDeltaChangedCount,
+            updatedRefs
+        );
+
+        clearSyncDeltaLogState();
+    }
+
+    private void clearSyncDeltaLogState() {
+        syncDeltaPending = false;
+        syncDeltaLastUpdateMs = 0;
+        syncDeltaLastRevision = -1;
+        syncDeltaWriter = "";
+        syncDeltaAddedCount = 0;
+        syncDeltaRemovedCount = 0;
+        syncDeltaChangedCount = 0;
+        syncDeltaAddedUsers.clear();
+        syncDeltaRemovedUsers.clear();
+        syncDeltaChangedRefs.clear();
     }
 
     private static Map<String, SyncProfileData> indexProfilesByIdentity(List<SyncProfileData> snapshot) {
@@ -1322,7 +1407,7 @@ public class AutoLogin extends Module {
         String writer = sourceWriter == null ? "" : sourceWriter.trim();
         if (writer.isBlank()) return "<remote>";
 
-        String currentDevice = syncDeviceId.get() == null ? "" : syncDeviceId.get().trim();
+        String currentDevice = currentSyncDeviceId();
         if (!currentDevice.isBlank() && writer.equalsIgnoreCase(currentDevice)) return "this-device";
         return writer;
     }
@@ -1810,6 +1895,15 @@ public class AutoLogin extends Module {
         };
     }
 
+    private record SyncRuntimeConfig(
+        String baseUrl,
+        String token,
+        String deviceId,
+        boolean useStream,
+        boolean allowHttp,
+        int timeoutSec,
+        int streamWaitMs
+    ) {}
     private record SyncProfileData(boolean enabled, String username, String server, LoginMode mode, String password, int delay) {}
     private record SyncPullResult(boolean ok, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}
     private record SyncPushResult(boolean ok, boolean applied, boolean conflict, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}
