@@ -109,6 +109,50 @@ repositories {
         name = "meteor-maven-snapshots"
         url = uri("https://maven.meteordev.org/snapshots")
     }
+    maven {
+        name = "Modrinth Maven"
+        url = uri("https://api.modrinth.com/maven")
+        content {
+            includeGroup("maven.modrinth")
+        }
+    }
+    maven {
+        name = "Xander Maven"
+        url = uri("https://maven.isxander.dev/releases")
+        content {
+            includeGroupAndSubgroups("dev.isxander")
+            includeGroupAndSubgroups("org.quiltmc")
+        }
+    }
+    maven {
+        name = "BlameJared"
+        url = uri("https://maven.blamejared.com")
+        content {
+            includeGroupAndSubgroups("com.blamejared.searchables")
+        }
+    }
+    maven {
+        name = "TerraformersMC"
+        url = uri("https://maven.terraformersmc.com/releases/")
+        content {
+            includeGroup("com.terraformersmc")
+        }
+    }
+    maven {
+        name = "WTHIT"
+        url = uri("https://maven2.bai.lol")
+        content {
+            includeGroupAndSubgroups("mcp.mobius.waila")
+            includeGroupAndSubgroups("lol.bai")
+        }
+    }
+    maven {
+        name = "MisterPeModder"
+        url = uri("https://maven.misterpemodder.com/libs-release/")
+        content {
+            includeGroupAndSubgroups("com.misterpemodder")
+        }
+    }
 }
 
 dependencies {
@@ -160,6 +204,11 @@ tasks {
 
         from("LICENSE") {
             rename { "${it}_${inputs.properties["archivesName"]}" }
+        }
+
+        from("chesttracker-port/chesttracker-port-embedded.jar") {
+            into("META-INF/jars")
+            rename { "chesttracker-port-embedded.jar" }
         }
     }
 

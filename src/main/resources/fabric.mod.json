@@ -22,6 +22,11 @@
   "mixins": [
     "addon-template.mixins.json"
   ],
+  "jars": [
+    {
+      "file": "META-INF/jars/chesttracker-port-embedded.jar"
+    }
+  ],
   "custom": {
     "meteor-client:color": "225,25,25"
   },

@@ -65,6 +65,13 @@ public class SyncHub extends Module {
         .build()
     );
 
+    private final Setting<Boolean> chestTrackerSync = sgFeatures.add(new BoolSetting.Builder()
+        .name("chest-tracker")
+        .description("Allow ChestTracker module to sync through this hub.")
+        .defaultValue(true)
+        .build()
+    );
+
     public SyncHub() {
         super(
             AddonTemplate.CATEGORY,
@@ -78,6 +85,7 @@ public class SyncHub extends Module {
         return switch (feature) {
             case AUTO_LOGIN -> autoLoginSync.get();
             case PING -> pingSync.get();
+            case CHEST_TRACKER -> chestTrackerSync.get();
         };
     }
 
@@ -116,6 +124,7 @@ public class SyncHub extends Module {
 
     public enum SyncFeature {
         AUTO_LOGIN,
-        PING
+        PING,
+        CHEST_TRACKER
     }
 }

@@ -9,6 +9,7 @@ import com.example.addon.modules.AutoAnvilRename;
 import com.example.addon.modules.AutoLogin;
 import com.example.addon.modules.AutoPearl;
 import com.example.addon.modules.AutoWasp;
+import com.example.addon.modules.ChestTrackerModule;
 import com.example.addon.modules.DiscordRPC;
 import com.example.addon.modules.HClip;
 import com.example.addon.modules.AutoCev;
@@ -65,6 +66,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules.get().add(new VClip());
         Modules.get().add(new HighwayBuilder());
         Modules.get().add(new MaceSpoof());
+        Modules.get().add(new ChestTrackerModule());
 
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());

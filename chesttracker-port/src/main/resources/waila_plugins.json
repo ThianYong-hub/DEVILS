@@ -1,0 +1,6 @@
+{
+  "devils-addon-chesttracker:wthit": {
+    "initializer": "com.example.addon.chesttracker.impl.compat.mods.wthit.ChestTrackerWTHITPlugin",
+    "side": "client"
+  }
+}
