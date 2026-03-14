@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.29`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.29/devils-addon-0.0.29.jar)
+- Current build (`v0.0.30`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.30/devils-addon-0.0.30.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -50,8 +50,8 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 ## ChestTracker Storage and Sync
 
 - Base addon directory: `.minecraft/devils-addon`
-- ChestTracker multiplayer banks: `.minecraft/devils-addon/multiplayer/<server>.nbt`
-- ChestTracker singleplayer banks: `.minecraft/devils-addon/singleplayer/<world>.nbt`
+- ChestTracker multiplayer banks: `.minecraft/devils-addon/chesttracker/multiplayer/<server>.nbt`
+- ChestTracker singleplayer banks: `.minecraft/devils-addon/chesttracker/singleplayer/<world>.nbt`
 - Metadata files are stored next to each bank as `.nbt.meta`.
 - When SyncHub is enabled for ChestTracker, bank data is synchronized per server namespace.
 
@@ -98,13 +98,13 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.29`)
+## Release Notes (`v0.0.30`)
 
-- Fixed ChestTracker persistence after reconnect/restart: connection settings and bank state now reload reliably.
-- Added legacy-to-stable bank key migration for multiplayer profiles to prevent accidental empty bank resets.
-- Added metadata recovery fallback when `.nbt.meta` is missing but bank `.nbt` is present.
-- Improved sync bank id resolution to avoid pushing/pulling into wrong banks on first join.
-- Updated embedded ChestTracker port jar with the persistence and migration fixes.
+- Fixed ChestTracker bank decoding for legacy position key formats (`x,y,z`, spaced triples, packed long), preventing false `Invalid number of coordinates` load failures.
+- Added robust NBT recovery chain for bank files (`.old`, `.corrupt`, `.corrupt.corrupt`) with non-empty restoration priority.
+- Prevented destructive empty-bank recreation after failed load: existing bank files are no longer silently overwritten by new blank banks.
+- Added automatic bank pre-load before opening ChestTracker GUI via keybind, so multiplayer banks open directly instead of falling back to bank manager.
+- Moved and standardized ChestTracker storage under `.minecraft/devils-addon/chesttracker/*`, with legacy layout migration.
 
 ## License
 

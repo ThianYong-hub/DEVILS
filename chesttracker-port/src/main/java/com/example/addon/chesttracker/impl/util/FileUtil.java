@@ -13,7 +13,9 @@ import org.jetbrains.annotations.Nullable;
 import com.example.addon.chesttracker.impl.ChestTracker;
 import com.example.addon.chesttracker.impl.config.ChestTrackerConfig;
 
+import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -75,11 +77,18 @@ public class FileUtil {
         if (Files.isRegularFile(path)) {
             try {
                 DynamicOps<Tag> ops = registries == null ? NbtOps.INSTANCE : registries.createSerializationContext(NbtOps.INSTANCE);
-                var tag = NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
+                var tag = readNbtTag(path);
                 var loaded = codec.decode(ops, tag);
+                if (loaded.isError() && registries != null) {
+                    // Recover from registry-context mismatches by decoding with plain NBT ops.
+                    loaded = codec.decode(NbtOps.INSTANCE, tag);
+                }
                 if (loaded.isError()) {
+                    // Decode failures are not always physical file corruption (e.g. schema/version mismatch).
+                    // Keep the original file in place for recovery/migration code paths.
                     //noinspection OptionalGetWithoutIsPresent
-                    throw new IOException("Invalid NBT: %s".formatted(loaded.error().get().message()));
+                    LOGGER.error("Invalid NBT payload at {}: {}", path, loaded.error().get().message());
+                    return Optional.empty();
                 } else {
                     return loaded.result().map(Pair::getFirst);
                 }
@@ -89,6 +98,20 @@ public class FileUtil {
             }
         }
         return Optional.empty();
+    }
+
+    private static Tag readNbtTag(Path path) throws IOException {
+        try {
+            return NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
+        } catch (IOException compressedReadError) {
+            // Some external writers may persist plain (non-gzip) NBT. Accept both formats.
+            try (InputStream in = Files.newInputStream(path); DataInputStream dataIn = new DataInputStream(in)) {
+                return NbtIo.read(dataIn, NbtAccounter.unlimitedHeap());
+            } catch (IOException plainReadError) {
+                plainReadError.addSuppressed(compressedReadError);
+                throw plainReadError;
+            }
+        }
     }
 
     public static void tryMove(Path from, Path to, CopyOption... options) {

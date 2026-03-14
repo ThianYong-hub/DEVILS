@@ -24,6 +24,7 @@ public class Storage {
 
     private static final Logger LOGGER = ChestTracker.getLogger("Storage");
     public static Backend backend;
+    private static HolderLookup.@org.jetbrains.annotations.Nullable Provider lastKnownRegistries;
 
     public static void setBackend(Backend backend) {
         Storage.backend = backend;
@@ -73,12 +74,7 @@ public class Storage {
         if (existing.isPresent() && id.equals(existing.get().getId()))
             return existing;
 
-        var level = Minecraft.getInstance().level;
-        HolderLookup.Provider registries = null;
-
-        if (level != null) {
-            registries = level.registryAccess();
-        }
+        HolderLookup.Provider registries = resolveRegistries();
 
         LOGGER.debug("Loading {} using {}", id, backend.getClass().getSimpleName());
         var loaded = backend.load(id, registries);
@@ -93,14 +89,31 @@ public class Storage {
             return;
         }
 
-        var level = Minecraft.getInstance().level;
-        HolderLookup.Provider registries = null;
-
-        if (level != null) {
-            registries = level.registryAccess();
-        }
+        HolderLookup.Provider registries = resolveRegistries();
 
         bank.getMetadata().updateModified();
         backend.save(bank, registries);
+    }
+
+    private static HolderLookup.@org.jetbrains.annotations.Nullable Provider resolveRegistries() {
+        Minecraft mc = Minecraft.getInstance();
+
+        if (mc.level != null) {
+            lastKnownRegistries = mc.level.registryAccess();
+            return lastKnownRegistries;
+        }
+
+        try {
+            if (mc.getConnection() != null) {
+                HolderLookup.Provider fromConnection = mc.getConnection().registryAccess();
+                if (fromConnection != null) {
+                    lastKnownRegistries = fromConnection;
+                    return fromConnection;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return lastKnownRegistries;
     }
 }

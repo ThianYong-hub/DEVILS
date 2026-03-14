@@ -8,6 +8,8 @@ import com.example.addon.chesttracker.impl.storage.ConnectionSettings;
 import com.example.addon.chesttracker.impl.storage.Storage;
 import com.example.addon.chesttracker.impl.util.Constants;
 import com.example.addon.chesttracker.impl.util.Strings;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import red.jackf.jackfredlib.client.api.gps.Coordinate;
 
 import java.util.HashMap;
@@ -18,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 
 public class MemoryBankAccessImpl implements MemoryBankAccess {
+    private static final Logger LOGGER = LogManager.getLogger("DevilsAddon/ChestTracker/MemoryBankAccess");
     public static final MemoryBankAccessImpl INSTANCE = new MemoryBankAccessImpl();
     @Nullable
     private static MemoryBankImpl loaded = null;
@@ -29,11 +32,22 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
     @Override
     public boolean loadOrCreate(String memoryBankId, String creationName) {
         INSTANCE.unload();
-        loaded = Storage.load(memoryBankId).orElseGet(() -> {
-            var bank = new MemoryBankImpl(Metadata.blankWithName(creationName), new HashMap<>());
-            bank.setId(memoryBankId);
-            return bank;
-        });
+        Optional<MemoryBankImpl> existing = Storage.load(memoryBankId);
+        if (existing.isPresent()) {
+            loaded = existing.get();
+            return true;
+        }
+
+        // If a bank file exists but failed to load, do not destroy user data by creating a fresh one.
+        if (Storage.exists(memoryBankId)) {
+            LOGGER.error("Refusing to recreate existing memory bank '{}' after load failure.", memoryBankId);
+            loaded = null;
+            return false;
+        }
+
+        var bank = new MemoryBankImpl(Metadata.blankWithName(creationName), new HashMap<>());
+        bank.setId(memoryBankId);
+        loaded = bank;
         INSTANCE.save();
 
         return true;

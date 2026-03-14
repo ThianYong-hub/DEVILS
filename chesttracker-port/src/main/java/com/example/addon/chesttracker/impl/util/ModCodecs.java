@@ -43,22 +43,42 @@ public class ModCodecs {
      */
     public static final Codec<BlockPos> BLOCK_POS_STRING = Codec.STRING.comapFlatMap(
             s -> {
-                String[] split = s.split(",");
-                if (split.length == 3) {
-                    try {
-                        int x = Integer.parseInt(split[0]);
-                        int y = Integer.parseInt(split[1]);
-                        int z = Integer.parseInt(split[2]);
+                String raw = s == null ? "" : s.trim();
+                if (raw.isEmpty()) return DataResult.error(() -> "Empty coordinate key");
 
-                        return DataResult.success(new BlockPos(x, y, z));
-                    } catch (NumberFormatException ex) {
-                        return DataResult.error(() -> "Invalid integer in key");
-                    }
-                } else {
-                    return DataResult.error(() -> "Invalid number of coordinates: " + split.length);
+                // Modern compact format: x,y,z
+                String[] csv = raw.split(",");
+                if (csv.length == 3) {
+                    return parseTriple(csv[0], csv[1], csv[2]);
                 }
+
+                // Legacy textual format: x y z
+                String[] spaced = raw.split("\\s+");
+                if (spaced.length == 3) {
+                    return parseTriple(spaced[0], spaced[1], spaced[2]);
+                }
+
+                // Legacy long-packed format.
+                try {
+                    long packed = Long.parseLong(raw);
+                    return DataResult.success(BlockPos.of(packed));
+                } catch (NumberFormatException ignored) {
+                }
+
+                return DataResult.error(() -> "Invalid number of coordinates: " + Math.max(csv.length, spaced.length));
             }, pos -> "%d,%d,%d".formatted(pos.getX(), pos.getY(), pos.getZ())
     );
+
+    private static DataResult<BlockPos> parseTriple(String sx, String sy, String sz) {
+        try {
+            int x = Integer.parseInt(sx.trim());
+            int y = Integer.parseInt(sy.trim());
+            int z = Integer.parseInt(sz.trim());
+            return DataResult.success(new BlockPos(x, y, z));
+        } catch (NumberFormatException ex) {
+            return DataResult.error(() -> "Invalid integer in key");
+        }
+    }
 
     /**
      * Compact codec for an ItemStack. Ignores the count on both serialization and deserialization. Deprecated.

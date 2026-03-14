@@ -44,7 +44,9 @@ import com.example.addon.chesttracker.impl.storage.ConnectionSettings;
 import com.example.addon.chesttracker.impl.storage.Storage;
 import com.example.addon.chesttracker.impl.storage.backend.JsonBackend;
 import com.example.addon.chesttracker.impl.storage.backend.NbtBackend;
+import com.example.addon.chesttracker.impl.util.Constants;
 import red.jackf.whereisit.client.api.events.ShouldIgnoreKey;
+import red.jackf.jackfredlib.client.api.gps.Coordinate;
 
 import java.util.Optional;
 
@@ -93,6 +95,13 @@ public class ChestTracker implements ClientModInitializer {
 
     public static void openInGame(Minecraft client, @Nullable Screen parent) {
         if (!ChestTrackerRuntimeState.isModuleEnabled()) return;
+
+        // In some reconnect phases the provider join callback might not have loaded a bank yet.
+        // Try to load the default bank for the current coordinate before opening the GUI.
+        if (MemoryBankAccessImpl.INSTANCE.getLoadedInternal().isEmpty()) {
+            Coordinate.getCurrent().ifPresent(MemoryBankAccessImpl.INSTANCE::loadWithDefaults);
+        }
+
         client.setScreen(new ChestTrackerScreen(parent));
     }
 
@@ -102,6 +111,7 @@ public class ChestTracker implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        Constants.migrateLegacyStorageLayout();
         ChestTrackerConfig.init();
         applyRuntimeSettingsFromConfig();
         LOGGER.debug("Loading ChestTracker");

@@ -88,7 +88,7 @@ public class ChestTrackerModule extends Module {
     private static final String ENDER_CHEST_SUFFIX = ":ender_chest";
     private static final String SKYBLOCK_ENDER_CHEST_SUFFIX = ":skyblock_ender_chest";
     private static final String SHARE_ENDER_CHEST_NAMESPACE = "shareenderchest:";
-    private static final String LOCAL_MODULE_SETTINGS_FILE = "chesttracker/module-settings.json";
+    private static final String LOCAL_MODULE_SETTINGS_FILE = "module-settings.json";
     private static final int DEVILS_THEME_ACCENT_R = 92;
     private static final int DEVILS_THEME_ACCENT_G = 0;
     private static final int DEVILS_THEME_ACCENT_B = 0;
@@ -246,7 +246,7 @@ public class ChestTrackerModule extends Module {
 
         WButton openFolder = list.add(theme.button("Open Data Folder")).expandX().widget();
         openFolder.action = () -> {
-            Path path = FabricLoader.getInstance().getGameDir().resolve("devils-addon");
+            Path path = storageDir();
             Util.getOperatingSystem().open(path.toUri().toString());
         };
 
@@ -751,7 +751,7 @@ public class ChestTrackerModule extends Module {
     }
 
     private Path storageDir() {
-        return FabricLoader.getInstance().getGameDir().resolve("devils-addon");
+        return FabricLoader.getInstance().getGameDir().resolve("devils-addon").resolve("chesttracker");
     }
 
     private Snapshot readLocalSnapshot(String bankId, String serverKey) {
@@ -776,7 +776,9 @@ public class ChestTrackerModule extends Module {
         try {
             byte[] nbtBytes = unzipBase64(snapshot.nbt);
             if (nbtBytes.length == 0) return false;
-            writeAtomically(storageDir().resolve(snapshot.bankId + ".nbt"), nbtBytes);
+            byte[] normalized = normalizeCompressedMemoryBankNbt(nbtBytes);
+            if (normalized.length == 0) return false;
+            writeAtomically(storageDir().resolve(snapshot.bankId + ".nbt"), normalized);
             return true;
         } catch (Throwable ignored) {
             return false;
@@ -1204,6 +1206,96 @@ public class ChestTrackerModule extends Module {
                 return NbtIo.readCompound(in, NbtSizeTracker.ofUnlimitedBytes());
             }
         }
+    }
+
+    private static byte[] normalizeCompressedMemoryBankNbt(byte[] rawNbtBytes) {
+        if (rawNbtBytes == null || rawNbtBytes.length == 0) return new byte[0];
+
+        try {
+            NbtCompound root = readMemoryBankNbt(rawNbtBytes);
+            if (root == null) return new byte[0];
+            if (looksLikeLegacySingleKeyRoot(root)) {
+                root = wrapLegacySingleKeyRoot(root);
+            }
+            if (!isLikelyMemoryBankRoot(root)) return new byte[0];
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            NbtIo.writeCompressed(root, out);
+            return out.toByteArray();
+        } catch (Throwable ignored) {
+            return new byte[0];
+        }
+    }
+
+    private static boolean looksLikeLegacySingleKeyRoot(NbtCompound root) {
+        if (root == null || root.isEmpty()) return false;
+        boolean hasMemories = root.contains("memories");
+        boolean hasOverrides = root.contains("overrides");
+        if (!hasMemories && !hasOverrides) return false;
+
+        for (String key : root.getKeys()) {
+            if (isResourceLikeKey(key)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isLikelyMemoryBankRoot(NbtCompound root) {
+        if (root == null) return false;
+        if (root.isEmpty()) return true;
+        boolean hasResourceLikeTopKey = false;
+
+        for (String key : root.getKeys()) {
+            if ("memories".equals(key) || "overrides".equals(key)) return false;
+            if (isResourceLikeKey(key)) hasResourceLikeTopKey = true;
+        }
+        return hasResourceLikeTopKey;
+    }
+
+    private static NbtCompound wrapLegacySingleKeyRoot(NbtCompound legacyRoot) {
+        NbtCompound wrapped = new NbtCompound();
+        wrapped.put(inferLegacySingleMemoryKeyId(legacyRoot), legacyRoot.copy());
+        return wrapped;
+    }
+
+    private static String inferLegacySingleMemoryKeyId(NbtCompound legacyRoot) {
+        final String fallback = "minecraft:chest";
+        if (legacyRoot == null || !legacyRoot.contains("memories")) return fallback;
+
+        Optional<NbtCompound> memoriesOpt = legacyRoot.getCompound("memories");
+        if (memoriesOpt.isEmpty()) return fallback;
+        NbtCompound memories = memoriesOpt.get();
+        if (memories.isEmpty()) return fallback;
+
+        java.util.HashMap<String, Integer> counts = new java.util.HashMap<>();
+        for (String posKey : memories.getKeys()) {
+            NbtElement element = memories.get(posKey);
+            if (!(element instanceof NbtCompound memory)) continue;
+            Optional<String> containerOpt = memory.getString("container");
+            if (containerOpt.isEmpty()) continue;
+            String container = containerOpt.get();
+            if (!isResourceLikeKey(container)) continue;
+            counts.put(container, counts.getOrDefault(container, 0) + 1);
+        }
+
+        String best = fallback;
+        int bestCount = -1;
+        for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
+            if (entry.getValue() > bestCount) {
+                best = entry.getKey();
+                bestCount = entry.getValue();
+            }
+        }
+        return best;
+    }
+
+    private static boolean isResourceLikeKey(String value) {
+        if (value == null || value.isBlank()) return false;
+        int colon = value.indexOf(':');
+        if (colon <= 0 || colon >= value.length() - 1) return false;
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isWhitespace(value.charAt(i))) return false;
+        }
+        return true;
     }
 
     private static boolean removePrivateEnderChestKeys(NbtCompound compound) {
