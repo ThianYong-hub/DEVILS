@@ -4,7 +4,7 @@
 
 ## ডাউনলোড
 
-- বর্তমান বিল্ড (`v0.0.27`): [jar ডাউনলোড](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.27/devils-addon-0.0.27.jar)
+- বর্তমান বিল্ড (`v0.0.28`): [jar ডাউনলোড](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.28/devils-addon-0.0.28.jar)
 - সর্বশেষ রিলিজ পেজ: [খুলুন](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - সব রিলিজ: [খুলুন](https://github.com/ThianYong-hub/DEVILS/releases)
 
