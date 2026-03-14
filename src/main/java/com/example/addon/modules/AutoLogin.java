@@ -4,6 +4,7 @@ import com.example.addon.AddonTemplate;
 import com.example.addon.gui.screens.settings.AutoLoginEditScreen;
 import com.example.addon.util.SyncCrypto;
 import com.example.addon.util.CrashGuard;
+import com.example.addon.util.SyncRequestSigner;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -672,6 +673,8 @@ public class AutoLogin extends Module {
         if (deviceId.isBlank()) return null;
         String encryptionKey = syncHub.getEncryptionKeyMaterial();
         if (encryptionKey.isBlank()) return null;
+        String signingKey = syncHub.getRequestSigningKey();
+        if (signingKey.isBlank()) return null;
 
         return new SyncRuntimeConfig(
             syncHub.getBaseUrl(),
@@ -681,7 +684,8 @@ public class AutoLogin extends Module {
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(1_000, syncHub.streamWaitMs()),
-            encryptionKey
+            encryptionKey,
+            signingKey
         );
     }
 
@@ -724,7 +728,7 @@ public class AutoLogin extends Module {
 
         String deviceId = sync.deviceId();
 
-        if (sync.useStream()) ensureSyncStream(baseUrl, deviceId, sync.token(), sync.timeoutSec(), sync.streamWaitMs());
+        if (sync.useStream()) ensureSyncStream(baseUrl, deviceId, sync.token(), sync.signingKey(), sync.timeoutSec(), sync.streamWaitMs());
         else stopSyncStream();
 
         long now = System.currentTimeMillis();
@@ -751,6 +755,7 @@ public class AutoLogin extends Module {
             baseUrl,
             deviceId,
             sync.token(),
+            sync.signingKey(),
             sync.timeoutSec(),
             sync.streamWaitMs(),
             sync.encryptionKey(),
@@ -767,6 +772,7 @@ public class AutoLogin extends Module {
         String baseUrl,
         String deviceId,
         String token,
+        String signingKey,
         int timeoutSec,
         int pullWaitMs,
         String encryptionKey,
@@ -789,7 +795,7 @@ public class AutoLogin extends Module {
 
             if (doPull) {
                 try {
-                    pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, knownRevision, pullWaitMs);
+                    pullResult = sendPullRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, knownRevision, pullWaitMs);
                     if (pullResult.revision() >= 0) pushBaseRevision = pullResult.revision();
                     List<SyncProfileData> remoteSnapshot = pullResult.profiles() == null ? List.of() : pullResult.profiles();
                     boolean remoteIsNewer = pullResult.ok() && pullResult.revision() > knownRevision && pullResult.profiles() != null;
@@ -820,7 +826,7 @@ public class AutoLogin extends Module {
 
             if (error == null && !remoteApplied && (localChanged || pushRequestedByInitialMerge)) {
                 try {
-                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushBaseRevision, pushSnapshot);
+                    pushResult = sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushBaseRevision, pushSnapshot);
                     if (pushResult.ok()
                         && pushResult.conflict()
                         && initialSync
@@ -831,7 +837,7 @@ public class AutoLogin extends Module {
                         String conflictRemoteFingerprint = computeFingerprint(pushResult.profiles());
                         String conflictMergedFingerprint = computeFingerprint(conflictMerged);
                         if (!conflictMergedFingerprint.equals(conflictRemoteFingerprint)) {
-                            pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
+                            pushResult = sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
                             if (pushResult.ok() && pushResult.applied()) {
                                 effectiveFingerprint = conflictMergedFingerprint;
                             }
@@ -912,7 +918,7 @@ public class AutoLogin extends Module {
         return true;
     }
 
-    private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec, int waitMs) {
+    private void ensureSyncStream(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, int waitMs) {
         long now = System.currentTimeMillis();
         if (syncStreamUnsupported && syncStreamUnsupportedUntilMs > now) return;
         if (syncStreamUnsupported && syncStreamUnsupportedUntilMs <= now) {
@@ -931,7 +937,9 @@ public class AutoLogin extends Module {
             + "|"
             + (syncStreamUseLegacyPath ? "legacy" : "v1")
             + "|"
-            + Integer.toHexString(tokenValue.hashCode());
+            + Integer.toHexString(tokenValue.hashCode())
+            + "|"
+            + Integer.toHexString((signingKey == null ? "" : signingKey).hashCode());
         if ((syncStreamConnected || syncStreamConnecting) && !connectionKey.equals(syncStreamConnectionKey)) stopSyncStream();
         if (syncStreamConnected || syncStreamConnecting) return;
         if (syncStreamReconnectAtMs > System.currentTimeMillis()) return;
@@ -943,13 +951,13 @@ public class AutoLogin extends Module {
         long knownRevision = Math.max(-1, lastKnownSyncRevision);
         int safeWaitMs = Math.max(1_000, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
-        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, safeWaitMs));
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, knownRevision, safeWaitMs));
     }
 
-    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs) {
         String streamError = null;
         try {
-            HttpRequest request = buildSyncStreamRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, waitMs);
+            HttpRequest request = buildSyncStreamRequest(baseUrl, deviceId, token, signingKey, timeoutSec, knownRevision, waitMs);
             HttpResponse<InputStream> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -1061,7 +1069,7 @@ public class AutoLogin extends Module {
         if (future != null) future.cancel(true);
     }
 
-    private HttpRequest buildSyncStreamRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+    private HttpRequest buildSyncStreamRequest(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs) {
         URI uri = buildSyncStreamUri(baseUrl, deviceId, knownRevision, waitMs);
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(Math.max(10, timeoutSec)))
@@ -1070,6 +1078,7 @@ public class AutoLogin extends Module {
             .header("User-Agent", "Devils-AutoLoginSync/1.0")
             .GET();
         if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token);
+        SyncRequestSigner.applySignedHeaders(builder, uri, "GET", "", signingKey);
         return builder.build();
     }
 
@@ -1109,7 +1118,7 @@ public class AutoLogin extends Module {
         String normalized = safeError.toLowerCase(Locale.ROOT);
         if (isLikelyAuthError(normalized)) {
             syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_AUTH_BACKOFF_MS);
-            logSync("AutoLogin sync hint: check token (must match SYNC_TOKEN on server).");
+            logSync("AutoLogin sync hint: check token and request-signing-key (SYNC_TOKEN + SYNC_SIGNING_KEY on server).");
             return;
         }
         if (isLikelyBaseUrlError(normalized)) {
@@ -1135,14 +1144,14 @@ public class AutoLogin extends Module {
         syncBackoffUntilMs = 0;
     }
 
-    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, String encryptionKey, long knownRevision, int waitMs) throws Exception {
+    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, String encryptionKey, long knownRevision, int waitMs) throws Exception {
         JsonObject payload = new JsonObject();
         payload.addProperty("deviceId", deviceId);
         payload.addProperty("knownRevision", knownRevision);
         if (waitMs > 0) payload.addProperty("waitMs", waitMs);
         payload.addProperty("module", "auto-login");
 
-        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, timeoutSec);
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, signingKey, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
         return parsePullResponse(response, encryptionKey);
     }
@@ -1151,6 +1160,7 @@ public class AutoLogin extends Module {
         String baseUrl,
         String deviceId,
         String token,
+        String signingKey,
         int timeoutSec,
         String encryptionKey,
         long knownRevision,
@@ -1162,12 +1172,12 @@ public class AutoLogin extends Module {
         payload.addProperty("module", "auto-login");
         payload.add("profiles", SyncCrypto.encryptProfiles(toJsonArray(profilesSnapshot), encryptionKey, "auto-login"));
 
-        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, timeoutSec);
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, signingKey, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
         return parsePushResponse(response, encryptionKey);
     }
 
-    private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, int timeoutSec) {
+    private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, String signingKey, int timeoutSec) {
         URI uri = URI.create(baseUrl + path);
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(Math.max(3, timeoutSec)))
@@ -1175,6 +1185,7 @@ public class AutoLogin extends Module {
             .header("Accept", "application/json")
             .header("User-Agent", "Devils-AutoLoginSync/1.0");
         if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token.trim());
+        SyncRequestSigner.applySignedHeaders(builder, uri, "POST", body, signingKey);
         return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
     }
 
@@ -1946,7 +1957,8 @@ public class AutoLogin extends Module {
         boolean allowHttp,
         int timeoutSec,
         int streamWaitMs,
-        String encryptionKey
+        String encryptionKey,
+        String signingKey
     ) {}
     private record SyncProfileData(boolean enabled, String username, String server, LoginMode mode, String password, int delay) {}
     private record SyncPullResult(boolean ok, long revision, List<SyncProfileData> profiles, String error, String lastWriter) {}

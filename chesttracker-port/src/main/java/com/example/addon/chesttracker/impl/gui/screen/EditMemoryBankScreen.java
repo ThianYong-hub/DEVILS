@@ -184,7 +184,7 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         // mark default if ingame
         if (inGame) {
             Optional<Coordinate> coord = Coordinate.getCurrent();
-            coord.map(coordinate -> ConnectionSettings.get(coordinate.id()))
+            coord.map(EditMemoryBankScreen::getConnectionSettingsForCoordinate)
                  .ifPresent(connectionSettings -> saveCreateLoadRow.add((x, y, width, height) -> {
                      String defaultId = MemoryBankAccessImpl.getDefaultMemoryBankId(coord.get());
                      if (connectionSettings.memoryBankIdOverride().orElse(defaultId)
@@ -654,10 +654,10 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
     private void markDefault(Button button) {
         var ctx = Coordinate.getCurrent();
         if (ctx.isPresent()) {
+            String settingsKey = MemoryBankAccessImpl.getConnectionSettingsKey(ctx.get());
             String defaultId = MemoryBankAccessImpl.getDefaultMemoryBankId(ctx.get());
-            ConnectionSettings.put(ctx.get().id(), ConnectionSettings.getOrCreate(ctx.get().id())
-                                                                     .setOverride(this.memoryBank.id()
-                                                                                                 .equals(defaultId) ? Optional.empty() : Optional.of(this.memoryBank.id())));
+            ConnectionSettings.put(settingsKey, getOrCreateConnectionSettingsForCoordinate(ctx.get())
+                    .setOverride(this.memoryBank.id().equals(defaultId) ? Optional.empty() : Optional.of(this.memoryBank.id())));
             button.active = false;
         }
     }
@@ -698,5 +698,31 @@ public class EditMemoryBankScreen extends BaseUtilScreen {
         MANAGE,
         SEARCH,
         EMPTY
+    }
+
+    @Nullable
+    private static ConnectionSettings getConnectionSettingsForCoordinate(Coordinate coordinate) {
+        if (coordinate == null) return null;
+
+        String settingsKey = MemoryBankAccessImpl.getConnectionSettingsKey(coordinate);
+        ConnectionSettings settings = ConnectionSettings.get(settingsKey);
+        if (settings != null) return settings;
+
+        String legacyKey = coordinate.id() == null ? "" : coordinate.id().trim();
+        if (!legacyKey.isBlank()) {
+            ConnectionSettings legacy = ConnectionSettings.get(legacyKey);
+            if (legacy != null) {
+                ConnectionSettings.put(settingsKey, legacy);
+                return legacy;
+            }
+        }
+
+        return null;
+    }
+
+    private static ConnectionSettings getOrCreateConnectionSettingsForCoordinate(Coordinate coordinate) {
+        ConnectionSettings existing = getConnectionSettingsForCoordinate(coordinate);
+        if (existing != null) return existing;
+        return ConnectionSettings.getOrCreate(MemoryBankAccessImpl.getConnectionSettingsKey(coordinate));
     }
 }

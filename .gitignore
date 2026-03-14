@@ -55,6 +55,15 @@ _tmp_meteor_ref/
 _tmp_meteor_src/
 _tmp_mio_extract/
 _tmp_mio_1218_decomp/
+*_javap*.txt
+*waypointrender*_javap*.txt
+nametag_javap.txt
 
 # local AutoLogin sync backend playground
 local-autologin-sync/
+
+# local SyncHub backend runtime artifacts
+SyncHub/.env
+SyncHub/data/
+SyncHub/__pycache__/
+SyncHub/tests/__pycache__/

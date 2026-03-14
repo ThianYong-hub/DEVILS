@@ -64,7 +64,19 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
 
     // Load from a coordinate's ID, checking the override file if necessary.
     public boolean loadWithDefaults(Coordinate coordinate) {
-        var settings = ConnectionSettings.getOrCreate(coordinate.id());
+        String settingsKey = getConnectionSettingsKey(coordinate);
+        String legacySettingsKey = coordinate == null || coordinate.id() == null ? "" : coordinate.id().trim();
+
+        ConnectionSettings settings = ConnectionSettings.get(settingsKey);
+        if (settings == null && !legacySettingsKey.isBlank()) {
+            ConnectionSettings legacySettings = ConnectionSettings.get(legacySettingsKey);
+            if (legacySettings != null) {
+                ConnectionSettings.put(settingsKey, legacySettings);
+                settings = legacySettings;
+            }
+        }
+        if (settings == null) settings = ConnectionSettings.getOrCreate(settingsKey);
+
         var defaultId = getDefaultMemoryBankId(coordinate);
         var id = settings.memoryBankIdOverride().orElse(defaultId);
 
@@ -87,6 +99,16 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
         }
 
         return loadOrCreate(id, coordinate.userFriendlyName());
+    }
+
+    public static String getConnectionSettingsKey(Coordinate coordinate) {
+        if (coordinate instanceof Coordinate.Multiplayer multi) {
+            return "multiplayer:" + normalizeMultiplayerAddress(multi.address(), true);
+        }
+
+        String id = coordinate == null || coordinate.id() == null ? "" : coordinate.id().trim();
+        if (id.isBlank()) return "singleplayer:unknown";
+        return "singleplayer:" + id;
     }
 
     public static String getDefaultMemoryBankId(Coordinate coordinate) {

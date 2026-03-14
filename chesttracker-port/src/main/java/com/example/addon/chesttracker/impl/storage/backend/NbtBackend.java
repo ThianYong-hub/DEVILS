@@ -7,6 +7,7 @@ import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 import com.example.addon.chesttracker.impl.ChestTracker;
 import com.example.addon.chesttracker.impl.memory.MemoryBankImpl;
+import com.example.addon.chesttracker.impl.memory.metadata.Metadata;
 import com.example.addon.chesttracker.impl.util.Constants;
 import com.example.addon.chesttracker.impl.util.FileUtil;
 import com.example.addon.chesttracker.impl.util.Misc;
@@ -31,9 +32,17 @@ public class NbtBackend extends FileBasedBackend {
 
     @Override
     public @Nullable MemoryBankImpl load(String id, @Nullable HolderLookup.Provider registries) {
-        var meta = loadMetadata(id);
-        if (meta.isEmpty()) return null;
         var path = Constants.STORAGE_DIR.resolve(id + extension());
+        var meta = loadMetadata(id);
+        if (meta.isEmpty() && Files.isRegularFile(path)) {
+            Metadata recovered = Metadata.blankWithName(defaultNameForId(id));
+            if (saveMetadata(id, recovered)) {
+                LOGGER.warn("Recovered missing metadata for '{}'.", id);
+                meta = Optional.of(recovered);
+            }
+        }
+        if (meta.isEmpty()) return null;
+
         var result = Misc.time(() -> FileUtil.loadFromNbt(MemoryBankImpl.DATA_CODEC, path, registries));
         if (result.getFirst().isPresent()) {
             LOGGER.debug("Loaded {} in {}ns", path, result.getSecond());
@@ -41,6 +50,15 @@ public class NbtBackend extends FileBasedBackend {
         } else {
             return new MemoryBankImpl(meta.get(), new HashMap<>());
         }
+    }
+
+    private static String defaultNameForId(String id) {
+        if (id == null || id.isBlank()) return "Memory Bank";
+        String normalized = id.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        String leaf = slash >= 0 && slash + 1 < normalized.length() ? normalized.substring(slash + 1) : normalized;
+        leaf = leaf.replace('_', ' ').trim();
+        return leaf.isBlank() ? "Memory Bank" : leaf;
     }
 
     @Override

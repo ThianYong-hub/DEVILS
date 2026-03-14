@@ -6,11 +6,14 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import javax.crypto.Cipher;
+import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Locale;
 
@@ -18,9 +21,13 @@ public final class SyncCrypto {
     private static final String ENVELOPE_USERNAME = "__devils_e2e__";
     private static final String ENVELOPE_SERVER = "*";
     private static final String ENVELOPE_MODE = "LOGIN";
-    private static final String ENVELOPE_PREFIX = "devils-e2e:v1:";
+    private static final String ENVELOPE_PREFIX_V1 = "devils-e2e:v1:";
+    private static final String ENVELOPE_PREFIX_V2 = "devils-e2e:v2:";
     private static final int NONCE_BYTES = 12;
+    private static final int SALT_BYTES = 16;
     private static final int TAG_BITS = 128;
+    private static final int PBKDF2_ITERATIONS = 310_000;
+    private static final int KEY_BYTES = 32;
     private static final SecureRandom RNG = new SecureRandom();
 
     private SyncCrypto() {
@@ -32,25 +39,29 @@ public final class SyncCrypto {
         if (key.isBlank()) throw new IllegalArgumentException("missing-key");
 
         String normalizedModule = normalizeModule(module);
+        byte[] salt = new byte[SALT_BYTES];
         byte[] nonce = new byte[NONCE_BYTES];
+        RNG.nextBytes(salt);
         RNG.nextBytes(nonce);
 
         byte[] plaintext = plainProfiles.toString().getBytes(StandardCharsets.UTF_8);
-        byte[] ciphertext = crypt(Cipher.ENCRYPT_MODE, plaintext, nonce, key, normalizedModule);
+        byte[] keyBytes = deriveKeyV2(key, salt);
+        byte[] ciphertext = crypt(Cipher.ENCRYPT_MODE, plaintext, nonce, keyBytes, normalizedModule, 2);
 
         JsonObject envelope = new JsonObject();
-        envelope.addProperty("v", 1);
+        envelope.addProperty("v", 2);
         envelope.addProperty("m", normalizedModule);
+        envelope.addProperty("s", b64Url(salt));
         envelope.addProperty("n", b64Url(nonce));
         envelope.addProperty("ct", b64Url(ciphertext));
-        envelope.addProperty("kid", keyId(key));
+        envelope.addProperty("kid", keyId(key, 2));
 
         JsonObject row = new JsonObject();
         row.addProperty("enabled", true);
         row.addProperty("username", ENVELOPE_USERNAME);
         row.addProperty("server", ENVELOPE_SERVER);
         row.addProperty("mode", ENVELOPE_MODE);
-        row.addProperty("password", ENVELOPE_PREFIX + b64Url(envelope.toString().getBytes(StandardCharsets.UTF_8)));
+        row.addProperty("password", ENVELOPE_PREFIX_V2 + b64Url(envelope.toString().getBytes(StandardCharsets.UTF_8)));
         row.addProperty("delay", 0);
 
         JsonArray wrapped = new JsonArray();
@@ -67,14 +78,17 @@ public final class SyncCrypto {
 
         JsonObject row = wireProfiles.get(0).getAsJsonObject();
         String password = safe(readString(row, "password")).trim();
-        if (!password.startsWith(ENVELOPE_PREFIX)) throw new IllegalArgumentException("bad-envelope-prefix");
+        boolean v2 = password.startsWith(ENVELOPE_PREFIX_V2);
+        boolean v1 = password.startsWith(ENVELOPE_PREFIX_V1);
+        if (!v1 && !v2) throw new IllegalArgumentException("bad-envelope-prefix");
 
-        byte[] packedBytes = b64UrlDecode(password.substring(ENVELOPE_PREFIX.length()));
+        String prefix = v2 ? ENVELOPE_PREFIX_V2 : ENVELOPE_PREFIX_V1;
+        byte[] packedBytes = b64UrlDecode(password.substring(prefix.length()));
         JsonObject envelope = parseObject(new String(packedBytes, StandardCharsets.UTF_8));
         if (envelope == null) throw new IllegalArgumentException("bad-envelope-json");
 
         int version = readInt(envelope, "v", 0);
-        if (version != 1) throw new IllegalArgumentException("unsupported-version");
+        if (version != 1 && version != 2) throw new IllegalArgumentException("unsupported-version");
 
         String normalizedModule = normalizeModule(module);
         String envelopeModule = normalizeModule(readString(envelope, "m"));
@@ -84,7 +98,15 @@ public final class SyncCrypto {
 
         byte[] nonce = b64UrlDecode(readString(envelope, "n"));
         byte[] ciphertext = b64UrlDecode(readString(envelope, "ct"));
-        byte[] plaintext = crypt(Cipher.DECRYPT_MODE, ciphertext, nonce, key, normalizedModule);
+        byte[] plaintext;
+        if (version == 2) {
+            byte[] salt = b64UrlDecode(readString(envelope, "s"));
+            byte[] keyBytes = deriveKeyV2(key, salt);
+            plaintext = crypt(Cipher.DECRYPT_MODE, ciphertext, nonce, keyBytes, normalizedModule, 2);
+        } else {
+            byte[] keyBytes = deriveKeyV1(key);
+            plaintext = crypt(Cipher.DECRYPT_MODE, ciphertext, nonce, keyBytes, normalizedModule, 1);
+        }
         JsonElement parsed = JsonParser.parseString(new String(plaintext, StandardCharsets.UTF_8));
         if (!parsed.isJsonArray()) throw new IllegalArgumentException("bad-plain-profiles");
         return parsed.getAsJsonArray();
@@ -95,37 +117,50 @@ public final class SyncCrypto {
         JsonObject row = profiles.get(0).getAsJsonObject();
         String username = safe(readString(row, "username")).trim();
         String password = safe(readString(row, "password")).trim();
-        return ENVELOPE_USERNAME.equals(username) && password.startsWith(ENVELOPE_PREFIX);
+        return ENVELOPE_USERNAME.equals(username)
+            && (password.startsWith(ENVELOPE_PREFIX_V1) || password.startsWith(ENVELOPE_PREFIX_V2));
     }
 
-    private static byte[] crypt(int mode, byte[] content, byte[] nonce, String keyMaterial, String module) throws Exception {
+    private static byte[] crypt(int mode, byte[] content, byte[] nonce, byte[] keyBytes, String module, int version) throws Exception {
         if (nonce == null || nonce.length != NONCE_BYTES) throw new IllegalArgumentException("bad-nonce");
-        byte[] keyBytes = deriveKey(keyMaterial);
         SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(mode, keySpec, new GCMParameterSpec(TAG_BITS, nonce));
-        cipher.updateAAD(aad(module));
+        cipher.updateAAD(aad(module, version));
         return cipher.doFinal(content);
     }
 
-    private static byte[] deriveKey(String keyMaterial) throws Exception {
+    private static byte[] deriveKeyV1(String keyMaterial) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update("devils-sync-e2e-key|".getBytes(StandardCharsets.UTF_8));
         digest.update(keyMaterial.getBytes(StandardCharsets.UTF_8));
         return digest.digest();
     }
 
-    private static String keyId(String keyMaterial) throws Exception {
+    private static byte[] deriveKeyV2(String keyMaterial, byte[] salt) throws Exception {
+        if (salt == null || salt.length < 8) throw new IllegalArgumentException("bad-salt");
+        char[] chars = keyMaterial.toCharArray();
+        PBEKeySpec spec = new PBEKeySpec(chars, salt, PBKDF2_ITERATIONS, KEY_BYTES * 8);
+        try {
+            SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+            return factory.generateSecret(spec).getEncoded();
+        } finally {
+            spec.clearPassword();
+            Arrays.fill(chars, '\0');
+        }
+    }
+
+    private static String keyId(String keyMaterial, int version) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        digest.update("devils-sync-e2e-kid|".getBytes(StandardCharsets.UTF_8));
+        digest.update(("devils-sync-e2e-kid:v" + version + "|").getBytes(StandardCharsets.UTF_8));
         digest.update(keyMaterial.getBytes(StandardCharsets.UTF_8));
         byte[] bytes = digest.digest();
         return b64Url(new byte[] {bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]});
     }
 
-    private static byte[] aad(String module) {
+    private static byte[] aad(String module, int version) {
         String normalized = normalizeModule(module);
-        return ("devils-sync-e2e:aad:v1|" + normalized).getBytes(StandardCharsets.UTF_8);
+        return ("devils-sync-e2e:aad:v" + version + "|" + normalized).getBytes(StandardCharsets.UTF_8);
     }
 
     private static String normalizeModule(String module) {

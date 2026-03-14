@@ -32,7 +32,14 @@ public class SyncHub extends Module {
 
     private final Setting<String> encryptionKey = sgGeneral.add(new StringSetting.Builder()
         .name("encryption-key")
-        .description("E2E encryption key for synced payloads. If empty, token value is used.")
+        .description("E2E encryption key for synced payloads.")
+        .defaultValue("")
+        .build()
+    );
+
+    private final Setting<String> requestSigningKey = sgGeneral.add(new StringSetting.Builder()
+        .name("request-signing-key")
+        .description("HMAC key for signed sync requests. Token alone is not enough when backend requires signatures.")
         .defaultValue("")
         .build()
     );
@@ -122,8 +129,11 @@ public class SyncHub extends Module {
 
     public String getEncryptionKeyMaterial() {
         String value = encryptionKey.get() == null ? "" : encryptionKey.get().trim();
-        if (!value.isBlank()) return value;
-        return getToken();
+        return value;
+    }
+
+    public String getRequestSigningKey() {
+        return requestSigningKey.get() == null ? "" : requestSigningKey.get().trim();
     }
 
     public String getOrCreateDeviceId() {

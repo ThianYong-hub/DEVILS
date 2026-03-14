@@ -5,6 +5,7 @@ import com.example.addon.gui.screens.settings.LocalIconSelectScreen;
 import com.example.addon.util.CrashGuard;
 import com.example.addon.util.MapIconManager;
 import com.example.addon.util.SyncCrypto;
+import com.example.addon.util.SyncRequestSigner;
 import com.example.addon.util.XaeroSyncWaypoints;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -461,6 +462,7 @@ public class XaeroSync extends Module {
         if (!syncHub.isFeatureEnabled(SyncHub.SyncFeature.XAERO_WORLD_MAP)) return "sync-hub-xaero-feature-disabled";
         if (syncHub.getOrCreateDeviceId().isBlank()) return "sync-hub-device-id-empty";
         if (syncHub.getEncryptionKeyMaterial().isBlank()) return "sync-hub-encryption-key-empty";
+        if (syncHub.getRequestSigningKey().isBlank()) return "sync-hub-signing-key-empty";
         return "unknown";
     }
 
@@ -531,7 +533,7 @@ public class XaeroSync extends Module {
             return;
         }
 
-        if (sync.useStream()) ensureSyncStream(baseUrl, sync.deviceId(), sync.token(), sync.timeoutSec(), sync.streamWaitMs());
+        if (sync.useStream()) ensureSyncStream(baseUrl, sync.deviceId(), sync.token(), sync.signingKey(), sync.timeoutSec(), sync.streamWaitMs());
         else stopSyncStream();
 
         if (syncBackoffUntilMs > System.currentTimeMillis()) {
@@ -562,6 +564,7 @@ public class XaeroSync extends Module {
             baseUrl,
             sync.deviceId(),
             sync.token(),
+            sync.signingKey(),
             sync.timeoutSec(),
             pullWaitMs,
             sync.encryptionKey(),
@@ -577,6 +580,7 @@ public class XaeroSync extends Module {
         String baseUrl,
         String deviceId,
         String token,
+        String signingKey,
         int timeoutSec,
         int pullWaitMs,
         String encryptionKey,
@@ -600,7 +604,7 @@ public class XaeroSync extends Module {
 
             if (doPull) {
                 try {
-                    pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, knownRevision, pullWaitMs);
+                    pullResult = sendPullRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, knownRevision, pullWaitMs);
                     if (!pullResult.ok()) {
                         error = "pull-rejected:" + pullResult.error();
                     } else {
@@ -640,12 +644,12 @@ public class XaeroSync extends Module {
 
             if (error == null && !remoteApplied && (localNeedsPush || pushRequestedByMerge)) {
                 try {
-                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushBaseRevision, effectiveSnapshot);
+                    pushResult = sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushBaseRevision, effectiveSnapshot);
 
                     if (pushResult.ok() && pushResult.conflict() && pushResult.profiles() != null && pushResult.revision() >= 0) {
                         List<SyncXaeroData> conflictMerged = mergeSnapshots(pushResult.profiles(), localSnapshot);
                         String conflictFingerprint = computeFingerprint(conflictMerged);
-                        pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
+                        pushResult = sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
                         effectiveSnapshot = conflictMerged;
                         effectiveFingerprint = conflictFingerprint;
                     }
@@ -2060,14 +2064,14 @@ public class XaeroSync extends Module {
         }
     }
 
-    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, String encryptionKey, long knownRevision, int waitMs) throws Exception {
+    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, String encryptionKey, long knownRevision, int waitMs) throws Exception {
         JsonObject payload = new JsonObject();
         payload.addProperty("deviceId", deviceId);
         payload.addProperty("knownRevision", knownRevision);
         if (waitMs > 0) payload.addProperty("waitMs", waitMs);
         payload.addProperty("module", MODULE_NAMESPACE);
 
-        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, timeoutSec);
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, signingKey, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
         return parsePullResponse(response, encryptionKey);
     }
@@ -2076,6 +2080,7 @@ public class XaeroSync extends Module {
         String baseUrl,
         String deviceId,
         String token,
+        String signingKey,
         int timeoutSec,
         String encryptionKey,
         long baseRevision,
@@ -2087,12 +2092,12 @@ public class XaeroSync extends Module {
         payload.addProperty("module", MODULE_NAMESPACE);
         payload.add("profiles", SyncCrypto.encryptProfiles(toJsonArray(snapshot), encryptionKey, MODULE_NAMESPACE));
 
-        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, timeoutSec);
+        HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, signingKey, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
         return parsePushResponse(response, encryptionKey);
     }
 
-    private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, int timeoutSec) {
+    private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, String signingKey, int timeoutSec) {
         URI uri = URI.create(baseUrl + path);
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(Math.max(3, timeoutSec)))
@@ -2100,6 +2105,7 @@ public class XaeroSync extends Module {
             .header("Accept", "application/json")
             .header("User-Agent", "Devils-XaeroSync/1.0");
         if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token.trim());
+        SyncRequestSigner.applySignedHeaders(builder, uri, "POST", body, signingKey);
         return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
     }
 
@@ -2192,7 +2198,7 @@ public class XaeroSync extends Module {
         return array;
     }
 
-    private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec, int waitMs) {
+    private void ensureSyncStream(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, int waitMs) {
         long now = System.currentTimeMillis();
         if (syncStreamUnsupported && syncStreamUnsupportedUntilMs > now) return;
         if (syncStreamUnsupported && syncStreamUnsupportedUntilMs <= now) {
@@ -2211,7 +2217,9 @@ public class XaeroSync extends Module {
             + "|"
             + (syncStreamUseLegacyPath ? "legacy" : "v1")
             + "|"
-            + Integer.toHexString(tokenValue.hashCode());
+            + Integer.toHexString(tokenValue.hashCode())
+            + "|"
+            + Integer.toHexString((signingKey == null ? "" : signingKey).hashCode());
         if ((syncStreamConnected || syncStreamConnecting) && !connectionKey.equals(syncStreamConnectionKey)) stopSyncStream();
         if (syncStreamConnected || syncStreamConnecting) return;
         if (syncStreamReconnectAtMs > System.currentTimeMillis()) return;
@@ -2223,13 +2231,13 @@ public class XaeroSync extends Module {
         long knownRevision = Math.max(-1, lastKnownSyncRevision);
         int safeWaitMs = Math.max(50, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
-        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, safeWaitMs));
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, knownRevision, safeWaitMs));
     }
 
-    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs) {
         String streamError = null;
         try {
-            HttpRequest request = buildSyncStreamRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, waitMs);
+            HttpRequest request = buildSyncStreamRequest(baseUrl, deviceId, token, signingKey, timeoutSec, knownRevision, waitMs);
             HttpResponse<InputStream> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -2347,7 +2355,7 @@ public class XaeroSync extends Module {
         if (future != null) future.cancel(true);
     }
 
-    private HttpRequest buildSyncStreamRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) {
+    private HttpRequest buildSyncStreamRequest(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs) {
         URI uri = buildSyncStreamUri(baseUrl, deviceId, knownRevision, waitMs);
         HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(Math.max(10, timeoutSec)))
@@ -2356,6 +2364,7 @@ public class XaeroSync extends Module {
             .header("User-Agent", "Devils-XaeroSync/1.0")
             .GET();
         if (token != null && !token.isBlank()) builder.header("Authorization", "Bearer " + token);
+        SyncRequestSigner.applySignedHeaders(builder, uri, "GET", "", signingKey);
         return builder.build();
     }
 
@@ -2385,6 +2394,8 @@ public class XaeroSync extends Module {
         if (deviceId.isBlank()) return null;
         String encryptionKey = syncHub.getEncryptionKeyMaterial();
         if (encryptionKey.isBlank()) return null;
+        String signingKey = syncHub.getRequestSigningKey();
+        if (signingKey.isBlank()) return null;
 
         return new SyncRuntimeConfig(
             syncHub.getBaseUrl(),
@@ -2394,7 +2405,8 @@ public class XaeroSync extends Module {
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(50, syncHub.streamWaitMs()),
-            encryptionKey
+            encryptionKey,
+            signingKey
         );
     }
 
@@ -2890,7 +2902,7 @@ public class XaeroSync extends Module {
         }
     }
 
-    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, boolean allowHttp, int timeoutSec, int streamWaitMs, String encryptionKey) {}
+    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, boolean allowHttp, int timeoutSec, int streamWaitMs, String encryptionKey, String signingKey) {}
     private record SyncXaeroData(boolean enabled, String username, String server, String payload, int delay) {}
     private record SyncPullResult(boolean ok, long revision, List<SyncXaeroData> profiles, String error, String lastWriter) {}
     private record SyncPushResult(boolean ok, boolean applied, boolean conflict, long revision, List<SyncXaeroData> profiles, String error, String lastWriter) {}

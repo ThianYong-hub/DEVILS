@@ -2,6 +2,7 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.util.SyncCrypto;
+import com.example.addon.util.SyncRequestSigner;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -428,6 +429,7 @@ public class ChestTrackerModule extends Module {
 
         String normalizedServer = normalizeServer(serverKey);
         String bankId = resolveSyncBankId(normalizedServer);
+        if (bankId.isBlank()) return;
         String namespace = SYNC_MODULE + ":" + namespaceKey(normalizedServer);
 
         if (!namespace.equals(activeNamespace) || !bankId.equals(activeBankId)) {
@@ -603,7 +605,9 @@ public class ChestTrackerModule extends Module {
             + "|"
             + cfg.streamWaitMs()
             + "|"
-            + (streamUseLegacyPath ? "legacy" : "v1");
+            + (streamUseLegacyPath ? "legacy" : "v1")
+            + "|"
+            + Integer.toHexString(cfg.signingKey().hashCode());
         if ((streamConnected || streamConnecting) && !key.equals(streamConnectionKey)) stopStream();
         if (streamConnected || streamConnecting || streamReconnectAtMs > System.currentTimeMillis()) return;
         streamStop = false;
@@ -628,6 +632,7 @@ public class ChestTrackerModule extends Module {
                 .header("Accept", "text/event-stream")
                 .GET();
             if (!cfg.token().isBlank()) builder.header("Authorization", "Bearer " + cfg.token().trim());
+            SyncRequestSigner.applySignedHeaders(builder, uri, "GET", "", cfg.signingKey());
 
             HttpResponse<InputStream> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -724,6 +729,8 @@ public class ChestTrackerModule extends Module {
         if (deviceId.isBlank()) return null;
         String encryptionKey = syncHub.getEncryptionKeyMaterial();
         if (encryptionKey.isBlank()) return null;
+        String signingKey = syncHub.getRequestSigningKey();
+        if (signingKey.isBlank()) return null;
 
         return new SyncRuntimeConfig(
             syncHub.getBaseUrl(),
@@ -732,7 +739,8 @@ public class ChestTrackerModule extends Module {
             syncHub.useStream(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(1_000, syncHub.streamWaitMs()),
-            encryptionKey
+            encryptionKey,
+            signingKey
         );
     }
 
@@ -940,11 +948,13 @@ public class ChestTrackerModule extends Module {
     }
 
     private HttpRequest buildRequest(String url, SyncRuntimeConfig cfg, String body) {
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
+        URI uri = URI.create(url);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofSeconds(Math.max(3, cfg.timeoutSec())))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json");
         if (!cfg.token().isBlank()) builder.header("Authorization", "Bearer " + cfg.token().trim());
+        SyncRequestSigner.applySignedHeaders(builder, uri, "POST", body, cfg.signingKey());
         return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
     }
 
@@ -1032,10 +1042,42 @@ public class ChestTrackerModule extends Module {
         String canonical = bankIdForServer(normalizedServer);
         if (bankFilesExist(canonical)) return canonical;
 
+        String portVariant = portVariantBankIdForServer(normalizedServer);
+        if (!portVariant.isBlank() && bankFilesExist(portVariant)) return portVariant;
+
         String legacy = legacyBankIdForServer(normalizedServer);
         if (bankFilesExist(legacy)) return legacy;
 
-        return canonical;
+        // Wait for provider-driven bank selection/load instead of guessing a new empty file ID.
+        return "";
+    }
+
+    private String portVariantBankIdForServer(String server) {
+        if (server == null || server.isBlank()) return "";
+
+        String base = server.trim().toLowerCase(Locale.ROOT);
+        while (base.endsWith(".")) base = base.substring(0, base.length() - 1);
+        if (base.isBlank()) return "";
+
+        String withPort;
+        if (base.startsWith("[")) {
+            if (!base.endsWith("]")) return "";
+            withPort = base + ":25565";
+        } else if (base.indexOf(':') >= 0) {
+            return "";
+        } else {
+            withPort = base + ":25565";
+        }
+
+        String source = withPort.replaceAll("[^a-z0-9._-]+", "_");
+        try {
+            Class<?> stringsClass = Class.forName(STRINGS_CLASS);
+            Method sanitize = stringsClass.getMethod("sanitizeForPath", String.class);
+            Object sanitized = sanitize.invoke(null, source);
+            if (sanitized instanceof String value && !value.isBlank()) source = value;
+        } catch (Throwable ignored) {
+        }
+        return "multiplayer/" + source;
     }
 
     private String getLoadedBankId() {
@@ -1334,7 +1376,7 @@ public class ChestTrackerModule extends Module {
         }
     }
 
-    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, int timeoutSec, int streamWaitMs, String encryptionKey) {
+    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, int timeoutSec, int streamWaitMs, String encryptionKey, String signingKey) {
     }
 
     private record Snapshot(String bankId, String serverKey, long updatedAt, String nbt, String meta) {

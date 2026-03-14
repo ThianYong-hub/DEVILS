@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.28`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.28/devils-addon-0.0.28.jar)
+- Current build (`v0.0.29`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.29/devils-addon-0.0.29.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -55,6 +55,21 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 - Metadata files are stored next to each bank as `.nbt.meta`.
 - When SyncHub is enabled for ChestTracker, bank data is synchronized per server namespace.
 
+## Secure SyncHub Setup
+
+- `sync-hub` now expects two independent secrets:
+  - `token` (`SYNC_TOKEN`) for bearer auth.
+  - `request-signing-key` (`SYNC_SIGNING_KEY`) for HMAC request signatures.
+- `encryption-key` is used for end-to-end encrypted profile payloads and is no longer auto-derived from token.
+- Backend can run in HTTPS mode by setting:
+  - `SYNC_TLS_CERT_FILE`
+  - `SYNC_TLS_KEY_FILE`
+  - optional `SYNC_TLS_MIN_VERSION` (`TLSv1_3` by default)
+- Signed request checks are controlled by:
+  - `SYNC_REQUIRE_SIGNED=true`
+  - `SYNC_SIGN_WINDOW_SEC` (default `30`)
+  - `SYNC_NONCE_TTL_SEC` (default `120`)
+
 ## Commands
 
 | Command | Purpose |
@@ -83,12 +98,13 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.28`)
+## Release Notes (`v0.0.29`)
 
-- Embedded Xaero stack wired for Devils integration (`Xaero Minimap`, `Xaero World Map`, `XaeroPlus`) with safer loading hooks.
-- Reworked Ping/Xaero sync loop with aggressive stream+pull cadence and conflict-safe merge handling.
-- Improved managed waypoint rendering pipeline for Devils icons and map labels.
-- Added `xaero-sync` module controls and expanded SyncHub feature wiring.
+- Fixed ChestTracker persistence after reconnect/restart: connection settings and bank state now reload reliably.
+- Added legacy-to-stable bank key migration for multiplayer profiles to prevent accidental empty bank resets.
+- Added metadata recovery fallback when `.nbt.meta` is missing but bank `.nbt` is present.
+- Improved sync bank id resolution to avoid pushing/pulling into wrong banks on first join.
+- Updated embedded ChestTracker port jar with the persistence and migration fixes.
 
 ## License
 
