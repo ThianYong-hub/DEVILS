@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.27`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.27/devils-addon-0.0.27.jar)
+- Current build (`v0.0.28`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.28/devils-addon-0.0.28.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -30,6 +30,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 | --- | --- | --- |
 | `chest-tracker` | Utility / Storage | Fully integrated ChestTracker module inside Devils Addon. Includes custom Devils UI theme, persistent NBT memory banks, and SyncHub synchronization. |
 | `sync-hub` | Core Sync | Shared sync configuration for Devils modules (`AutoLogin`, `Ping`, `ChestTracker`), including stream/pull/push behavior. |
+| `xaero-sync` | Utility / Team Map | Standalone sync pipeline for Xaero World Map tracked players and managed waypoints with Devils overlay integration. |
 | `auto-login` | Utility / Auth | Sends saved `/login` or `/reg` commands automatically per username/server profile. Supports SyncHub profile sync. |
 | `ping` | Utility / Team | Team ping markers with optional sound/text/icon and SyncHub data sync across clients. |
 | `tracker-player` (`join-watcher`) | Utility / Alerts | Per-player join/leave tracking with custom rules, sounds, and optional chat actions. |
@@ -81,6 +82,13 @@ Run tests:
 ```bash
 ./gradlew test
 ```
+
+## Release Notes (`v0.0.28`)
+
+- Embedded Xaero stack wired for Devils integration (`Xaero Minimap`, `Xaero World Map`, `XaeroPlus`) with safer loading hooks.
+- Reworked Ping/Xaero sync loop with aggressive stream+pull cadence and conflict-safe merge handling.
+- Improved managed waypoint rendering pipeline for Devils icons and map labels.
+- Added `xaero-sync` module controls and expanded SyncHub feature wiring.
 
 ## License
 

@@ -2,6 +2,7 @@
 
 .gradle/
 .gradle-codex/
+.gradle-home/
 build/
 out/
 classes/
@@ -42,6 +43,7 @@ icon.png
 category_icon.png
 .tmp_meteor_src/
 .claude/
+embedded-libs/
 
 # local server sources and reverse-engineering workdirs
 Folia-ver-1.21.8/

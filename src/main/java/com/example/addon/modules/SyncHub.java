@@ -10,8 +10,8 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import java.util.UUID;
 
 public class SyncHub extends Module {
-    private static final int REQUEST_TIMEOUT_SEC = 15;
-    private static final int STREAM_WAIT_MS = 25_000;
+    private static final int REQUEST_TIMEOUT_SEC = 3;
+    private static final int STREAM_WAIT_MS = 25;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgFeatures = settings.createGroup("Features");
@@ -26,6 +26,13 @@ public class SyncHub extends Module {
     private final Setting<String> token = sgGeneral.add(new StringSetting.Builder()
         .name("token")
         .description("Bearer token used for sync hub authentication.")
+        .defaultValue("")
+        .build()
+    );
+
+    private final Setting<String> encryptionKey = sgGeneral.add(new StringSetting.Builder()
+        .name("encryption-key")
+        .description("E2E encryption key for synced payloads. If empty, token value is used.")
         .defaultValue("")
         .build()
     );
@@ -72,12 +79,27 @@ public class SyncHub extends Module {
         .build()
     );
 
+    private final Setting<Boolean> xaeroWorldMapSync = sgFeatures.add(new BoolSetting.Builder()
+        .name("xaero-world-map")
+        .description("Allow XaeroSync module to sync live player map markers for Xaero World Map.")
+        .defaultValue(true)
+        .build()
+    );
+
+    private final Setting<Boolean> xaeroDebugPipeline = sgFeatures.add(new BoolSetting.Builder()
+        .name("xaero-debug-pipeline")
+        .description("Enable Xaero map pipeline debug logs in chat.")
+        .defaultValue(false)
+        .build()
+    );
+
     public SyncHub() {
         super(
             AddonTemplate.CATEGORY,
             "sync-hub",
             "Shared sync configuration for Devils modules."
         );
+        XaeroSync.ensureInternal();
     }
 
     public boolean isFeatureEnabled(SyncFeature feature) {
@@ -86,6 +108,7 @@ public class SyncHub extends Module {
             case AUTO_LOGIN -> autoLoginSync.get();
             case PING -> pingSync.get();
             case CHEST_TRACKER -> chestTrackerSync.get();
+            case XAERO_WORLD_MAP -> xaeroWorldMapSync.get();
         };
     }
 
@@ -95,6 +118,12 @@ public class SyncHub extends Module {
 
     public String getToken() {
         return token.get() == null ? "" : token.get().trim();
+    }
+
+    public String getEncryptionKeyMaterial() {
+        String value = encryptionKey.get() == null ? "" : encryptionKey.get().trim();
+        if (!value.isBlank()) return value;
+        return getToken();
     }
 
     public String getOrCreateDeviceId() {
@@ -122,9 +151,14 @@ public class SyncHub extends Module {
         return STREAM_WAIT_MS;
     }
 
+    public boolean xaeroDebugPipeline() {
+        return xaeroDebugPipeline.get();
+    }
+
     public enum SyncFeature {
         AUTO_LOGIN,
         PING,
-        CHEST_TRACKER
+        CHEST_TRACKER,
+        XAERO_WORLD_MAP
     }
 }

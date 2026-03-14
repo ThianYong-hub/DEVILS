@@ -68,6 +68,15 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
         var defaultId = getDefaultMemoryBankId(coordinate);
         var id = settings.memoryBankIdOverride().orElse(defaultId);
 
+        // Backward compatibility with previous Devils builds that used a ":25565" suffix in default IDs.
+        if (settings.memoryBankIdOverride().isEmpty()) {
+            var portVariantId = getPortVariantDefaultMemoryBankId(coordinate);
+            if (!portVariantId.isBlank() && !Storage.exists(defaultId) && Storage.exists(portVariantId)) {
+                migrateLegacyBankFiles(portVariantId, defaultId);
+                id = Storage.exists(defaultId) ? defaultId : portVariantId;
+            }
+        }
+
         // Backward compatibility with previous Devils builds that used "server-*" root files.
         if (settings.memoryBankIdOverride().isEmpty()) {
             var legacyId = getLegacyDefaultMemoryBankId(coordinate);
@@ -82,9 +91,7 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
 
     public static String getDefaultMemoryBankId(Coordinate coordinate) {
         if (coordinate instanceof Coordinate.Multiplayer multi) {
-            String address = multi.address() == null ? "" : multi.address().trim().toLowerCase(Locale.ROOT);
-            while (address.endsWith(".")) address = address.substring(0, address.length() - 1);
-            if (address.isBlank()) address = "unknown";
+            String address = normalizeMultiplayerAddress(multi.address(), true);
             return "multiplayer/" + Strings.sanitizeForPath(address);
         }
 
@@ -93,6 +100,14 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
         while (world.endsWith(".")) world = world.substring(0, world.length() - 1);
         if (world.isBlank()) world = "unknown";
         return "singleplayer/" + Strings.sanitizeForPath(world);
+    }
+
+    private static String getPortVariantDefaultMemoryBankId(Coordinate coordinate) {
+        if (!(coordinate instanceof Coordinate.Multiplayer multi)) return "";
+        String canonicalAddress = normalizeMultiplayerAddress(multi.address(), true);
+        String oldAddress = normalizeMultiplayerAddress(multi.address(), false);
+        if (canonicalAddress.equals(oldAddress)) return "";
+        return "multiplayer/" + Strings.sanitizeForPath(oldAddress);
     }
 
     private static String getLegacyDefaultMemoryBankId(Coordinate coordinate) {
@@ -106,6 +121,35 @@ public class MemoryBankAccessImpl implements MemoryBankAccess {
         while (base.endsWith(".")) base = base.substring(0, base.length() - 1);
         if (base.isEmpty()) base = "unknown";
         return "server-" + Strings.sanitizeForPath(base);
+    }
+
+    private static String normalizeMultiplayerAddress(String address, boolean stripDefaultPort) {
+        String out = address == null ? "" : address.trim().toLowerCase(Locale.ROOT);
+        while (out.endsWith(".")) out = out.substring(0, out.length() - 1);
+        if (out.isBlank()) return "unknown";
+
+        if (!stripDefaultPort) return out;
+
+        // [ipv6]:25565 -> [ipv6]
+        if (out.startsWith("[")) {
+            int end = out.indexOf(']');
+            if (end > 0 && out.length() > end + 2 && out.charAt(end + 1) == ':') {
+                String port = out.substring(end + 2).trim();
+                if ("25565".equals(port)) out = out.substring(0, end + 1);
+            }
+            return out.isBlank() ? "unknown" : out;
+        }
+
+        // host:25565 -> host (single colon only; avoid raw IPv6).
+        int firstColon = out.indexOf(':');
+        int lastColon = out.lastIndexOf(':');
+        if (firstColon > 0 && firstColon == lastColon && lastColon + 1 < out.length()) {
+            String port = out.substring(lastColon + 1).trim();
+            boolean numericPort = !port.isEmpty() && port.chars().allMatch(Character::isDigit);
+            if (numericPort && "25565".equals(port)) out = out.substring(0, lastColon);
+        }
+
+        return out.isBlank() ? "unknown" : out;
     }
 
     private static void migrateLegacyBankFiles(String fromId, String toId) {

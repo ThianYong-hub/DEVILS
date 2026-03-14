@@ -24,6 +24,15 @@
   ],
   "jars": [
     {
+      "file": "META-INF/jars/${xaero_minimap_jar}"
+    },
+    {
+      "file": "META-INF/jars/${xaero_worldmap_jar}"
+    },
+    {
+      "file": "META-INF/jars/${xaeroplus_jar}"
+    },
+    {
       "file": "META-INF/jars/chesttracker-port-embedded.jar"
     }
   ],

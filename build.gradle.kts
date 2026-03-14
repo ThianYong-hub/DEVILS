@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     id("fabric-loom") version "1.11-SNAPSHOT"
     java
@@ -84,6 +86,14 @@ val resolvedAppVersion = appVersionFromEnv
     ?: appVersionFromGit
     ?: modVersionFallback
 
+val minecraftVersion = properties["minecraft_version"] as String
+val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
+val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
+val xaeroPlusVersion = properties["xaeroplus_version"] as String
+val xaeroMinimapJar = "xaeros-minimap-$xaeroMinimapVersion.jar"
+val xaeroWorldMapJar = "xaeros-world-map-$xaeroWorldMapVersion.jar"
+val xaeroPlusJar = "xaeroplus-$xaeroPlusVersion.jar"
+
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
@@ -114,6 +124,13 @@ repositories {
         url = uri("https://api.modrinth.com/maven")
         content {
             includeGroup("maven.modrinth")
+        }
+    }
+    maven {
+        name = "Xaero Maven"
+        url = uri("https://maven.2b2t.vc/xaero")
+        content {
+            includeGroup("xaero.lib")
         }
     }
     maven {
@@ -157,12 +174,13 @@ repositories {
 
 dependencies {
     // Fabric
-    minecraft("com.mojang:minecraft:${properties["minecraft_version"] as String}")
+    minecraft("com.mojang:minecraft:$minecraftVersion")
     mappings("net.fabricmc:yarn:${properties["yarn_mappings"] as String}:v2")
     modImplementation("net.fabricmc:fabric-loader:${properties["loader_version"] as String}")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${properties["fabric_api_version"] as String}")
 
     // Meteor
-    modImplementation("meteordevelopment:meteor-client:${properties["minecraft_version"] as String}-SNAPSHOT")
+    modImplementation("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
 
     // Local OGG playback (jar-in-jar)
     implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
@@ -179,6 +197,42 @@ dependencies {
 }
 
 tasks {
+    val embeddedXaeroJars = listOf(
+        Triple(
+            xaeroMinimapJar,
+            "https://api.modrinth.com/maven/maven/modrinth/xaeros-minimap/$xaeroMinimapVersion/$xaeroMinimapJar",
+            xaeroMinimapJar
+        ),
+        Triple(
+            xaeroWorldMapJar,
+            "https://api.modrinth.com/maven/maven/modrinth/xaeros-world-map/$xaeroWorldMapVersion/$xaeroWorldMapJar",
+            xaeroWorldMapJar
+        ),
+        Triple(
+            xaeroPlusJar,
+            "https://api.modrinth.com/maven/maven/modrinth/xaeroplus/$xaeroPlusVersion/$xaeroPlusJar",
+            xaeroPlusJar
+        )
+    )
+
+    val prepareEmbeddedXaeroJars by registering {
+        val targetDir = layout.projectDirectory.dir("embedded-libs")
+        outputs.files(embeddedXaeroJars.map { targetDir.file(it.first) })
+        doLast {
+            val dir = targetDir.asFile
+            dir.mkdirs()
+            embeddedXaeroJars.forEach { (name, url, _) ->
+                val output = dir.resolve(name)
+                if (output.isFile && output.length() > 0L) return@forEach
+
+                logger.lifecycle("Downloading embedded Xaero jar: {}", name)
+                URI.create(url).toURL().openStream().use { input ->
+                    output.outputStream().use { out -> input.copyTo(out) }
+                }
+            }
+        }
+    }
+
     val cleanLibsJars by registering(Delete::class) {
         delete(fileTree(layout.buildDirectory.dir("libs")) { include("*.jar") })
     }
@@ -186,7 +240,10 @@ tasks {
     processResources {
         val propertyMap = mapOf(
             "version" to project.version,
-            "mc_version" to project.property("minecraft_version"),
+            "mc_version" to minecraftVersion,
+            "xaero_minimap_jar" to xaeroMinimapJar,
+            "xaero_worldmap_jar" to xaeroWorldMapJar,
+            "xaeroplus_jar" to xaeroPlusJar,
         )
 
         inputs.properties(propertyMap)
@@ -199,11 +256,18 @@ tasks {
     }
 
     jar {
-        dependsOn(cleanLibsJars)
+        dependsOn(cleanLibsJars, prepareEmbeddedXaeroJars)
         inputs.property("archivesName", project.base.archivesName.get())
 
         from("LICENSE") {
             rename { "${it}_${inputs.properties["archivesName"]}" }
+        }
+
+        embeddedXaeroJars.forEach { (name, _, outputName) ->
+            from("embedded-libs/$name") {
+                into("META-INF/jars")
+                rename { outputName }
+            }
         }
 
         from("chesttracker-port/chesttracker-port-embedded.jar") {

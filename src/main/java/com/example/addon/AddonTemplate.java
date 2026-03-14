@@ -22,6 +22,7 @@ import com.example.addon.modules.MaceSpoof;
 import com.example.addon.modules.VClip;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
 import com.example.addon.settings.TrackerPlayersSetting;
+import com.example.addon.util.XaeroEnvironmentReporter;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
@@ -44,6 +45,7 @@ public class AddonTemplate extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
         AddonModulesConfig.init();
+        XaeroEnvironmentReporter.logXaeroState();
 
         SettingsWidgetFactory.registerCustomFactory(TrackerPlayersSetting.class, theme -> (table, setting) -> {
             WTable rulesTable = table.add(theme.table()).expandX().widget();

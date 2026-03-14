@@ -1,7 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
-import com.example.addon.mixin.ClientPlayerInteractionManagerAccessor;
+import com.example.addon.mixin.ClientPlayerInteractionManagerInvoker;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -875,8 +875,7 @@ public class AutoCev extends Module {
 
     private boolean isBreakingBlock(BlockPos pos) {
         if (pos == null || mc.interactionManager == null) return false;
-        ClientPlayerInteractionManagerAccessor accessor = (ClientPlayerInteractionManagerAccessor) mc.interactionManager;
-        return accessor.isBreakingBlock() && pos.equals(accessor.getCurrentBreakingPos());
+        return ((ClientPlayerInteractionManagerInvoker) mc.interactionManager).devilsAddon$isCurrentlyBreaking(pos);
     }
 
     private boolean isPlayerInBlocks(PlayerEntity player) {

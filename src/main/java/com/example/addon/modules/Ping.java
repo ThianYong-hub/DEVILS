@@ -2,9 +2,12 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.audio.JoinSoundPlayer;
+import com.example.addon.gui.screens.settings.LocalIconSelectScreen;
 import com.example.addon.gui.screens.settings.LocalSoundSelectScreen;
 import com.example.addon.settings.SoundSourceMode;
 import com.example.addon.util.CrashGuard;
+import com.example.addon.util.MapIconManager;
+import com.example.addon.util.SyncCrypto;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -30,6 +33,7 @@ import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
@@ -39,7 +43,10 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.Util;
@@ -67,27 +74,39 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-import static meteordevelopment.meteorclient.MeteorClient.mc;
-
 public class Ping extends Module {
     private static final String SYNC_PULL_PATH = "/pull";
     private static final String SYNC_PUSH_PATH = "/push";
     private static final String SYNC_STREAM_PATH = "/v1/sync/stream";
-    private static final long SYNC_STREAM_RECONNECT_MS = 5_000;
-    private static final long SYNC_AUTH_BACKOFF_MS = 30_000;
-    private static final long SYNC_NETWORK_BACKOFF_MS = 10_000;
-    private static final long SYNC_CONFIG_BACKOFF_MS = 30_000;
+    private static final String SYNC_STREAM_PATH_LEGACY = "/stream";
+    private static final long SYNC_STREAM_RECONNECT_MS = 250;
+    private static final long SYNC_AUTH_BACKOFF_MS = 1_000;
+    private static final long SYNC_CRYPTO_BACKOFF_MS = 1_000;
+    private static final long SYNC_NETWORK_BACKOFF_MS = 250;
+    private static final long SYNC_CONFIG_BACKOFF_MS = 1_000;
+    private static final long SYNC_STREAM_UNSUPPORTED_BACKOFF_MS = 300_000;
     private static final long SYNC_PROBLEM_LOG_COOLDOWN_MS = 20_000;
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
     private static final int MAX_SYNC_MARKERS = 256;
-    private static final int PULL_FALLBACK_INTERVAL_MS = 8_000;
+    private static final String DEFAULT_PING_ICON_PATH = MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
     private static final long MARKER_TTL_MS = 10_000;
     private static final long MARKER_PULSE_PERIOD_MS = 1_200;
+    private static final long PULL_FALLBACK_INTERVAL_MS = 50;
     private static final int WORLD_MIN_Y = -65;
     private static final int WORLD_MAX_Y = 365;
     private static final String DEFAULT_SOUND = "minecraft:block.note_block.pling";
-    private static final String ICON_WARNING = "\u26A0";
+    private static final Identifier PING_MARKER_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_map_icon.png");
     private static final String MODULE_NAMESPACE = "ping";
+    private static final String MARKER_SCHEMA = "devils-ping-marker-v1";
+    private static final double STATIC_LABEL_SCALE = 1.35;
+    private static final int DEVILS_MAP_ICON_SOURCE_SIZE = 1024;
+    // Cropped non-transparent bounds inside the 1024x1024 source image.
+    private static final int DEVILS_MAP_ICON_U = 256;
+    private static final int DEVILS_MAP_ICON_V = 167;
+    private static final int DEVILS_MAP_ICON_REGION_W = 525;
+    private static final int DEVILS_MAP_ICON_REGION_H = 612;
+    private static final long PUSH_OK_LOG_COOLDOWN_MS = 120_000;
+    private static volatile Boolean xaeroWaypointRendererPresent;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgRender = settings.createGroup("Render");
@@ -113,9 +132,24 @@ public class Ping extends Module {
         .build()
     );
 
+    private final Setting<String> iconPath = sgGeneral.add(new StringSetting.Builder()
+        .name("icon-path")
+        .description("Custom icon file (.png/.jpg) from <gameDir>/devils-addon/icons. Empty = built-in Devils icon.")
+        .defaultValue(DEFAULT_PING_ICON_PATH)
+        .visible(() -> false)
+        .build()
+    );
+
     private final Setting<Boolean> syncVerbose = sgGeneral.add(new BoolSetting.Builder()
         .name("sync-verbose-log")
         .description("Show technical sync lifecycle messages in chat.")
+        .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<Boolean> xaeroMapDebug = sgGeneral.add(new BoolSetting.Builder()
+        .name("xaero-map-debug")
+        .description("Enable debug logs for Ping -> Xaero World Map marker bridge.")
         .defaultValue(false)
         .build()
     );
@@ -167,10 +201,12 @@ public class Ping extends Module {
 
     private boolean syncInFlight;
     private long lastKnownSyncRevision = -1;
+    private long lastSyncPullAttemptMs;
     private String lastSyncedFingerprint = "";
     private String lastSyncStatus = "idle";
+    private long lastPushOkLogMs;
+    private long lastConflictLogMs;
     private long syncBackoffUntilMs;
-    private long lastPullAttemptMs;
     private String lastSyncProblemSignature = "";
     private long lastSyncProblemLogMs;
     private int lastSyncProblemSuppressed;
@@ -183,6 +219,13 @@ public class Ping extends Module {
     private volatile long syncStreamPendingRevision = -1;
     private volatile long syncStreamReconnectAtMs;
     private volatile String syncStreamConnectionKey = "";
+    private volatile boolean syncStreamUseLegacyPath;
+    private volatile boolean syncStreamUnsupported;
+    private volatile long syncStreamUnsupportedUntilMs;
+    private volatile String runtimeSyncDeviceId = "";
+    private boolean runtimePingSyncEnabled;
+    private volatile boolean syncTickQueued;
+    private long lastLocalMarkerCreatedAtMs;
 
     public Ping() {
         super(
@@ -198,17 +241,21 @@ public class Ping extends Module {
     @Override
     public void onActivate() {
         toggleOnBindRelease = false;
+        if (MapIconManager.normalizeIconPath(iconPath.get()).isBlank()) iconPath.set(DEFAULT_PING_ICON_PATH);
     }
 
     @Override
     public void onDeactivate() {
         stopSyncStream();
+        syncTickQueued = false;
+        lastLocalMarkerCreatedAtMs = 0L;
     }
 
     @Override
     public NbtCompound toTag() {
         NbtCompound tag = super.toTag();
         tag.putString("ping-sound-path", pingSoundPath);
+        tag.putString("ping-icon-path", iconPath.get());
         return tag;
     }
 
@@ -216,6 +263,9 @@ public class Ping extends Module {
     public Module fromTag(NbtCompound tag) {
         super.fromTag(tag);
         pingSoundPath = normalizeLocalSoundPath(tag.getString("ping-sound-path", ""));
+        String loaded = MapIconManager.normalizeIconPath(tag.getString("ping-icon-path", iconPath.get()));
+        if (loaded.isBlank()) loaded = DEFAULT_PING_ICON_PATH;
+        iconPath.set(loaded);
         return this;
     }
 
@@ -231,6 +281,16 @@ public class Ping extends Module {
         WButton openSoundFolder = controls.add(theme.button("Open Folder")).expandX().widget();
         openSoundFolder.action = () -> Util.getOperatingSystem().open(JoinSoundPlayer.ensureSoundsDirectory().toUri().toString());
 
+        WButton openIconFolder = controls.add(theme.button("Icons Folder")).expandX().widget();
+        openIconFolder.action = () -> Util.getOperatingSystem().open(MapIconManager.ensureIconsDirectory().toUri().toString());
+
+        WButton selectIcon = controls.add(theme.button("Select Icon")).expandX().widget();
+        selectIcon.action = () -> mc.setScreen(new LocalIconSelectScreen(theme, value -> iconPath.set(MapIconManager.normalizeIconPath(value))));
+
+        String normalizedIcon = MapIconManager.normalizeIconPath(iconPath.get());
+        list.add(theme.label("Current icon: " + (normalizedIcon.isBlank() ? "(built-in)" : normalizedIcon))).expandX();
+        list.add(theme.label("Sync status: " + safe(lastSyncStatus))).expandX();
+
         return list;
     }
 
@@ -238,7 +298,11 @@ public class Ping extends Module {
     private void onGameJoined(GameJoinedEvent event) {
         CrashGuard.run(this, "onGameJoined", () -> {
             if (!isActive()) return;
-            lastPullAttemptMs = 0;
+            lastSyncPullAttemptMs = 0;
+            syncStreamUnsupported = false;
+            syncStreamUnsupportedUntilMs = 0;
+            syncTickQueued = false;
+            lastLocalMarkerCreatedAtMs = 0L;
         });
     }
 
@@ -247,6 +311,9 @@ public class Ping extends Module {
         CrashGuard.run(this, "onGameLeft", () -> {
             if (!isActive()) return;
             stopSyncStream();
+            lastSyncPullAttemptMs = 0;
+            syncTickQueued = false;
+            lastLocalMarkerCreatedAtMs = 0L;
         });
     }
 
@@ -307,20 +374,15 @@ public class Ping extends Module {
         double maxRange = Math.max(8, raycastRange.get());
         Vec3d fallback = eye.add(rotation.multiply(maxRange));
 
-        HitResult hit;
-        if (detachedCamera) {
-            hit = mc.crosshairTarget;
-            if (hit == null || hit.getType() == HitResult.Type.MISS) hit = mc.cameraEntity.raycast(maxRange, 1.0f, false);
-        } else {
-            hit = mc.player.raycast(maxRange, 1.0f, false);
-            HitResult crosshair = mc.crosshairTarget;
-            if (crosshair != null && crosshair.getType() != HitResult.Type.MISS) hit = crosshair;
-        }
+        HitResult hit = detachedCamera
+            ? mc.cameraEntity.raycast(maxRange, 1.0f, false)
+            : mc.player.raycast(maxRange, 1.0f, false);
 
         Vec3d raw = fallback;
         if (hit != null && hit.getPos() != null) {
             if (hit.getType() != HitResult.Type.MISS) {
-                raw = hit.getPos();
+                if (hit instanceof BlockHitResult blockHitResult) raw = Vec3d.ofCenter(blockHitResult.getBlockPos());
+                else raw = hit.getPos();
             } else {
                 double missDistance = hit.getPos().distanceTo(eye);
                 raw = missDistance >= (maxRange * 0.95) ? hit.getPos() : fallback;
@@ -332,21 +394,30 @@ public class Ping extends Module {
         String server = currentServerKey();
         String deviceId = currentSyncDeviceId();
         String id = buildMarkerId(sender, server);
+        String markerIconPath = MapIconManager.normalizeIconPath(iconPath.get());
+        if (markerIconPath.isBlank()) markerIconPath = DEFAULT_PING_ICON_PATH;
+
+        long now = System.currentTimeMillis();
+        long createdAt = now <= lastLocalMarkerCreatedAtMs ? (lastLocalMarkerCreatedAtMs + 1L) : now;
+        lastLocalMarkerCreatedAtMs = createdAt;
 
         PingMarker marker = new PingMarker(
             id,
             sender,
             deviceId,
             server,
+            mc.world == null ? "minecraft:overworld" : mc.world.getRegistryKey().getValue().toString(),
             raw.x,
             clampedY,
             raw.z,
-            System.currentTimeMillis(),
-            icon.get()
+            createdAt,
+            icon.get(),
+            markerIconPath
         );
 
         applyMarker(marker);
         trimMarkerCapacity();
+        playLocalPingSound();
     }
 
     private void renderMarkers3D(Render3DEvent event) {
@@ -392,6 +463,8 @@ public class Ping extends Module {
 
     private void renderMarkers2D(Render2DEvent event) {
         if (mc.player == null || mc.world == null) return;
+        if (mc.currentScreen != null) return;
+        if (shouldUseXaeroWaypointLabelsOnly()) return;
 
         Vector3d pos = new Vector3d();
         long now = System.currentTimeMillis();
@@ -402,14 +475,14 @@ public class Ping extends Module {
             if (!NametagUtils.to2D(pos, labelScale(marker), false)) continue;
 
             String label = buildInfoText(marker);
-            boolean showIcon = icon.get();
-            String iconLabel = showIcon ? currentIconGlyph() : "";
+            boolean showIcon = icon.get() && marker.icon();
             if (label.isBlank() && !showIcon) continue;
 
             NametagUtils.begin(pos, event.drawContext);
-            double iconWidth = showIcon ? mc.textRenderer.getWidth(iconLabel) : 0;
+            int iconSize = Math.max(8, mc.textRenderer.fontHeight);
+            double iconWidth = showIcon ? iconSize : 0;
             double textWidth = label.isBlank() ? 0 : mc.textRenderer.getWidth(label);
-            double spacing = showIcon && !label.isBlank() ? 3 : 0;
+            double spacing = showIcon && !label.isBlank() ? 2 : 0;
             double width = iconWidth + spacing + textWidth;
             double height = mc.textRenderer.fontHeight;
             double x = -width / 2;
@@ -427,14 +500,26 @@ public class Ping extends Module {
 
             double cursorX = x;
             if (showIcon) {
-                event.drawContext.drawText(
-                    mc.textRenderer,
-                    iconLabel,
-                    (int) Math.round(cursorX),
-                    (int) Math.round(y),
-                    toArgb(iconColor()),
-                    false
-                );
+                int iconX = (int) Math.round(cursorX);
+                int iconY = (int) Math.round(y - 1);
+                boolean drawnCustom = MapIconManager.drawCustomIcon(event.drawContext, marker.iconPath(), iconX, iconY, iconSize, 0xFFFFFFFF);
+                if (!drawnCustom) {
+                    event.drawContext.drawTexture(
+                        RenderPipelines.GUI_TEXTURED,
+                        PING_MARKER_ICON_TEXTURE,
+                        iconX,
+                        iconY,
+                        DEVILS_MAP_ICON_U,
+                        DEVILS_MAP_ICON_V,
+                        iconSize,
+                        iconSize,
+                        DEVILS_MAP_ICON_REGION_W,
+                        DEVILS_MAP_ICON_REGION_H,
+                        DEVILS_MAP_ICON_SOURCE_SIZE,
+                        DEVILS_MAP_ICON_SOURCE_SIZE,
+                        0xFFFFFFFF
+                    );
+                }
                 cursorX += iconWidth + spacing;
             }
 
@@ -450,32 +535,55 @@ public class Ping extends Module {
             }
             NametagUtils.end(event.drawContext);
         }
+
     }
 
     private String buildInfoText(PingMarker marker) {
+        String sender = normalizeSender(marker.sender());
+        String pingPrefix = "[PING] " + sender;
+        String coords = formatCoords(marker.x(), marker.y(), marker.z());
+
         return switch (infoMode.get()) {
-            case Distance -> {
-                if (mc.player == null) yield marker.sender();
-                double distance = mc.player.getPos().distanceTo(new Vec3d(marker.x(), marker.y(), marker.z()));
-                yield marker.sender() + " " + String.format(Locale.ROOT, "%.1fm", distance);
-            }
-            case Coords -> formatCoords(marker.x(), marker.y(), marker.z());
-            case Both -> marker.sender() + " " + formatCoords(marker.x(), marker.y(), marker.z());
+            case Distance -> pingPrefix;
+            case Coords -> pingPrefix + " | " + coords;
         };
+    }
+
+    private static String normalizeSender(String raw) {
+        String value = safe(raw).trim();
+        if (value.isBlank()) return "Unknown";
+        if (value.contains("|")) {
+            String[] parts = value.split("\\|");
+            value = safe(parts[0]).trim();
+        } else if (value.contains("/") || value.contains("\\")) {
+            String[] parts = value.replace('\\', '/').split("/");
+            if (parts.length >= 3 && safe(parts[0]).toLowerCase(Locale.ROOT).contains("[ping]")) {
+                value = safe(parts[1]).trim();
+            } else {
+                value = safe(parts[parts.length - 1]).trim();
+            }
+        }
+        if (value.regionMatches(true, 0, "[PING]", 0, 6)) {
+            value = safe(value.substring(6)).trim();
+        }
+        int lastSpace = value.lastIndexOf(' ');
+        if (lastSpace > 0) {
+            String tail = safe(value.substring(lastSpace + 1)).trim().toLowerCase(Locale.ROOT);
+            if (tail.equals("~") || tail.equals("--") || tail.matches("\\d+(?:\\.\\d+)?(?:m|k)?")) {
+                value = safe(value.substring(0, lastSpace)).trim();
+            }
+        }
+        return value.isBlank() ? "Unknown" : value;
     }
 
     private List<PingMarker> collectVisibleMarkers() {
         if (markers.isEmpty()) return List.of();
 
         String serverKey = normalizeServerKey(currentServerKey());
-        String selfDevice = normalizeKey(currentSyncDeviceId());
 
         ArrayList<PingMarker> visible = new ArrayList<>();
         for (PingMarker marker : markers.values()) {
-            if (!selfDevice.isBlank() && selfDevice.equals(normalizeKey(marker.senderDevice()))) {
-                visible.add(marker);
-                continue;
-            }
+            if (marker == null) continue;
 
             if (!isMarkerAudienceAllowed(marker, serverKey)) continue;
             visible.add(marker);
@@ -483,6 +591,49 @@ public class Ping extends Module {
 
         visible.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
         return visible;
+    }
+
+    public List<MarkerJumpTarget> snapshotMarkerTargets() {
+        if (markers.isEmpty()) return List.of();
+
+        String serverKey = normalizeServerKey(currentServerKey());
+        ArrayList<MarkerJumpTarget> targets = new ArrayList<>();
+        for (PingMarker marker : markers.values()) {
+            if (marker == null) continue;
+            if (!isMarkerAudienceAllowed(marker, serverKey)) continue;
+            targets.add(new MarkerJumpTarget(marker.id(), marker.sender(), marker.server(), marker.dimension(), marker.x(), marker.y(), marker.z(), marker.createdAtMs(), marker.iconPath()));
+        }
+
+        targets.sort(Comparator.comparingLong(MarkerJumpTarget::createdAtMs).reversed());
+        return targets;
+    }
+
+    public boolean xaeroMapDebug() {
+        return xaeroMapDebug.get();
+    }
+
+    public InfoMode xaeroInfoMode() {
+        return infoMode.get();
+    }
+
+    private boolean shouldUseXaeroWaypointLabelsOnly() {
+        if (XaeroSync.isWaypointIntegrationRunning()) return true;
+        return isXaeroWaypointRendererPresent();
+    }
+
+    private boolean isXaeroWaypointRendererPresent() {
+        Boolean cached = xaeroWaypointRendererPresent;
+        if (cached != null) return cached;
+
+        boolean present;
+        try {
+            Class.forName("xaero.map.mods.gui.WaypointRenderer", false, Ping.class.getClassLoader());
+            present = true;
+        } catch (Throwable ignored) {
+            present = false;
+        }
+        xaeroWaypointRendererPresent = present;
+        return present;
     }
 
     private boolean isMarkerAudienceAllowed(PingMarker marker, String normalizedServerKey) {
@@ -580,17 +731,27 @@ public class Ping extends Module {
 
     private PingMarker canonicalizeMarker(PingMarker marker) {
         String canonicalId = buildMarkerId(marker.sender(), marker.server());
-        if (canonicalId.equals(marker.id())) return marker;
+        double canonicalX = marker.x();
+        double canonicalY = clampY(marker.y());
+        double canonicalZ = marker.z();
+        if (canonicalId.equals(marker.id())
+            && Double.compare(canonicalX, marker.x()) == 0
+            && Double.compare(canonicalY, marker.y()) == 0
+            && Double.compare(canonicalZ, marker.z()) == 0) {
+            return marker;
+        }
         return new PingMarker(
             canonicalId,
             marker.sender(),
             marker.senderDevice(),
             marker.server(),
-            marker.x(),
-            marker.y(),
-            marker.z(),
+            marker.dimension(),
+            canonicalX,
+            canonicalY,
+            canonicalZ,
             marker.createdAtMs(),
-            marker.icon()
+            marker.icon(),
+            marker.iconPath()
         );
     }
 
@@ -614,20 +775,8 @@ public class Ping extends Module {
         return pulseColor(textColor.get(), marker, nowMs, 0.72, 1.0);
     }
 
-    private String currentIconGlyph() {
-        return ICON_WARNING;
-    }
-
-    private Color iconColor() {
-        return new Color(255, 58, 58, 255);
-    }
-
     private double labelScale(PingMarker marker) {
-        if (mc.player == null) return 1.0;
-        double distance = mc.player.getPos().distanceTo(new Vec3d(marker.x(), marker.y(), marker.z()));
-        double scaled = 1.0 + Math.sqrt(Math.max(0, distance)) / 8.0;
-        if (scaled < 1.0) return 1.0;
-        return Math.min(scaled, 3.2);
+        return STATIC_LABEL_SCALE;
     }
 
     private double pulsePhase(PingMarker marker, long nowMs) {
@@ -653,10 +802,18 @@ public class Ping extends Module {
     private void handleSyncTick() {
         SyncRuntimeConfig sync = resolveSyncRuntimeConfig();
         if (sync == null) {
+            runtimePingSyncEnabled = false;
+            runtimeSyncDeviceId = "";
             stopSyncStream();
             return;
         }
-        if (syncInFlight) return;
+        if (syncInFlight) {
+            syncTickQueued = true;
+            return;
+        }
+
+        runtimePingSyncEnabled = true;
+        runtimeSyncDeviceId = sync.deviceId();
 
         String baseUrl = normalizeSyncBaseUrl(sync.baseUrl());
         if (baseUrl.isBlank()) {
@@ -679,34 +836,42 @@ public class Ping extends Module {
             return;
         }
 
+        if (mc.player == null || mc.world == null) {
+            stopSyncStream();
+            return;
+        }
+
         if (sync.useStream()) ensureSyncStream(baseUrl, sync.deviceId(), sync.token(), sync.timeoutSec(), sync.streamWaitMs());
         else stopSyncStream();
 
-        long now = System.currentTimeMillis();
-        if (syncBackoffUntilMs > now) return;
+        if (syncBackoffUntilMs > System.currentTimeMillis()) return;
 
+        long now = System.currentTimeMillis();
         List<SyncPingData> localSnapshot = snapshotSyncData();
         String localFingerprint = computeFingerprint(localSnapshot);
         boolean localChanged = !localFingerprint.equals(lastSyncedFingerprint);
         boolean streamTriggeredPull = consumePendingStreamPullSignal();
-        boolean streamDisconnected = sync.useStream() && !syncStreamConnected;
+
         boolean shouldBootstrapPull = lastKnownSyncRevision < 0;
-        boolean periodicPull = (now - lastPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS && (!sync.useStream() || streamDisconnected);
-        boolean pullBeforePushWhenStreamDown = localChanged && streamDisconnected;
-        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || periodicPull || pullBeforePushWhenStreamDown;
-        boolean shouldRun = localChanged || shouldPull;
+        // Hard sync mode: always poll quickly in addition to stream signals.
+        boolean periodicPull = (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
+        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || periodicPull;
+        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull || periodicPull;
         if (!shouldRun) return;
 
+        lastSyncPullAttemptMs = now;
         syncInFlight = true;
-        lastPullAttemptMs = now;
+        int pullWaitMs = sync.useStream() ? 0 : sync.streamWaitMs();
         runSyncCycleAsync(
             baseUrl,
             sync.deviceId(),
             sync.token(),
             sync.timeoutSec(),
-            sync.streamWaitMs(),
+            pullWaitMs,
+            sync.encryptionKey(),
             lastKnownSyncRevision,
             localSnapshot,
+            localFingerprint,
             localChanged,
             shouldPull
         );
@@ -718,144 +883,229 @@ public class Ping extends Module {
         String token,
         int timeoutSec,
         int pullWaitMs,
+        String encryptionKey,
         long knownRevision,
         List<SyncPingData> localSnapshot,
+        String localFingerprint,
         boolean localChanged,
         boolean doPull
     ) {
         CompletableFuture.runAsync(() -> {
             SyncPullResult pullResult = null;
             SyncPushResult pushResult = null;
+            boolean remoteApplied = false;
             String error = null;
 
             List<SyncPingData> effectiveSnapshot = localSnapshot;
-            String remoteFingerprint = null;
+            String effectiveFingerprint = localFingerprint;
             long pushBaseRevision = knownRevision;
+            boolean pushRequestedByMerge = false;
+            boolean localNeedsPush = localChanged;
 
             if (doPull) {
                 try {
-                    pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, knownRevision, pullWaitMs);
-                    if (pullResult.ok()) {
-                        pushBaseRevision = pullResult.revision();
-                        List<SyncPingData> remoteSnapshot = pullResult.profiles() == null ? List.of() : pullResult.profiles();
-                        remoteFingerprint = computeFingerprint(remoteSnapshot);
-                        effectiveSnapshot = mergeSnapshots(localSnapshot, remoteSnapshot);
-                    } else {
+                    pullResult = sendPullRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, knownRevision, pullWaitMs);
+                    if (!pullResult.ok()) {
                         error = "pull-rejected:" + pullResult.error();
+                    } else {
+                        if (pullResult.revision() >= 0) pushBaseRevision = pullResult.revision();
+
+                        List<SyncPingData> remoteSnapshot = pullResult.profiles() == null ? List.of() : pullResult.profiles();
+                        String remoteFingerprint = computeFingerprint(remoteSnapshot);
+                        boolean remoteIsNewer = pullResult.revision() > knownRevision && pullResult.profiles() != null;
+
+                        if (localChanged) {
+                            List<SyncPingData> merged = mergeSnapshots(remoteSnapshot, localSnapshot);
+                            String mergedFingerprint = computeFingerprint(merged);
+                            if (!mergedFingerprint.equals(remoteFingerprint)) {
+                                effectiveSnapshot = merged;
+                                effectiveFingerprint = mergedFingerprint;
+                                pushRequestedByMerge = true;
+                                localNeedsPush = true;
+                            } else {
+                                effectiveSnapshot = remoteSnapshot;
+                                effectiveFingerprint = remoteFingerprint;
+                                localNeedsPush = false;
+                                if (remoteIsNewer) {
+                                    remoteApplied = true;
+                                }
+                            }
+                        } else if (remoteIsNewer) {
+                            effectiveSnapshot = remoteSnapshot;
+                            effectiveFingerprint = remoteFingerprint;
+                            remoteApplied = true;
+                        }
                     }
                 } catch (Throwable t) {
                     error = formatSyncException("pull-error", t);
                 }
             }
 
-            if (error == null) {
-                String effectiveFingerprint = computeFingerprint(effectiveSnapshot);
-                boolean needPush = localChanged
-                    || (remoteFingerprint != null && !effectiveFingerprint.equals(remoteFingerprint));
+            if (error == null && !remoteApplied && (localNeedsPush || pushRequestedByMerge)) {
+                try {
+                    pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushBaseRevision, effectiveSnapshot);
 
-                if (needPush) {
-                    try {
-                        pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, pushBaseRevision, effectiveSnapshot);
-
-                        if (pushResult.ok() && pushResult.conflict() && pushResult.profiles() != null && pushResult.revision() >= 0) {
-                            List<SyncPingData> conflictMerged = mergeSnapshots(effectiveSnapshot, pushResult.profiles());
-                            pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, pushResult.revision(), conflictMerged);
-                            effectiveSnapshot = conflictMerged;
-                        }
-                    } catch (Throwable t) {
-                        error = formatSyncException("push-error", t);
+                    if (pushResult.ok() && pushResult.conflict() && pushResult.profiles() != null && pushResult.revision() >= 0) {
+                        List<SyncPingData> conflictMerged = mergeSnapshots(pushResult.profiles(), localSnapshot);
+                        String conflictFingerprint = computeFingerprint(conflictMerged);
+                        pushResult = sendPushRequest(baseUrl, deviceId, token, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
+                        effectiveSnapshot = conflictMerged;
+                        effectiveFingerprint = conflictFingerprint;
                     }
+                } catch (Throwable t) {
+                    error = formatSyncException("push-error", t);
                 }
             }
 
-            String effectiveFingerprint = computeFingerprint(effectiveSnapshot);
-            SyncCycleResult result = new SyncCycleResult(pullResult, pushResult, effectiveSnapshot, effectiveFingerprint, error);
+            SyncCycleResult result = new SyncCycleResult(
+                pullResult,
+                pushResult,
+                remoteApplied,
+                localNeedsPush,
+                effectiveSnapshot,
+                effectiveFingerprint,
+                error
+            );
             mc.execute(() -> handleSyncCycleResult(result));
         });
     }
 
     private void handleSyncCycleResult(SyncCycleResult result) {
         syncInFlight = false;
-
-        if (result.error() != null) {
-            lastSyncStatus = result.error();
-            logSyncProblem("failed", result.error());
-            return;
-        }
-
-        clearSyncProblemTracking();
-
-        if (result.pullResult() != null && result.pullResult().ok() && result.pullResult().revision() >= 0) {
-            lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pullResult().revision());
-        }
-
-        if (result.pushResult() != null) {
-            if (result.pushResult().ok() && result.pushResult().applied()) {
-                if (result.pushResult().revision() >= 0) {
-                    lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pushResult().revision());
-                }
-                lastSyncStatus = "push-ok";
-                logSync("Ping sync push ok (rev=%d).", lastKnownSyncRevision);
-            } else if (result.pushResult().ok() && result.pushResult().conflict()) {
-                lastSyncStatus = "push-conflict";
-                logSync("Ping sync conflict handled by merge.");
-            } else if (result.pushResult().ok()) {
-                lastSyncStatus = "push-rejected:" + result.pushResult().error();
-                logSyncProblem("push rejected", result.pushResult().error());
+        try {
+            if (result.error() != null) {
+                lastSyncStatus = result.error();
+                logSyncProblem("failed", result.error());
+                return;
             }
-        } else if (result.pullResult() != null && result.pullResult().ok()) {
-            lastSyncStatus = "pull-ok";
-        }
 
-        applySyncedSnapshot(result.snapshot());
-        lastSyncedFingerprint = result.snapshotFingerprint();
+            if (result.pullResult() != null && result.pullResult().ok() && result.pullResult().revision() >= 0) {
+                lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pullResult().revision());
+            }
+
+            if (result.remoteApplied()) {
+                lastSyncStatus = "pull-applied";
+                applySyncedSnapshot(result.snapshot());
+                lastSyncedFingerprint = result.snapshotFingerprint();
+                clearSyncProblemTracking();
+                return;
+            }
+
+            if (result.pushResult() != null) {
+                if (result.pushResult().ok() && result.pushResult().applied()) {
+                    if (result.pushResult().revision() >= 0) {
+                        lastKnownSyncRevision = Math.max(lastKnownSyncRevision, result.pushResult().revision());
+                    }
+                    lastSyncStatus = "push-ok";
+                    long now = System.currentTimeMillis();
+                    if (now - lastPushOkLogMs >= PUSH_OK_LOG_COOLDOWN_MS) {
+                        logSync("Ping sync push ok (rev=%d).", lastKnownSyncRevision);
+                        lastPushOkLogMs = now;
+                    }
+                    applySyncedSnapshot(result.snapshot());
+                    lastSyncedFingerprint = result.snapshotFingerprint();
+                    clearSyncProblemTracking();
+                    return;
+                }
+
+                if (result.pushResult().ok() && result.pushResult().conflict()) {
+                    lastSyncStatus = "push-conflict";
+                    long now = System.currentTimeMillis();
+                    if (now - lastConflictLogMs >= PUSH_OK_LOG_COOLDOWN_MS) {
+                        logSync("Ping sync conflict handled by merge.");
+                        lastConflictLogMs = now;
+                    }
+                    applySyncedSnapshot(result.snapshot());
+                    lastSyncedFingerprint = result.snapshotFingerprint();
+                    clearSyncProblemTracking();
+                    return;
+                }
+
+                if (result.pushResult().ok()) {
+                    lastSyncStatus = "push-rejected:" + result.pushResult().error();
+                    logSyncProblem("push rejected", result.pushResult().error());
+                    return;
+                }
+            }
+
+            if (!result.localChanged()) {
+                lastSyncedFingerprint = result.snapshotFingerprint();
+                lastSyncStatus = "noop";
+                clearSyncProblemTracking();
+                return;
+            }
+
+            lastSyncStatus = "local-change-pending";
+        } finally {
+            if (syncTickQueued) {
+                syncTickQueued = false;
+                handleSyncTick();
+            }
+        }
     }
 
     private void applySyncedSnapshot(List<SyncPingData> snapshot) {
-        LinkedHashMap<String, PingMarker> oldMarkers = new LinkedHashMap<>(markers);
-        LinkedHashMap<String, PingMarker> merged = decodeToMarkerMap(snapshot);
-        Map<String, Boolean> oldEligibility = new HashMap<>(logoutSpotEligible);
-        markers.clear();
-        logoutSpotEligible.clear();
-        markers.putAll(merged);
-        trimMarkerCapacity();
-
-        for (PingMarker marker : markers.values()) {
-            if (oldEligibility.getOrDefault(marker.id(), false) || isPlayerInView(marker.sender())) {
-                logoutSpotEligible.put(marker.id(), true);
-            }
-        }
-
         String selfName = normalizeKey(currentUsername());
         String serverKey = normalizeServerKey(currentServerKey());
 
-        if (shouldPlayRemoteSound(oldMarkers, markers, selfName, serverKey)) {
-            JoinSoundPlayer.play(
-                SoundSourceMode.LocalFolder,
-                pingSoundPath,
-                DEFAULT_SOUND,
-                pingVolume.get()
-            );
+        if (runtimePingSyncEnabled) {
+            LinkedHashMap<String, PingMarker> oldMarkers = new LinkedHashMap<>(markers);
+            LinkedHashMap<String, PingMarker> merged = decodeToMarkerMap(snapshot);
+            String selfDevice = normalizeKey(currentSyncDeviceId());
+
+            // Never roll back a fresh local ping to an older pulled snapshot.
+            for (PingMarker local : oldMarkers.values()) {
+                if (local == null) continue;
+                boolean localOwned = (!selfDevice.isBlank() && selfDevice.equals(normalizeKey(local.senderDevice())))
+                    || normalizeKey(local.sender()).equals(selfName);
+                if (!localOwned) continue;
+
+                PingMarker remote = merged.get(local.id());
+                if (remote == null || local.createdAtMs() > remote.createdAtMs()) {
+                    merged.put(local.id(), local);
+                }
+            }
+
+            Map<String, Boolean> oldEligibility = new HashMap<>(logoutSpotEligible);
+            markers.clear();
+            logoutSpotEligible.clear();
+            markers.putAll(merged);
+            trimMarkerCapacity();
+
+            for (PingMarker marker : markers.values()) {
+                if (oldEligibility.getOrDefault(marker.id(), false) || isPlayerInView(marker.sender())) {
+                    logoutSpotEligible.put(marker.id(), true);
+                }
+            }
+
+            if (shouldPlayRemoteSound(oldMarkers, markers, selfName, serverKey)) {
+                JoinSoundPlayer.play(
+                    SoundSourceMode.LocalFolder,
+                    pingSoundPath,
+                    DEFAULT_SOUND,
+                    pingVolume.get()
+                );
+            }
         }
     }
 
-    private List<SyncPingData> mergeSnapshots(List<SyncPingData> local, List<SyncPingData> remote) {
-        LinkedHashMap<String, PingMarker> map = decodeToMarkerMap(remote);
-        LinkedHashMap<String, PingMarker> localMap = decodeToMarkerMap(local);
+    private List<SyncPingData> mergeSnapshots(List<SyncPingData> remoteSnapshot, List<SyncPingData> localSnapshot) {
+        LinkedHashMap<String, PingMarker> mergedMarkers = decodeToMarkerMap(remoteSnapshot);
+        LinkedHashMap<String, PingMarker> localMarkers = decodeToMarkerMap(localSnapshot);
 
-        for (PingMarker localMarker : localMap.values()) {
-            PingMarker existing = map.get(localMarker.id());
+        for (PingMarker localMarker : localMarkers.values()) {
+            PingMarker existing = mergedMarkers.get(localMarker.id());
             if (existing == null || localMarker.createdAtMs() >= existing.createdAtMs()) {
-                map.put(localMarker.id(), localMarker);
+                mergedMarkers.put(localMarker.id(), localMarker);
             }
         }
 
-        List<PingMarker> sorted = new ArrayList<>(map.values());
-        sorted.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
-        if (sorted.size() > MAX_SYNC_MARKERS) sorted = sorted.subList(0, MAX_SYNC_MARKERS);
+        List<PingMarker> sortedMarkers = new ArrayList<>(mergedMarkers.values());
+        sortedMarkers.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
+        if (sortedMarkers.size() > MAX_SYNC_MARKERS) sortedMarkers = sortedMarkers.subList(0, MAX_SYNC_MARKERS);
 
-        ArrayList<SyncPingData> merged = new ArrayList<>(sorted.size());
-        for (PingMarker marker : sorted) merged.add(encodeMarker(marker));
+        ArrayList<SyncPingData> merged = new ArrayList<>(sortedMarkers.size());
+        for (PingMarker marker : sortedMarkers) merged.add(encodeMarker(marker));
         return merged;
     }
 
@@ -877,27 +1127,39 @@ public class Ping extends Module {
     }
 
     private List<SyncPingData> snapshotSyncData() {
-        if (markers.isEmpty()) return List.of();
+        ArrayList<SyncPingData> snapshot = new ArrayList<>();
 
-        ArrayList<PingMarker> ordered = new ArrayList<>(markers.values());
-        ordered.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
-        if (ordered.size() > MAX_SYNC_MARKERS) ordered = new ArrayList<>(ordered.subList(0, MAX_SYNC_MARKERS));
+        if (runtimePingSyncEnabled) {
+            String selfName = normalizeKey(currentUsername());
+            String selfDevice = normalizeKey(currentSyncDeviceId());
+            ArrayList<PingMarker> ordered = new ArrayList<>(markers.values());
+            ordered.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
+            if (ordered.size() > MAX_SYNC_MARKERS) ordered = new ArrayList<>(ordered.subList(0, MAX_SYNC_MARKERS));
+            for (PingMarker marker : ordered) {
+                if (marker == null) continue;
+                boolean localOwned = (!selfDevice.isBlank() && selfDevice.equals(normalizeKey(marker.senderDevice())))
+                    || (!selfName.isBlank() && selfName.equals(normalizeKey(marker.sender())));
+                if (!localOwned) continue;
+                snapshot.add(encodeMarker(marker));
+            }
+        }
 
-        ArrayList<SyncPingData> snapshot = new ArrayList<>(ordered.size());
-        for (PingMarker marker : ordered) snapshot.add(encodeMarker(marker));
         return snapshot;
     }
 
     private SyncPingData encodeMarker(PingMarker marker) {
         JsonObject payload = new JsonObject();
+        payload.addProperty("schema", MARKER_SCHEMA);
         payload.addProperty("id", marker.id());
         payload.addProperty("sender", marker.sender());
         payload.addProperty("senderDevice", marker.senderDevice());
+        payload.addProperty("dim", marker.dimension());
         payload.addProperty("x", marker.x());
         payload.addProperty("y", marker.y());
         payload.addProperty("z", marker.z());
         payload.addProperty("createdAt", marker.createdAtMs());
         payload.addProperty("icon", marker.icon());
+        payload.addProperty("iconPath", marker.iconPath());
         return new SyncPingData(true, marker.sender(), marker.server(), payload.toString(), 0);
     }
 
@@ -918,18 +1180,23 @@ public class Ping extends Module {
             return null;
         }
 
+        String schema = readString(json, "schema", "");
+        if (!schema.isBlank() && !MARKER_SCHEMA.equals(schema)) return null;
+
         String senderDevice = readString(json, "senderDevice", "");
+        String dimension = readString(json, "dim", mc.world == null ? "minecraft:overworld" : mc.world.getRegistryKey().getValue().toString());
         double x = readDouble(json, "x", Double.NaN);
         double y = clampY(readDouble(json, "y", Double.NaN));
         double z = readDouble(json, "z", Double.NaN);
         long createdAt = readLong(json, "createdAt", 0);
         boolean iconValue = readBoolean(json, "icon", true);
+        String iconPathValue = MapIconManager.normalizeIconPath(readString(json, "iconPath", readString(json, "icon-path", "")));
 
         if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return null;
         if (createdAt <= 0) createdAt = System.currentTimeMillis();
         String id = buildMarkerId(sender, server);
 
-        return new PingMarker(id, sender, senderDevice, server, x, y, z, createdAt, iconValue);
+        return new PingMarker(id, sender, senderDevice, server, dimension, x, y, z, createdAt, iconValue, iconPathValue);
     }
 
     private boolean shouldPlayRemoteSound(
@@ -961,19 +1228,20 @@ public class Ping extends Module {
         return false;
     }
 
-    private PingMarker newestMarker(Iterable<PingMarker> values) {
-        PingMarker newest = null;
-        for (PingMarker marker : values) {
-            if (marker == null) continue;
-            if (newest == null || marker.createdAtMs() > newest.createdAtMs()) newest = marker;
-        }
-        return newest;
-    }
-
     private String markerSoundStamp(PingMarker marker) {
         return marker.id() + ":" + marker.createdAtMs();
     }
-    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, long knownRevision, int waitMs) throws Exception {
+
+    private void playLocalPingSound() {
+        JoinSoundPlayer.play(
+            SoundSourceMode.LocalFolder,
+            pingSoundPath,
+            DEFAULT_SOUND,
+            pingVolume.get()
+        );
+    }
+
+    private SyncPullResult sendPullRequest(String baseUrl, String deviceId, String token, int timeoutSec, String encryptionKey, long knownRevision, int waitMs) throws Exception {
         JsonObject payload = new JsonObject();
         payload.addProperty("deviceId", deviceId);
         payload.addProperty("knownRevision", knownRevision);
@@ -982,7 +1250,7 @@ public class Ping extends Module {
 
         HttpRequest request = buildSyncRequest(baseUrl, SYNC_PULL_PATH, payload.toString(), token, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return parsePullResponse(response);
+        return parsePullResponse(response, encryptionKey);
     }
 
     private SyncPushResult sendPushRequest(
@@ -990,6 +1258,7 @@ public class Ping extends Module {
         String deviceId,
         String token,
         int timeoutSec,
+        String encryptionKey,
         long baseRevision,
         List<SyncPingData> snapshot
     ) throws Exception {
@@ -997,11 +1266,11 @@ public class Ping extends Module {
         payload.addProperty("deviceId", deviceId);
         payload.addProperty("baseRevision", baseRevision);
         payload.addProperty("module", MODULE_NAMESPACE);
-        payload.add("profiles", toJsonArray(snapshot));
+        payload.add("profiles", SyncCrypto.encryptProfiles(toJsonArray(snapshot), encryptionKey, MODULE_NAMESPACE));
 
         HttpRequest request = buildSyncRequest(baseUrl, SYNC_PUSH_PATH, payload.toString(), token, timeoutSec);
         HttpResponse<String> response = syncHttpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        return parsePushResponse(response);
+        return parsePushResponse(response, encryptionKey);
     }
 
     private HttpRequest buildSyncRequest(String baseUrl, String path, String body, String token, int timeoutSec) {
@@ -1015,7 +1284,7 @@ public class Ping extends Module {
         return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
     }
 
-    private SyncPullResult parsePullResponse(HttpResponse<String> response) {
+    private SyncPullResult parsePullResponse(HttpResponse<String> response, String encryptionKey) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             return new SyncPullResult(false, -1, null, parseHttpError(response), "");
         }
@@ -1028,13 +1297,18 @@ public class Ping extends Module {
 
         boolean ok = readBoolean(json, "ok", true);
         long revision = readLong(json, "revision", readLong(json, "rev", -1));
-        List<SyncPingData> profiles = readProfiles(json);
+        List<SyncPingData> profiles;
+        try {
+            profiles = readProfiles(json, encryptionKey);
+        } catch (Exception decryptError) {
+            return new SyncPullResult(false, revision, null, "decrypt:" + decryptError.getClass().getSimpleName(), "");
+        }
         String error = readString(json, "error", "");
         String lastWriter = readString(json, "lastWriter", readString(json, "last_writer", ""));
         return new SyncPullResult(ok, revision, profiles, error, lastWriter);
     }
 
-    private SyncPushResult parsePushResponse(HttpResponse<String> response) {
+    private SyncPushResult parsePushResponse(HttpResponse<String> response, String encryptionKey) {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             return new SyncPushResult(false, false, false, -1, null, parseHttpError(response), "");
         }
@@ -1049,16 +1323,22 @@ public class Ping extends Module {
         boolean applied = readBoolean(json, "applied", ok);
         boolean conflict = readBoolean(json, "conflict", false);
         long revision = readLong(json, "revision", -1);
-        List<SyncPingData> profiles = readProfiles(json);
+        List<SyncPingData> profiles;
+        try {
+            profiles = readProfiles(json, encryptionKey);
+        } catch (Exception decryptError) {
+            return new SyncPushResult(false, false, conflict, revision, null, "decrypt:" + decryptError.getClass().getSimpleName(), "");
+        }
         String error = readString(json, "error", "");
         String lastWriter = readString(json, "lastWriter", readString(json, "last_writer", ""));
         return new SyncPushResult(ok, applied, conflict, revision, profiles, error, lastWriter);
     }
 
-    private List<SyncPingData> readProfiles(JsonObject json) {
+    private List<SyncPingData> readProfiles(JsonObject json, String encryptionKey) throws Exception {
         JsonArray array = readArray(json, "profiles");
         if (array == null) array = readArray(json, "data");
         if (array == null) return List.of();
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, MODULE_NAMESPACE);
 
         ArrayList<SyncPingData> list = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {
@@ -1094,6 +1374,13 @@ public class Ping extends Module {
     }
 
     private void ensureSyncStream(String baseUrl, String deviceId, String token, int timeoutSec, int waitMs) {
+        long now = System.currentTimeMillis();
+        if (syncStreamUnsupported && syncStreamUnsupportedUntilMs > now) return;
+        if (syncStreamUnsupported && syncStreamUnsupportedUntilMs <= now) {
+            syncStreamUnsupported = false;
+            syncStreamUnsupportedUntilMs = 0;
+        }
+
         String tokenValue = token == null ? "" : token.trim();
         String connectionKey = baseUrl
             + "|"
@@ -1102,6 +1389,8 @@ public class Ping extends Module {
             + timeoutSec
             + "|"
             + waitMs
+            + "|"
+            + (syncStreamUseLegacyPath ? "legacy" : "v1")
             + "|"
             + Integer.toHexString(tokenValue.hashCode());
         if ((syncStreamConnected || syncStreamConnecting) && !connectionKey.equals(syncStreamConnectionKey)) stopSyncStream();
@@ -1113,7 +1402,7 @@ public class Ping extends Module {
         syncStreamConnectionKey = connectionKey;
 
         long knownRevision = Math.max(-1, lastKnownSyncRevision);
-        int safeWaitMs = Math.max(1_000, waitMs);
+        int safeWaitMs = Math.max(50, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
         syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, requestTimeout, knownRevision, safeWaitMs));
     }
@@ -1128,6 +1417,15 @@ public class Ping extends Module {
                 String errorBody = "";
                 try (InputStream input = response.body()) {
                     if (input != null) errorBody = new String(input.readNBytes(512), StandardCharsets.UTF_8);
+                }
+                if (response.statusCode() == 404 && !syncStreamUseLegacyPath) {
+                    syncStreamUseLegacyPath = true;
+                    throw new IllegalStateException("stream-404-switching-to-legacy");
+                }
+                if (response.statusCode() == 404 && syncStreamUseLegacyPath) {
+                    syncStreamUnsupported = true;
+                    syncStreamUnsupportedUntilMs = System.currentTimeMillis() + SYNC_STREAM_UNSUPPORTED_BACKOFF_MS;
+                    throw new IllegalStateException("stream-unsupported:http-404");
                 }
                 throw new IllegalStateException(parseHttpError(response.statusCode(), errorBody));
             }
@@ -1173,11 +1471,16 @@ public class Ping extends Module {
                     long reconnectDelay = switch (classifySyncError(finalStreamError)) {
                         case AUTH -> SYNC_AUTH_BACKOFF_MS;
                         case CONFIG -> SYNC_CONFIG_BACKOFF_MS;
+                        case CRYPTO -> SYNC_CRYPTO_BACKOFF_MS;
                         case NETWORK -> SYNC_NETWORK_BACKOFF_MS;
                         case OTHER -> SYNC_STREAM_RECONNECT_MS;
                     };
-                    syncStreamReconnectAtMs = System.currentTimeMillis() + reconnectDelay;
-                    if (finalStreamError != null && !finalStreamError.isBlank()) logSync("Ping sync stream disconnected: %s", finalStreamError);
+                    long reconnectAt = System.currentTimeMillis() + reconnectDelay;
+                    if (syncStreamUnsupported && syncStreamUnsupportedUntilMs > reconnectAt) reconnectAt = syncStreamUnsupportedUntilMs;
+                    syncStreamReconnectAtMs = reconnectAt;
+                    if (finalStreamError != null && !finalStreamError.isBlank()) {
+                        logSyncProblem("stream disconnected", finalStreamError);
+                    }
                 } else {
                     syncStreamReconnectAtMs = 0;
                 }
@@ -1189,19 +1492,11 @@ public class Ping extends Module {
         if (data == null || data.isBlank()) return;
         JsonObject json = parseJsonObject(data);
         if (json == null) return;
+
         long revision = readLong(json, "revision", -1);
         if (revision > lastKnownSyncRevision) {
             syncStreamPendingRevision = revision;
             syncStreamUpdatePending = true;
-            if (revision > lastKnownSyncRevision + 1) {
-                String writer = readString(json, "lastWriter", "");
-                logSync(
-                    "Ping sync stream catch-up %s (rev=%d, by=%s).",
-                    eventType == null || eventType.isBlank() ? "<none>" : eventType,
-                    revision,
-                    writer.isBlank() ? "<remote>" : writer
-                );
-            }
         }
     }
 
@@ -1243,8 +1538,9 @@ public class Ping extends Module {
             "deviceId=" + encodeQueryValue(deviceId)
                 + "&module=" + MODULE_NAMESPACE
                 + "&knownRevision=" + knownRevision
-                + "&waitMs=" + Math.max(1_000, waitMs);
-        return URI.create(baseUrl + SYNC_STREAM_PATH + "?" + query);
+                + "&waitMs=" + Math.max(50, waitMs);
+        String path = syncStreamUseLegacyPath ? SYNC_STREAM_PATH_LEGACY : SYNC_STREAM_PATH;
+        return URI.create(baseUrl + path + "?" + query);
     }
 
     private static String encodeQueryValue(String value) {
@@ -1256,19 +1552,24 @@ public class Ping extends Module {
         if (modules == null) return null;
 
         SyncHub syncHub = modules.get(SyncHub.class);
-        if (syncHub == null || !syncHub.isFeatureEnabled(SyncHub.SyncFeature.PING)) return null;
+        if (syncHub == null) return null;
+
+        if (!syncHub.isFeatureEnabled(SyncHub.SyncFeature.PING)) return null;
 
         String deviceId = syncHub.getOrCreateDeviceId();
         if (deviceId.isBlank()) return null;
+        String encryptionKey = syncHub.getEncryptionKeyMaterial();
+        if (encryptionKey.isBlank()) return null;
 
         return new SyncRuntimeConfig(
             syncHub.getBaseUrl(),
             syncHub.getToken(),
             deviceId,
-            syncHub.useStream(),
+            true,
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
-            Math.max(1_000, syncHub.streamWaitMs())
+            Math.max(50, syncHub.streamWaitMs()),
+            encryptionKey
         );
     }
 
@@ -1373,6 +1674,11 @@ public class Ping extends Module {
             logSync("Ping sync hint: check base-url (must include scheme).");
             return;
         }
+        if (type == SyncErrorType.CRYPTO) {
+            syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_CRYPTO_BACKOFF_MS);
+            logSync("Ping sync hint: encryption-key mismatch between clients.");
+            return;
+        }
         if (type == SyncErrorType.NETWORK) {
             syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + SYNC_NETWORK_BACKOFF_MS);
             logSync("Ping sync hint: check host/port/firewall and server reachability.");
@@ -1390,11 +1696,15 @@ public class Ping extends Module {
         String normalized = error == null ? "" : error.toLowerCase(Locale.ROOT);
         if (normalized.isBlank()) return SyncErrorType.OTHER;
         if (normalized.contains("401") || normalized.contains("unauthorized") || normalized.contains("forbidden")) return SyncErrorType.AUTH;
+        if (normalized.contains("404") || normalized.contains("not-found") || normalized.contains("not_found")) return SyncErrorType.CONFIG;
         if (normalized.contains("undefined scheme") || normalized.contains("bad-base-url") || normalized.contains("unsupported scheme") || normalized.contains("uri with undefined host")) {
             return SyncErrorType.CONFIG;
         }
         if (normalized.contains("certificateexception") || normalized.contains("sslhandshakeexception") || normalized.contains("pkix") || normalized.contains("subject alternative names")) {
             return SyncErrorType.CONFIG;
+        }
+        if (normalized.contains("decrypt") || normalized.contains("aeadbadtagexception") || normalized.contains("tag mismatch")) {
+            return SyncErrorType.CRYPTO;
         }
         if (normalized.contains("timeout")
             || normalized.contains("connect")
@@ -1539,23 +1849,47 @@ public class Ping extends Module {
         return String.format(Locale.ROOT, "%d %d %d", Math.round(x), Math.round(y), Math.round(z));
     }
 
-    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, boolean allowHttp, int timeoutSec, int streamWaitMs) {}
+    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, boolean allowHttp, int timeoutSec, int streamWaitMs, String encryptionKey) {}
     private record SyncPingData(boolean enabled, String username, String server, String payload, int delay) {}
     private record SyncPullResult(boolean ok, long revision, List<SyncPingData> profiles, String error, String lastWriter) {}
     private record SyncPushResult(boolean ok, boolean applied, boolean conflict, long revision, List<SyncPingData> profiles, String error, String lastWriter) {}
-    private record SyncCycleResult(SyncPullResult pullResult, SyncPushResult pushResult, List<SyncPingData> snapshot, String snapshotFingerprint, String error) {}
-    private record PingMarker(String id, String sender, String senderDevice, String server, double x, double y, double z, long createdAtMs, boolean icon) {}
+    private record SyncCycleResult(SyncPullResult pullResult, SyncPushResult pushResult, boolean remoteApplied, boolean localChanged, List<SyncPingData> snapshot, String snapshotFingerprint, String error) {}
+    private record PingMarker(
+        String id,
+        String sender,
+        String senderDevice,
+        String server,
+        String dimension,
+        double x,
+        double y,
+        double z,
+        long createdAtMs,
+        boolean icon,
+        String iconPath
+    ) {}
+
+    public record MarkerJumpTarget(
+        String id,
+        String sender,
+        String server,
+        String dimension,
+        double x,
+        double y,
+        double z,
+        long createdAtMs,
+        String iconPath
+    ) {}
 
     private enum SyncErrorType {
         AUTH,
         CONFIG,
+        CRYPTO,
         NETWORK,
         OTHER
     }
 
     public enum InfoMode {
         Distance,
-        Coords,
-        Both
+        Coords
     }
 }

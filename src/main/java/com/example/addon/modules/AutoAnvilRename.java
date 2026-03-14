@@ -1,7 +1,6 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
-import com.example.addon.mixin.AnvilScreenHandlerAccessor;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -137,7 +136,7 @@ public class AutoAnvilRename extends Module {
         if (!output.isEmpty()) {
             stuckCycles = 0; // output appeared, so we're not stuck
 
-            int     cost      = ((AnvilScreenHandlerAccessor) anvil).getLevelCost().get();
+            int     cost      = anvil.getLevelCost();
             boolean canAfford = mc.player.isCreative() || mc.player.experienceLevel >= cost;
 
             if (!canAfford) {

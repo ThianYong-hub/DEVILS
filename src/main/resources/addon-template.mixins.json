@@ -4,10 +4,14 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "ClientConnectionMixin",
-    "ClientPlayerInteractionManagerAccessor",
+    "ClientPlayerInteractionManagerInvoker",
     "ExampleMixin",
-    "AnvilScreenHandlerAccessor",
-    "PlayerInteractEntityC2SPacketAccessor",
+    "GuiMapXaeroSyncMixin",
+    "HudModSafeModFileMixin",
+    "XaeroCommonFabricPlatformHelperMixin",
+    "WorldMapFabricSafeModFileMixin",
+    "ScreenXaeroSyncMixin",
+    "PlayerTrackerPingNameMixin",
     "ItemListSettingScreenMixin",
     "ModulesScreenIconsMixin",
     "ModulesNameCollisionMixin"
