@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.30`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.30/devils-addon-0.0.30.jar)
+- Current build (`v0.0.31`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.31/devils-addon-0.0.31.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -98,13 +98,12 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.30`)
+## Release Notes (`v0.0.31`)
 
-- Fixed ChestTracker bank decoding for legacy position key formats (`x,y,z`, spaced triples, packed long), preventing false `Invalid number of coordinates` load failures.
-- Added robust NBT recovery chain for bank files (`.old`, `.corrupt`, `.corrupt.corrupt`) with non-empty restoration priority.
-- Prevented destructive empty-bank recreation after failed load: existing bank files are no longer silently overwritten by new blank banks.
-- Added automatic bank pre-load before opening ChestTracker GUI via keybind, so multiplayer banks open directly instead of falling back to bank manager.
-- Moved and standardized ChestTracker storage under `.minecraft/devils-addon/chesttracker/*`, with legacy layout migration.
+- Added pre-launch log-spam filtering bootstrap to prevent early-init crashes while suppressing repeated font/entity-class warning floods.
+- Fixed pre-launch mixin stability by isolating early logger filter installation from addon bootstrap class loading.
+- Reduced sync overhead in `xaero-sync` and `ping`: stream-first pull strategy, fallback polling only when stream is unavailable, and lower parallel sync pressure.
+- Removed render-loop forced sync in `xaero-sync` and normalized presence update cadence to reduce FPS drops during active sync sessions.
 
 ## License
 

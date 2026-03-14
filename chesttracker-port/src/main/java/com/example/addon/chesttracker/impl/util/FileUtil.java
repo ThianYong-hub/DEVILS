@@ -87,7 +87,7 @@ public class FileUtil {
                     // Decode failures are not always physical file corruption (e.g. schema/version mismatch).
                     // Keep the original file in place for recovery/migration code paths.
                     //noinspection OptionalGetWithoutIsPresent
-                    LOGGER.error("Invalid NBT payload at {}: {}", path, loaded.error().get().message());
+                    LOGGER.error("Invalid NBT payload at {}: {}", path, abbreviateCodecMessage(loaded.error().get().message()));
                     return Optional.empty();
                 } else {
                     return loaded.result().map(Pair::getFirst);
@@ -98,6 +98,13 @@ public class FileUtil {
             }
         }
         return Optional.empty();
+    }
+
+    private static String abbreviateCodecMessage(String message) {
+        if (message == null) return "null";
+        final int maxLen = 700;
+        if (message.length() <= maxLen) return message;
+        return message.substring(0, maxLen) + "... [truncated " + (message.length() - maxLen) + " chars]";
     }
 
     private static Tag readNbtTag(Path path) throws IOException {

@@ -92,7 +92,7 @@ public class Ping extends Module {
     private static final String DEFAULT_PING_ICON_PATH = MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
     private static final long MARKER_TTL_MS = 10_000;
     private static final long MARKER_PULSE_PERIOD_MS = 1_200;
-    private static final long PULL_FALLBACK_INTERVAL_MS = 50;
+    private static final long PULL_FALLBACK_INTERVAL_MS = 250;
     private static final int WORLD_MIN_Y = -65;
     private static final int WORLD_MAX_Y = 365;
     private static final String DEFAULT_SOUND = "minecraft:block.note_block.pling";
@@ -855,9 +855,13 @@ public class Ping extends Module {
 
         boolean shouldBootstrapPull = lastKnownSyncRevision < 0;
         // Hard sync mode: always poll quickly in addition to stream signals.
-        boolean periodicPull = (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
-        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || periodicPull;
-        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull || periodicPull;
+        boolean streamFallbackPull = sync.useStream()
+            && !syncStreamConnected
+            && !syncStreamConnecting
+            && (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
+        boolean periodicPull = !sync.useStream() && (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
+        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || streamFallbackPull || periodicPull;
+        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull || streamFallbackPull || periodicPull;
         if (!shouldRun) return;
 
         lastSyncPullAttemptMs = now;

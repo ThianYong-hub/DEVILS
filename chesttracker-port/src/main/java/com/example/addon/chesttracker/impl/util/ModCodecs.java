@@ -25,10 +25,7 @@ import java.util.function.Predicate;
  * Codecs for classes that aren't ours
  */
 public class ModCodecs {
-    /**
-     * Identical to {@link ItemStack#OPTIONAL_CODEC}, but will not enforce a max stack size of 99.
-     */
-    public static final Codec<ItemStack> OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = ExtraCodecs.<ItemStack>optionalEmptyMap(Codec.lazyInitialized(
+    private static final Codec<ItemStack> FULL_OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = ExtraCodecs.<ItemStack>optionalEmptyMap(Codec.lazyInitialized(
             () -> RecordCodecBuilder.create(
                     instance -> instance.group(
                             Item.CODEC.fieldOf("id").forGetter(ItemStack::getItemHolder),
@@ -37,6 +34,25 @@ public class ModCodecs {
                     ).apply(instance, ItemStack::new)
             )
     )).xmap(opt -> opt.orElse(ItemStack.EMPTY), stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));
+
+    /**
+     * Lenient ItemStack codec used as a decode fallback when component payloads are invalid.
+     * Keeps only id/count so memory banks remain readable instead of being rejected completely.
+     */
+    private static final Codec<ItemStack> SIMPLE_OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = ExtraCodecs.<ItemStack>optionalEmptyMap(RecordCodecBuilder.create(
+            instance -> instance.group(
+                    BuiltInRegistries.ITEM.byNameCodec().fieldOf("id").forGetter(ItemStack::getItem),
+                    ExtraCodecs.POSITIVE_INT.fieldOf("count").orElse(1).forGetter(ItemStack::getCount)
+            ).apply(instance, ItemStack::new)
+    )).xmap(opt -> opt.orElse(ItemStack.EMPTY), stack -> stack.isEmpty() ? Optional.empty() : Optional.of(stack));
+
+    /**
+     * Identical to {@link ItemStack#OPTIONAL_CODEC}, but will not enforce a max stack size of 99.
+     */
+    public static final Codec<ItemStack> OPTIONAL_ITEMSTACK_UNCAPPED_SIZE = JFLCodecs.firstInList(
+            FULL_OPTIONAL_ITEMSTACK_UNCAPPED_SIZE,
+            SIMPLE_OPTIONAL_ITEMSTACK_UNCAPPED_SIZE
+    );
 
     /**
      * Short form block pos codec
@@ -129,7 +145,7 @@ public class ModCodecs {
                 if (decodingPredicate.test(dynamic)) {
                     return base.decode(dynamic);
                 }
-                return DataResult.error(() -> "Did not match predicate: " + input);
+                return DataResult.error(() -> "Did not match predicate");
             }
 
             @Override

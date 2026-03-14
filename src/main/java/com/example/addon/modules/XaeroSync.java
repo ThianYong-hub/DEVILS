@@ -78,7 +78,7 @@ public class XaeroSync extends Module {
     private static final String SYNC_PUSH_PATH = "/push";
     private static final String SYNC_STREAM_PATH = "/v1/sync/stream";
     private static final String SYNC_STREAM_PATH_LEGACY = "/stream";
-    private static final long PULL_FALLBACK_INTERVAL_MS = 25;
+    private static final long PULL_FALLBACK_INTERVAL_MS = 250;
     private static final long SYNC_STREAM_RECONNECT_MS = 250;
     private static final long SYNC_AUTH_BACKOFF_MS = 1_000;
     private static final long SYNC_CRYPTO_BACKOFF_MS = 1_000;
@@ -96,15 +96,14 @@ public class XaeroSync extends Module {
 
     private static final long PRESENCE_STALE_MS = 30_000;
     // Keep high responsiveness without flooding sync hub on fast movement.
-    private static final long PRESENCE_MIN_UPDATE_MS = 1;
+    private static final long PRESENCE_MIN_UPDATE_MS = 25;
     // Keep occasional heartbeat while idle without flooding push traffic.
-    private static final long PRESENCE_FORCE_UPDATE_MS = 5;
+    private static final long PRESENCE_FORCE_UPDATE_MS = 1_000;
     // Treat any meaningful movement as an update.
     private static final double PRESENCE_MOVE_THRESHOLD_SQ = 0.0;
     private static final int MAX_SYNC_PRESENCE = 64;
     private static final double PRESENCE_MAX_SPEED_BLOCKS_PER_SEC = 230.0;
-    private static final int MAX_PARALLEL_SYNC_CYCLES = 12;
-    private static final long AGGRESSIVE_RENDER_SYNC_INTERVAL_MS = 5L;
+    private static final int MAX_PARALLEL_SYNC_CYCLES = 2;
 
     private static final int BUTTON_W = 20;
     private static final int BUTTON_H = 20;
@@ -214,7 +213,6 @@ public class XaeroSync extends Module {
     private volatile String runtimeSyncDeviceId = "";
     private boolean menuOpen;
     private volatile boolean syncTickQueued;
-    private long lastRenderSyncAttemptMs;
     private String lastRuntimeDebugSnapshot = "";
     private String lastWaypointPipelineDebugSnapshot = "";
     private String lastWaypointDebugMessage = "";
@@ -357,13 +355,6 @@ public class XaeroSync extends Module {
     @EventHandler
     private void onRender2D(Render2DEvent event) {
         CrashGuard.run(this, "onRender2D", () -> {
-            if (isActive() && mc.world != null && mc.player != null) {
-                long now = System.currentTimeMillis();
-                if ((now - lastRenderSyncAttemptMs) >= AGGRESSIVE_RENDER_SYNC_INTERVAL_MS) {
-                    lastRenderSyncAttemptMs = now;
-                    handleSyncTick();
-                }
-            }
             if (isXaeroMapScreen(mc.currentScreen)) return;
             renderOverlay(event);
         });
@@ -381,7 +372,6 @@ public class XaeroSync extends Module {
         lastSyncedFingerprint = "";
         lastSyncPullAttemptMs = 0;
         syncTickQueued = false;
-        lastRenderSyncAttemptMs = 0L;
         syncStreamUseLegacyPath = false;
         syncStreamUnsupported = false;
         syncStreamUnsupportedUntilMs = 0;
@@ -549,9 +539,13 @@ public class XaeroSync extends Module {
 
         boolean shouldBootstrapPull = lastKnownSyncRevision < 0;
         // Hard sync mode: always poll quickly in addition to stream signals.
-        boolean periodicPull = (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
-        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || periodicPull;
-        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull || periodicPull;
+        boolean streamFallbackPull = sync.useStream()
+            && !syncStreamConnected
+            && !syncStreamConnecting
+            && (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
+        boolean periodicPull = !sync.useStream() && (now - lastSyncPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
+        boolean shouldPull = streamTriggeredPull || shouldBootstrapPull || streamFallbackPull || periodicPull;
+        boolean shouldRun = streamTriggeredPull || localChanged || shouldBootstrapPull || streamFallbackPull || periodicPull;
         if (!shouldRun) {
             applyXaeroPresenceSnapshot();
             return;
@@ -946,7 +940,9 @@ public class XaeroSync extends Module {
         double movedSq = (dx * dx) + (dy * dy) + (dz * dz);
 
         long age = now - localPresenceCache.updatedAtMs();
-        boolean movedEnough = movedSq >= PRESENCE_MOVE_THRESHOLD_SQ && age >= PRESENCE_MIN_UPDATE_MS;
+        double moveThresholdSq = Math.max(PRESENCE_MOVE_THRESHOLD_SQ, 0.0);
+        boolean movedEnough = ((moveThresholdSq == 0.0) ? movedSq > 1.0e-7 : movedSq >= moveThresholdSq)
+            && age >= PRESENCE_MIN_UPDATE_MS;
         double dvx = localPresenceCache.vx() - vx;
         double dvy = localPresenceCache.vy() - vy;
         double dvz = localPresenceCache.vz() - vz;
@@ -2023,7 +2019,6 @@ public class XaeroSync extends Module {
         lastSyncedFingerprint = "";
         lastSyncPullAttemptMs = 0;
         syncTickQueued = false;
-        lastRenderSyncAttemptMs = 0L;
         syncStreamUseLegacyPath = false;
         syncStreamUnsupported = false;
         syncStreamUnsupportedUntilMs = 0;
