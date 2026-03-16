@@ -18,9 +18,10 @@ This directory contains the branch-ready test port of Devils Addon for Minecraft
 ## GitHub Release
 
 - Branch: `DevilsAddon-1.21.11-test`
-- Planned tag: `v0.0.32-test.1.21.11`
+- Release tag: `v0.0.32-test.1.21.11`
 - Release type: prerelease
 - Main asset: `devils-addon-1.21.11-test.jar`
+- Release page: `https://github.com/ThianYong-hub/DEVILS/releases/tag/v0.0.32-test.1.21.11`
 
 ## Snapshot Contents
 
