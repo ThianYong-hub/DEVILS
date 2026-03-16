@@ -5,7 +5,7 @@ This directory contains the branch-ready test port of Devils Addon for Minecraft
 ## Included in This Branch
 
 - `devils-addon-1.21.11-test.jar`
-  - built test jar for quick launcher checks
+  - built test jar for quick launcher checks and GitHub prerelease asset upload
 - `devils-addon-1.21.11-test.zip`
   - compact source snapshot of the `1.21.11` test port
 - `devils-addon-1.21.11-branch/`
@@ -14,6 +14,13 @@ This directory contains the branch-ready test port of Devils Addon for Minecraft
   - current status and validation notes
 - `LATEST-TEST-PORT.txt`
   - path pointer to the tracked source snapshot
+
+## GitHub Release
+
+- Branch: `DevilsAddon-1.21.11-test`
+- Planned tag: `v0.0.32-test.1.21.11`
+- Release type: prerelease
+- Main asset: `devils-addon-1.21.11-test.jar`
 
 ## Snapshot Contents
 
@@ -42,5 +49,5 @@ From `Source 1.21.11/devils-addon-1.21.11-branch`:
 
 ## Notes
 
-- This is a test port, not a release branch for production use.
+- This is a dedicated `1.21.11` test branch, separated from the stable `1.21.8` release line.
 - The port is build-tested, not runtime-verified in Minecraft.

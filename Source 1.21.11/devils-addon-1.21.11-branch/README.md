@@ -4,25 +4,38 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.32`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32/devils-addon-0.0.32.jar)
-- Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
+- 1.21.11 test prerelease (`v0.0.32-test.1.21.11`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32-test.1.21.11/devils-addon-1.21.11-test.jar)
+- Source snapshot zip: [Download zip](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32-test.1.21.11/devils-addon-1.21.11-test.zip)
+- This branch: [DevilsAddon-1.21.11-test](https://github.com/ThianYong-hub/DEVILS/tree/DevilsAddon-1.21.11-test)
+- 1.21.11 test release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/tag/v0.0.32-test.1.21.11)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
 ## Requirements
 
 | Component | Required Version |
 | --- | --- |
-| Minecraft | `1.21.8` |
-| Fabric Loader | `0.16.14+` |
+| Minecraft | `1.21.11` |
+| Fabric Loader | `0.18.2+` |
 | Java | `21` |
-| Meteor Client | build for `1.21.8` |
+| Meteor Client | build for `1.21.11` |
 
 ## Installation
 
 1. Install Meteor Client.
-2. Download the latest `devils-addon-*.jar`.
+2. Download `devils-addon-1.21.11-test.jar` from the `v0.0.32-test.1.21.11` prerelease.
 3. Put the jar into `.minecraft/mods`.
 4. Start the game and open category `Devils` in Meteor.
+
+## Branch Status
+
+- Branch purpose: isolated `1.21.11` test port
+- Stability level: build-tested
+- Runtime level: not yet verified in a live Minecraft client session
+- Embedded dependency line:
+  - Fabric API `0.140.0+1.21.11`
+  - Xaero Minimap `fabric-1.21.11-25.3.10`
+  - Xaero World Map `fabric-1.21.11-1.40.11`
+  - XaeroPlus `2.30.9+fabric-1.21.11`
 
 ## Project Layout
 
@@ -107,13 +120,13 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.32`)
+## Release Notes (`v0.0.32-test.1.21.11`)
 
-- Rebuilt the addon into a package-oriented structure: large monolithic modules were split into feature-local controllers, planners, codec helpers, and UI support classes.
-- Normalized repository structure so Java sources stay in the `100-500` line range instead of multi-thousand-line modules or 10-line wrapper files.
-- Consolidated bootstrap pieces such as commands, HUD registration, tracker settings, mixin support, and sync helper models into cleaner facades.
-- Fixed Fabric `preLaunch` startup failures by making the `CrashGuard` entrypoint directly instantiable by the loader.
-- Revalidated the addon with green `compileJava`, `test`, and full `build` runs before the release cut.
+- Ported the addon test build from the stable `1.21.8` line to `1.21.11`.
+- Updated Fabric, Yarn, Meteor, Xaero Minimap, Xaero World Map, and XaeroPlus dependency targets for `1.21.11`.
+- Repacked ChestTracker into a dedicated `chesttracker-port-1.21.11` module and embedded it into the test jar.
+- Migrated affected Meteor input APIs, `GameProfile` accessors, camera access, and entity-position compatibility helpers.
+- Revalidated the `1.21.11` branch with green `clean build` runs, including the embedded ChestTracker rebuild path.
 
 ## License
 
