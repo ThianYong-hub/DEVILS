@@ -15,7 +15,7 @@
   "environment": "client",
   "entrypoints": {
     "preLaunch": [
-      "com.example.addon.util.CrashGuardPreLaunch"
+      "com.example.addon.util.CrashGuard"
     ],
     "meteor": [
       "com.example.addon.AddonTemplate"

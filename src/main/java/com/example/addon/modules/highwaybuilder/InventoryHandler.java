@@ -3,77 +3,21 @@ package com.example.addon.modules.highwaybuilder;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.FindItemResult;
-import meteordevelopment.meteorclient.utils.player.Rotations;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.component.DataComponentTypes;
 import net.minecraft.enchantment.Enchantments;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.math.Vec3d;
 
-import java.util.Arrays;
-import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
 public class InventoryHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final int ROLE_SWORD = 0;
-    private static final int ROLE_PICKAXE = 1;
-    private static final int ROLE_APPLE = 2;
-    private static final int ROLE_OBSIDIAN = 3;
-    private static final int ROLE_ENDER_CHEST = 4;
-    private static final int ROLE_COUNT = 5;
-    private static final Set<Item> JUNK_ITEMS = Set.of(
-        Items.ANCIENT_DEBRIS,
-        Items.NETHER_GOLD_ORE,
-        Items.NETHER_QUARTZ_ORE,
-        Items.QUARTZ,
-        Items.GLOWSTONE,
-        Items.BLACKSTONE,
-        Items.BASALT,
-        Items.SMOOTH_BASALT,
-        Items.MAGMA_BLOCK,
-        Items.SOUL_SAND,
-        Items.SOUL_SOIL,
-        Items.GRAVEL,
-        Items.FLINT,
-        Items.CRIMSON_NYLIUM,
-        Items.WARPED_NYLIUM,
-        Items.CRIMSON_STEM,
-        Items.WARPED_STEM,
-        Items.NETHER_WART_BLOCK,
-        Items.WARPED_WART_BLOCK,
-        Items.BONE_BLOCK,
-        Items.NETHER_BRICKS,
-        Items.RED_NETHER_BRICKS,
-        Items.CRYING_OBSIDIAN,
-        Items.WEEPING_VINES,
-        Items.TWISTING_VINES,
-        Items.CRIMSON_ROOTS,
-        Items.WARPED_ROOTS,
-        Items.NETHER_SPROUTS,
-        Items.CRIMSON_FUNGUS,
-        Items.WARPED_FUNGUS,
-        Items.NETHER_WART,
-        Items.BLAZE_ROD,
-        Items.MAGMA_CREAM,
-        Items.GHAST_TEAR,
-        Items.BONE,
-        Items.ROTTEN_FLESH,
-        Items.GOLD_NUGGET,
-        Items.GOLDEN_SWORD,
-        Items.GOLDEN_HELMET,
-        Items.GOLDEN_CHESTPLATE,
-        Items.GOLDEN_LEGGINGS,
-        Items.GOLDEN_BOOTS
-    );
 
     private final HighwayBuilder module;
     public Vec3d lastHitVec = Vec3d.ZERO;
@@ -81,13 +25,14 @@ public class InventoryHandler {
     public final ConcurrentLinkedDeque<Long> packetLimiter = new ConcurrentLinkedDeque<>();
     public int swapBackSlot = -1;
     private int junkCleanupDelay = 0;
-    private int junkDropDirectionIndex = 0;
-    private final int[] protectedRoleSlots = new int[ROLE_COUNT];
-    private boolean protectedSlotsCaptured = false;
+    private final InventoryJunkDropper junkDropper;
+    private final InventoryJunkRules junkRules;
+    private final InventoryRoleSlotGuard roleSlotGuard = new InventoryRoleSlotGuard();
 
     public InventoryHandler(HighwayBuilder module) {
         this.module = module;
-        Arrays.fill(protectedRoleSlots, -1);
+        this.junkDropper = new InventoryJunkDropper(module);
+        this.junkRules = new InventoryJunkRules(this);
     }
 
     public void cleanupPacketLimiter() {
@@ -98,77 +43,23 @@ public class InventoryHandler {
     }
 
     public void captureInitialPreferredHotbarSlots() {
-        if (mc.player == null) return;
-        recaptureProtectedRoleSlots();
-        protectedSlotsCaptured = true;
+        roleSlotGuard.captureInitialPreferredHotbarSlots();
     }
 
     public void refreshProtectedHotbarSlotsDynamically() {
-        if (mc.player == null) return;
-        if (swapBackSlot >= 0) return;
-        if (mc.player.currentScreenHandler == null || mc.player.currentScreenHandler.syncId != 0) return;
-        ensureProtectedSlotsCaptured();
-        recaptureProtectedRoleSlots();
+        roleSlotGuard.refreshProtectedHotbarSlotsDynamically(swapBackSlot);
     }
 
     public boolean canUseHotbarSlot(int slot, Item incomingItem) {
-        if (slot < 0 || slot >= 9) return false;
-        ensureProtectedSlotsCaptured();
-
-        int lockedRole = getLockedRoleForSlot(slot);
-        if (lockedRole == -1) return true;
-
-        int incomingRole = roleOfItem(incomingItem);
-        return incomingRole != -1 && incomingRole == lockedRole;
+        return roleSlotGuard.canUseHotbarSlot(slot, incomingItem);
     }
 
     public boolean isProtectedHotbarSlot(int slot) {
-        if (slot < 0 || slot >= 9) return false;
-        ensureProtectedSlotsCaptured();
-        return getLockedRoleForSlot(slot) != -1;
+        return roleSlotGuard.isProtectedHotbarSlot(slot);
     }
 
     public boolean isAppleReservedHotbarSlot(int slot) {
-        if (slot < 0 || slot >= 9) return false;
-        ensureProtectedSlotsCaptured();
-        return protectedRoleSlots[ROLE_APPLE] == slot;
-    }
-
-    private void ensureProtectedSlotsCaptured() {
-        if (!protectedSlotsCaptured) captureInitialPreferredHotbarSlots();
-    }
-
-    private void recaptureProtectedRoleSlots() {
-        Arrays.fill(protectedRoleSlots, -1);
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            int role = roleOfStack(stack);
-            if (role == -1) continue;
-            if (protectedRoleSlots[role] == -1) protectedRoleSlots[role] = i;
-        }
-    }
-
-    private int getLockedRoleForSlot(int slot) {
-        for (int role = 0; role < ROLE_COUNT; role++) {
-            if (protectedRoleSlots[role] == slot) return role;
-        }
-        return -1;
-    }
-
-    private int roleOfItem(Item item) {
-        if (item == null) return -1;
-        ItemStack stack = item.getDefaultStack();
-        return roleOfStack(stack);
-    }
-
-    private int roleOfStack(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return -1;
-        if (isSwordStack(stack)) return ROLE_SWORD;
-        if (stack.isIn(ItemTags.PICKAXES)) return ROLE_PICKAXE;
-        if (isAppleStackForHotbar(stack)) return ROLE_APPLE;
-        if (isObsidianStack(stack)) return ROLE_OBSIDIAN;
-        if (isEnderChestStack(stack)) return ROLE_ENDER_CHEST;
-        return -1;
+        return roleSlotGuard.isAppleReservedHotbarSlot(slot);
     }
 
     public void cleanupJunkInventory() {
@@ -187,13 +78,13 @@ public class InventoryHandler {
         int netherrackCount = countItem(Items.NETHERRACK);
 
         // Drop listed junk first.
-        for (int slot : getCleanupScanOrder()) {
+        for (int slot : junkDropper.getCleanupScanOrder()) {
             ItemStack stack = mc.player.getInventory().getStack(slot);
             if (stack.isEmpty()) continue;
-            if (!shouldDropJunkStack(stack)) continue;
+            if (!junkRules.shouldDropJunkStack(stack)) continue;
             if (isFortuneThreePickaxeNoSilk(stack)) continue;
 
-            dropInventorySlot(slot, true);
+            junkDropper.dropInventorySlot(slot, true);
             junkCleanupDelay = 1;
             return;
         }
@@ -202,11 +93,11 @@ public class InventoryHandler {
         if (netherrackCount <= netherrackKeep) return;
 
         int excess = netherrackCount - netherrackKeep;
-        int slot = findNetherrackCleanupSlot(excess);
+        int slot = junkDropper.findNetherrackCleanupSlot(excess);
         if (slot == -1) return;
 
         boolean dropWholeStack = mc.player.getInventory().getStack(slot).getCount() <= excess;
-        dropInventorySlot(slot, dropWholeStack);
+        junkDropper.dropInventorySlot(slot, dropWholeStack);
         junkCleanupDelay = dropWholeStack ? 1 : 0;
     }
 
@@ -475,140 +366,6 @@ public class InventoryHandler {
         return false;
     }
 
-    private int[] getCleanupScanOrder() {
-        // Main inventory first, then hotbar.
-        int[] order = new int[36];
-        int p = 0;
-        for (int i = 9; i < 36; i++) order[p++] = i;
-        for (int i = 0; i < 9; i++) order[p++] = i;
-        return order;
-    }
-
-    private int findNetherrackCleanupSlot(int excess) {
-        if (mc.player == null || excess <= 0) return -1;
-
-        int bestSlot = -1;
-        int bestCount = Integer.MAX_VALUE;
-
-        for (int slot : getCleanupScanOrder()) {
-            ItemStack stack = mc.player.getInventory().getStack(slot);
-            if (stack.getItem() != Items.NETHERRACK) continue;
-
-            int count = stack.getCount();
-            if (count <= excess) {
-                if (count < bestCount) {
-                    bestCount = count;
-                    bestSlot = slot;
-                }
-            } else if (bestSlot == -1) {
-                // fallback: if all stacks are bigger than excess, drop single items from this one
-                bestSlot = slot;
-            }
-        }
-
-        return bestSlot;
-    }
-
-    private void dropInventorySlot(int inventorySlot, boolean fullStack) {
-        if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
-        int screenSlot = inventorySlotToScreenSlot(inventorySlot);
-        if (screenSlot < 0) return;
-
-        Runnable throwAction = () -> {
-            if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
-            mc.interactionManager.clickSlot(
-                mc.player.currentScreenHandler.syncId,
-                screenSlot,
-                fullStack ? 1 : 0,
-                SlotActionType.THROW,
-                mc.player
-            );
-        };
-
-        float throwYaw = getNextJunkDropYaw();
-        float throwPitch = -10.0f;
-        Rotations.rotate(throwYaw, throwPitch, 30, throwAction);
-    }
-
-    private float getNextJunkDropYaw() {
-        if (mc.player == null) return 0.0f;
-
-        int mode = Math.floorMod(junkDropDirectionIndex++, 3); // left, right, back
-        HWDirection buildDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
-        if (buildDir != null) {
-            return switch (mode) {
-                case 0 -> buildDir.counterClockwise(2).yaw;
-                case 1 -> buildDir.clockwise(2).yaw;
-                default -> buildDir.clockwise(4).yaw;
-            };
-        }
-
-        float yaw = mc.player.getYaw();
-        return switch (mode) {
-            case 0 -> yaw - 90.0f;
-            case 1 -> yaw + 90.0f;
-            default -> yaw + 180.0f;
-        };
-    }
-
-    private int inventorySlotToScreenSlot(int inventorySlot) {
-        if (inventorySlot < 0 || inventorySlot >= 36) return -1;
-        return inventorySlot < 9 ? 36 + inventorySlot : inventorySlot;
-    }
-
-    private boolean isSwordStack(ItemStack stack) {
-        return stack != null && !stack.isEmpty() && stack.isIn(ItemTags.SWORDS);
-    }
-
-    private boolean isAppleStackForHotbar(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        return stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE
-            || stack.getItem() == Items.GOLDEN_APPLE
-            || stack.getItem() == Items.APPLE;
-    }
-
-    private boolean isObsidianStack(ItemStack stack) {
-        return stack != null && !stack.isEmpty() && stack.getItem() == Items.OBSIDIAN;
-    }
-
-    private boolean isEnderChestStack(ItemStack stack) {
-        return stack != null && !stack.isEmpty() && stack.getItem() == Items.ENDER_CHEST;
-    }
-
-    private boolean shouldDropJunkStack(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        Item item = stack.getItem();
-        if (item instanceof BlockItem bi && bi.getBlock() instanceof net.minecraft.block.ShulkerBoxBlock) return false;
-
-        // Never trash useful tools used by builder/combat logic.
-        if (isFortuneThreePickaxeNoSilk(stack)) return false;
-        if (stack.isIn(ItemTags.PICKAXES)) return false;
-        if (stack.isIn(ItemTags.SHOVELS)) return false;
-        if (stack.isIn(ItemTags.AXES) && item != Items.GOLDEN_AXE) return false;
-        if (stack.isIn(ItemTags.SWORDS) && item != Items.GOLDEN_SWORD) return false;
-
-        if (item == Items.NETHERRACK) return false;
-        if (JUNK_ITEMS.contains(item)) {
-            return true;
-        }
-
-        if (isFireResistancePotion(stack)) return true;
-        return false;
-    }
-
-    private boolean isFireResistancePotion(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        if (stack.getItem() != Items.POTION
-            && stack.getItem() != Items.SPLASH_POTION
-            && stack.getItem() != Items.LINGERING_POTION) return false;
-
-        var contents = stack.get(DataComponentTypes.POTION_CONTENTS);
-        if (contents == null || contents.potion().isEmpty()) return false;
-        var potion = contents.potion().get().value();
-        var id = Registries.POTION.getId(potion);
-        return id != null && id.getPath().contains("fire_resistance");
-    }
-
     private int findPreferredBuildHotbarSlot(Item incomingItem) {
         if (mc.player == null) return -1;
 
@@ -694,7 +451,7 @@ public class InventoryHandler {
         return true;
     }
 
-    private boolean isFortuneThreePickaxeNoSilk(ItemStack stack) {
+    boolean isFortuneThreePickaxeNoSilk(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
         if (!stack.isIn(ItemTags.PICKAXES)) return false;
         if (Utils.hasEnchantment(stack, Enchantments.SILK_TOUCH)) return false;
@@ -712,3 +469,5 @@ public class InventoryHandler {
     }
 
 }
+
+

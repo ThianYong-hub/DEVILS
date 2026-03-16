@@ -147,3 +147,5 @@ public class MaceSpoof extends Module {
             && !mc.world.getBlockState(pos).isOf(Blocks.POWDER_SNOW);
     }
 }
+
+

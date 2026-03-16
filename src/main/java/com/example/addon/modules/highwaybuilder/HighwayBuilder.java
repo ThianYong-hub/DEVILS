@@ -1,12 +1,9 @@
 package com.example.addon.modules.highwaybuilder;
 
-import com.example.addon.AddonTemplate;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.*;
-import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
@@ -16,542 +13,23 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.tag.ItemTags;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityType;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 
-import java.util.Set;
 import java.util.List;
+import java.util.Set;
 
-public class HighwayBuilder extends Module {
-
-    // ── Setting Groups ──────────────────────────────────────────────────
-
-    private final SettingGroup sgBlueprint = settings.createGroup("Blueprint");
-    private final SettingGroup sgBehavior  = settings.createGroup("Behavior");
-    private final SettingGroup sgMining    = settings.createGroup("Mining");
-    private final SettingGroup sgPlacing   = settings.createGroup("Placing");
-    private final SettingGroup sgStorage   = settings.createGroup("Storage");
-    private final SettingGroup sgRender    = settings.createGroup("Render");
-
-    // ── Blueprint Settings ──────────────────────────────────────────────
-
-    public final Setting<Structure> mode = sgBlueprint.add(new EnumSetting.Builder<Structure>()
-        .name("mode")
-        .description("Highway build mode.")
-        .defaultValue(Structure.HIGHWAY)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Integer> width = sgBlueprint.add(new IntSetting.Builder()
-        .name("width")
-        .description("Width of the highway.")
-        .defaultValue(5)
-        .min(1)
-        .max(11)
-        .sliderRange(1, 11)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Integer> height = sgBlueprint.add(new IntSetting.Builder()
-        .name("height")
-        .description("Height of the tunnel.")
-        .defaultValue(3)
-        .min(2)
-        .max(6)
-        .sliderRange(2, 6)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> backfill = sgBlueprint.add(new BoolSetting.Builder()
-        .name("backfill")
-        .description("Fill blocks behind you.")
-        .defaultValue(false)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> clearSpace = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clear-space")
-        .description("Clear blocks above the highway.")
-        .defaultValue(true)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> railing = sgBlueprint.add(new BoolSetting.Builder()
-        .name("railing")
-        .description("Build railings on the sides.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.HIGHWAY)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Integer> railingHeight = sgBlueprint.add(new IntSetting.Builder()
-        .name("railing-height")
-        .description("Height of the railings.")
-        .defaultValue(1)
-        .min(1)
-        .max(4)
-        .sliderRange(1, 4)
-        .visible(() -> mode.get() == Structure.HIGHWAY && railing.get())
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cornerBlock = sgBlueprint.add(new BoolSetting.Builder()
-        .name("corner-block")
-        .description("Place corner blocks on diagonal highways.")
-        .defaultValue(false)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cleanFloor = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clean-floor")
-        .description("Clean the floor in tunnels.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cleanLeftWall = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clean-left-wall")
-        .description("Clean the left wall in tunnels.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cleanRightWall = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clean-right-wall")
-        .description("Clean the right wall in tunnels.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cleanRoof = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clean-roof")
-        .description("Clean the roof in tunnels.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Boolean> cleanCorner = sgBlueprint.add(new BoolSetting.Builder()
-        .name("clean-corner")
-        .description("Clean corner blocks in tunnels.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Structure.TUNNEL)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    // ── Behavior Settings ───────────────────────────────────────────────
-
-    public final Setting<Double> maxReach = sgBehavior.add(new DoubleSetting.Builder()
-        .name("max-reach")
-        .description("Maximum reach distance.")
-        .defaultValue(4.5)
-        .min(1.0)
-        .max(7.0)
-        .sliderRange(1.0, 7.0)
-        .build()
-    );
-
-    public final Setting<Double> minDistance = sgBehavior.add(new DoubleSetting.Builder()
-        .name("min-distance")
-        .description("Minimum distance before interacting with a block.")
-        .defaultValue(0.8)
-        .min(0.0)
-        .max(3.0)
-        .sliderRange(0.0, 3.0)
-        .build()
-    );
-
-    public final Setting<Double> moveSpeed = sgBehavior.add(new DoubleSetting.Builder()
-        .name("move-speed")
-        .description("Movement speed when not using Baritone.")
-        .defaultValue(0.2)
-        .min(0.05)
-        .max(1.0)
-        .sliderRange(0.05, 1.0)
-        .build()
-    );
-
-    public final Setting<Boolean> scaffold = sgBehavior.add(new BoolSetting.Builder()
-        .name("scaffold")
-        .description("Bridge over gaps.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> rubberbandTimeout = sgBehavior.add(new IntSetting.Builder()
-        .name("rubberband-timeout")
-        .description("Ticks to pause after rubberband detection.")
-        .defaultValue(50)
-        .min(0)
-        .max(200)
-        .sliderRange(0, 200)
-        .build()
-    );
-
-    public final Setting<Boolean> goalRender = sgBehavior.add(new BoolSetting.Builder()
-        .name("goal-render")
-        .description("Render Baritone goal.")
-        .defaultValue(false)
-        .build()
-    );
-
-    public final Setting<Boolean> rotate = sgBehavior.add(new BoolSetting.Builder()
-        .name("rotate")
-        .description("Rotate player to face blocks being interacted with.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> blocksPerTick = sgBehavior.add(new IntSetting.Builder()
-        .name("blocks-per-tick")
-        .description("Maximum blocks to interact with per tick.")
-        .defaultValue(1)
-        .min(1)
-        .max(10)
-        .sliderRange(1, 10)
-        .build()
-    );
-
-    public final Setting<EChestSwapMode> swapMode = sgBehavior.add(new EnumSetting.Builder<EChestSwapMode>()
-        .name("swap-mode")
-        .description("Normal: visible hotbar swap. Silent: swap via packet, swap back after placing/breaking.")
-        .defaultValue(EChestSwapMode.Silent)
-        .build()
-    );
-
-    public final Setting<ToolSwapMode> pickaxeSwapMode = sgBehavior.add(new EnumSetting.Builder<ToolSwapMode>()
-        .name("pickaxe-swap-mode")
-        .description("Vanilla: visible pickaxe swap for mining. Silent: silent swap and auto-restore.")
-        .defaultValue(ToolSwapMode.Vanilla)
-        .build()
-    );
-
-    public final Setting<Boolean> autoEat = sgBehavior.add(new BoolSetting.Builder()
-        .name("auto-eat")
-        .description("Pause Highway Builder and automatically eat food when health/hunger is low.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> autoEatHealth = sgBehavior.add(new IntSetting.Builder()
-        .name("auto-eat-health")
-        .description("Auto-eat starts when health is at or below this value.")
-        .defaultValue(19)
-        .min(1)
-        .max(20)
-        .sliderRange(1, 20)
-        .visible(autoEat::get)
-        .build()
-    );
-
-    public final Setting<Integer> autoEatHunger = sgBehavior.add(new IntSetting.Builder()
-        .name("auto-eat-hunger")
-        .description("Auto-eat starts when hunger is at or below this value.")
-        .defaultValue(10)
-        .min(0)
-        .max(20)
-        .sliderRange(0, 20)
-        .visible(autoEat::get)
-        .build()
-    );
-
-    public final Setting<Boolean> mobShield = sgBehavior.add(new BoolSetting.Builder()
-        .name("mob-shield")
-        .description("Automatically attacks selected Nether mobs that physically block obsidian placement.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Double> mobShieldRange = sgBehavior.add(new DoubleSetting.Builder()
-        .name("mob-shield-range")
-        .description("Attack range for mob-shield.")
-        .defaultValue(5.0)
-        .min(1.0)
-        .max(5.5)
-        .sliderRange(1.0, 5.5)
-        .visible(mobShield::get)
-        .build()
-    );
-
-    // ── Mining Settings ─────────────────────────────────────────────────
-
-    public final Setting<Double> miningReach = sgMining.add(new DoubleSetting.Builder()
-        .name("mining-reach")
-        .description("Maximum reach distance used for block breaking.")
-        .defaultValue(4.5)
-        .min(1.0)
-        .max(7.0)
-        .sliderRange(1.0, 7.0)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Integer> miningRangeUp = sgMining.add(new IntSetting.Builder()
-        .name("mining-up")
-        .description("How many blocks above the player can be mined.")
-        .defaultValue(3)
-        .min(0)
-        .max(10)
-        .sliderRange(0, 10)
-        .onChanged(v -> rebuildBlueprint())
-        .build()
-    );
-
-    public final Setting<Integer> breakDelay = sgMining.add(new IntSetting.Builder()
-        .name("break-delay")
-        .description("Ticks between block breaks.")
-        .defaultValue(0)
-        .min(0)
-        .max(20)
-        .sliderRange(0, 20)
-        .build()
-    );
-
-    public final Setting<Boolean> multiBreak = sgMining.add(new BoolSetting.Builder()
-        .name("multi-break")
-        .description("Break multiple blocks in the same direction at once.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Boolean> packetFlood = sgMining.add(new BoolSetting.Builder()
-        .name("packet-flood")
-        .description("Send extra break packets to speed up mining.")
-        .defaultValue(false)
-        .build()
-    );
-
-    public final Setting<Double> miningSpeedFactor = sgMining.add(new DoubleSetting.Builder()
-        .name("mining-speed-factor")
-        .description("Factor for mining speed calculation.")
-        .defaultValue(1.0)
-        .min(0.1)
-        .max(2.0)
-        .sliderRange(0.1, 2.0)
-        .build()
-    );
-
-    // ── Placing Settings ────────────────────────────────────────────────
-
-    public final Setting<Integer> placeDelay = sgPlacing.add(new IntSetting.Builder()
-        .name("place-delay")
-        .description("Ticks between block placements.")
-        .defaultValue(0)
-        .min(0)
-        .max(20)
-        .sliderRange(0, 20)
-        .build()
-    );
-
-    public final Setting<Boolean> illegalPlacements = sgPlacing.add(new BoolSetting.Builder()
-        .name("illegal-placements")
-        .description("Allow placements without visible face.")
-        .defaultValue(false)
-        .build()
-    );
-
-    public final Setting<Boolean> dynamicDelay = sgPlacing.add(new BoolSetting.Builder()
-        .name("dynamic-delay")
-        .description("Dynamically increase delay on failed placements.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Boolean> multiBuilding = sgPlacing.add(new BoolSetting.Builder()
-        .name("multi-building")
-        .description("Place multiple blocks per tick when possible.")
-        .defaultValue(false)
-        .build()
-    );
-
-    public final Setting<Integer> interactionLimit = sgPlacing.add(new IntSetting.Builder()
-        .name("interaction-limit")
-        .description("Max interactions per tick.")
-        .defaultValue(20)
-        .min(1)
-        .max(100)
-        .sliderRange(1, 100)
-        .build()
-    );
-
-    public final Setting<Integer> saveMaterial = sgPlacing.add(new IntSetting.Builder()
-        .name("save-material")
-        .description("Minimum material to keep in inventory (0 to disable).")
-        .defaultValue(0)
-        .min(0)
-        .max(576)
-        .sliderRange(0, 576)
-        .build()
-    );
-
-    public final Setting<Integer> placementSearch = sgPlacing.add(new IntSetting.Builder()
-        .name("placement-search")
-        .description("Search depth for finding placement support blocks.")
-        .defaultValue(2)
-        .min(1)
-        .max(4)
-        .sliderRange(1, 4)
-        .build()
-    );
-
-    // ── Storage Settings ────────────────────────────────────────────────
-
-    public final Setting<Boolean> storageManagement = sgStorage.add(new BoolSetting.Builder()
-        .name("storage-management")
-        .description("Enable automatic restock from shulker boxes.")
-        .defaultValue(false)
-        .build()
-    );
-
-    public final Setting<Integer> echestSlots = sgStorage.add(new IntSetting.Builder()
-        .name("echest-slots")
-        .description("Number of inventory slots to fill with obsidian from ender chests. EChest miner auto-activates when material is obsidian and ender chests are available.")
-        .defaultValue(2)
-        .min(1)
-        .max(36)
-        .sliderRange(1, 36)
-        .build()
-    );
-
-    public final Setting<EChestMineMode> echestMineMode = sgStorage.add(new EnumSetting.Builder<EChestMineMode>()
-        .name("echest-mine-mode")
-        .description("Normal: mine ender chest fully. Insta: single hit per chest (requires external InstaMine).")
-        .defaultValue(EChestMineMode.Normal)
-        .build()
-    );
-
-    public final Setting<Boolean> autoJunkCleanup = sgStorage.add(new BoolSetting.Builder()
-        .name("auto-junk-cleanup")
-        .description("Automatically throw configured Nether junk items from inventory.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> keepNetherrack = sgStorage.add(new IntSetting.Builder()
-        .name("keep-netherrack")
-        .description("How many netherrack items to keep for lava plugging.")
-        .defaultValue(64)
-        .min(0)
-        .max(2304)
-        .sliderRange(0, 256)
-        .build()
-    );
-
-    // ── Render Settings ─────────────────────────────────────────────────
-
-    public final Setting<Boolean> filled = sgRender.add(new BoolSetting.Builder()
-        .name("filled")
-        .description("Render filled shapes.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Boolean> outline = sgRender.add(new BoolSetting.Builder()
-        .name("outline")
-        .description("Render outline shapes.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> aFilled = sgRender.add(new IntSetting.Builder()
-        .name("filled-alpha")
-        .description("Alpha for filled shapes.")
-        .defaultValue(30)
-        .min(0)
-        .max(255)
-        .sliderRange(0, 255)
-        .build()
-    );
-
-    public final Setting<Integer> aOutline = sgRender.add(new IntSetting.Builder()
-        .name("outline-alpha")
-        .description("Alpha for outlines.")
-        .defaultValue(100)
-        .min(0)
-        .max(255)
-        .sliderRange(0, 255)
-        .build()
-    );
-
-    public final Setting<Boolean> popUp = sgRender.add(new BoolSetting.Builder()
-        .name("pop-up")
-        .description("Pop-up animation for new tasks.")
-        .defaultValue(true)
-        .build()
-    );
-
-    public final Setting<Integer> popUpSpeed = sgRender.add(new IntSetting.Builder()
-        .name("pop-up-speed")
-        .description("Speed of the pop-up animation in ms.")
-        .defaultValue(200)
-        .min(50)
-        .max(1000)
-        .sliderRange(50, 1000)
-        .build()
-    );
-
-    public final Setting<Boolean> showCurrentPos = sgRender.add(new BoolSetting.Builder()
-        .name("show-current-pos")
-        .description("Render current position marker.")
-        .defaultValue(true)
-        .build()
-    );
-
-    // ── Block Settings ──────────────────────────────────────────────────
-
-    private final SettingGroup sgBlocks = settings.createGroup("Blocks");
-
-    public final Setting<Block> material = sgBlocks.add(new BlockSetting.Builder()
-        .name("material")
-        .description("Primary building material.")
-        .defaultValue(Blocks.OBSIDIAN)
-        .build()
-    );
-
-    public final Setting<Block> fillerMat = sgBlocks.add(new BlockSetting.Builder()
-        .name("filler-material")
-        .description("Filler material for liquids and support.")
-        .defaultValue(Blocks.NETHERRACK)
-        .build()
-    );
-
-    public final Setting<List<Block>> ignoreBlocks = sgBlocks.add(new BlockListSetting.Builder()
-        .name("ignore-blocks")
-        .description("Blocks to ignore when breaking.")
-        .defaultValue(List.of(Blocks.BEDROCK, Blocks.END_PORTAL_FRAME, Blocks.COMMAND_BLOCK))
-        .build()
-    );
-
-    // ── Sub-components ──────────────────────────────────────────────────
-
+public class HighwayBuilder extends HighwayBuilderConfig {
     public BlueprintGenerator blueprintGenerator;
     public TaskManager taskManager;
     public TaskExecutor taskExecutor;
@@ -565,18 +43,12 @@ public class HighwayBuilder extends Module {
     public HighwayRenderer renderer;
     public HighwayStatistics statistics;
     public EChestMiner echestMiner;
-    private int repopulateTimer = 0;
-    private boolean containerBusyLastTick = false;
-    private int autoEatRestoreSlot = -1;
 
-    // ── Constructor ─────────────────────────────────────────────────────
+    private final HighwayAutoEatController autoEatController = new HighwayAutoEatController(this);
+    private int repopulateTimer;
+    private boolean containerBusyLastTick;
 
-    public HighwayBuilder() {
-        super(AddonTemplate.CATEGORY, "highway-builder-plus", "Automatically builds highways, tunnels, and flat paths in the Nether.");
-    }
-
-    // ── Lifecycle ───────────────────────────────────────────────────────
-
+    public HighwayBuilder() {}
     @Override
     public void onActivate() {
         if (mc.player == null || mc.world == null) {
@@ -800,7 +272,8 @@ public class HighwayBuilder extends Module {
         return false;
     }
 
-    private void rebuildBlueprint() {
+    @Override
+    protected void rebuildBlueprint() {
         if (!isActive() || taskManager == null || blueprintGenerator == null) return;
         taskManager.getTasks().clear();
         taskManager.populateTasks();
@@ -813,143 +286,11 @@ public class HighwayBuilder extends Module {
     }
 
     private boolean handleAutoEat() {
-        if (mc.player == null || mc.interactionManager == null) return false;
-
-        if (!autoEat.get()) {
-            stopAutoEat();
-            return false;
-        }
-
-        int hunger = mc.player.getHungerManager().getFoodLevel();
-        float health = mc.player.getHealth();
-        boolean needEat = health <= autoEatHealth.get() || hunger <= autoEatHunger.get();
-
-        if (!needEat) {
-            stopAutoEat();
-            return false;
-        }
-
-        if (mc.player.currentScreenHandler != null && mc.player.currentScreenHandler.syncId != 0) {
-            mc.player.closeHandledScreen();
-            return true;
-        }
-
-        if (!ensureFoodInMainHand()) {
-            if (pathfinder != null) pathfinder.resetBaritone();
-            mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
-            stopAutoEat();
-            return true;
-        }
-
-        if (pathfinder != null) pathfinder.resetBaritone();
-        mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
-
-        mc.options.useKey.setPressed(true);
-
-        if (!mc.player.isUsingItem()) {
-            var result = mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
-            if (result.isAccepted()) mc.player.swingHand(Hand.MAIN_HAND);
-        }
-
-        return true;
+        return autoEatController.handleAutoEat();
     }
 
     private void stopAutoEat() {
-        if (mc == null || mc.options == null) return;
-
-        mc.options.useKey.setPressed(false);
-
-        if (mc.player != null && autoEatRestoreSlot >= 0 && autoEatRestoreSlot < 9) {
-            int selected = mc.player.getInventory().getSelectedSlot();
-            if (selected != autoEatRestoreSlot) {
-                InvUtils.swap(autoEatRestoreSlot, false);
-            }
-        }
-
-        autoEatRestoreSlot = -1;
-    }
-
-    private boolean ensureFoodInMainHand() {
-        if (mc.player == null) return false;
-
-        if (isFoodStack(mc.player.getMainHandStack())) return true;
-
-        int selected = mc.player.getInventory().getSelectedSlot();
-        int foodSlot = findFoodHotbarSlot();
-        if (foodSlot == -1) {
-            int inventoryFood = findFoodInventorySlot();
-            if (inventoryFood == -1) return false;
-
-            int targetHotbar = findAutoEatHotbarTarget(selected);
-            if (targetHotbar == -1) return false;
-
-            if (autoEatRestoreSlot == -1) autoEatRestoreSlot = selected;
-            InvUtils.move().from(inventoryFood).toHotbar(targetHotbar);
-            foodSlot = targetHotbar;
-        }
-
-        if (autoEatRestoreSlot == -1) autoEatRestoreSlot = selected;
-        if (selected != foodSlot) InvUtils.swap(foodSlot, false);
-
-        return isFoodStack(mc.player.getMainHandStack());
-    }
-
-    private int findFoodHotbarSlot() {
-        if (mc.player == null) return -1;
-        for (int i = 0; i < 9; i++) {
-            if (isFoodStack(mc.player.getInventory().getStack(i))) return i;
-        }
-        return -1;
-    }
-
-    private int findFoodInventorySlot() {
-        if (mc.player == null) return -1;
-        for (int i = 9; i < 36; i++) {
-            if (isFoodStack(mc.player.getInventory().getStack(i))) return i;
-        }
-        return -1;
-    }
-
-    private int findAutoEatHotbarTarget(int selected) {
-        if (mc.player == null) return -1;
-
-        if (selected >= 0 && selected < 9) {
-            ItemStack stack = mc.player.getInventory().getStack(selected);
-            boolean selectedProtected = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(selected);
-            boolean selectedAppleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(selected);
-            if ((stack.isEmpty() || !stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES))
-                && (!selectedProtected || selectedAppleReserved)) {
-                return selected;
-            }
-        }
-
-        for (int i = 0; i < 9; i++) {
-            boolean protectedSlot = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(i);
-            boolean appleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(i);
-            if (protectedSlot && !appleReserved) continue;
-            if (mc.player.getInventory().getStack(i).isEmpty()) return i;
-        }
-
-        for (int i = 0; i < 9; i++) {
-            boolean protectedSlot = inventoryHandler != null && inventoryHandler.isProtectedHotbarSlot(i);
-            boolean appleReserved = inventoryHandler != null && inventoryHandler.isAppleReservedHotbarSlot(i);
-            if (protectedSlot && !appleReserved) continue;
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (!stack.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES)) return i;
-        }
-
-        return selected;
-    }
-
-    private boolean isFoodStack(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
-        if (stack.get(DataComponentTypes.FOOD) == null) return false;
-
-        Item item = stack.getItem();
-        return item != Items.ROTTEN_FLESH
-            && item != Items.SPIDER_EYE
-            && item != Items.POISONOUS_POTATO
-            && item != Items.PUFFERFISH;
+        autoEatController.stopAutoEat();
     }
 
     private boolean handleMobShield() {
@@ -1149,3 +490,8 @@ public class HighwayBuilder extends Module {
         EntityType.STRIDER
     );
 }
+
+
+
+
+

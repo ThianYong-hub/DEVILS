@@ -2,34 +2,31 @@ package com.example.addon.modules.highwaybuilder;
 
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.fluid.FluidState;
-import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class TaskManager {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final double MINING_REACH_EPSILON = 0.05;
-    private static final double VANILLA_STRICT_BREAK_REACH = 4.0;
-    private static final double BACKWARD_TASK_PADDING = 0.10;
 
     private final HighwayBuilder module;
+    private final TaskStateRules stateRules;
+    private final TaskPriorityPlanner priorityPlanner;
     private final ConcurrentHashMap<BlockPos, BlockTask> tasks = new ConcurrentHashMap<>();
     public BlockTask lastTask = null;
 
     public TaskManager(HighwayBuilder module) {
         this.module = module;
+        this.stateRules = new TaskStateRules(module);
+        this.priorityPlanner = new TaskPriorityPlanner(module, stateRules);
     }
 
     public ConcurrentHashMap<BlockPos, BlockTask> getTasks() {
@@ -70,7 +67,7 @@ public class TaskManager {
                 if (nearWorkArea) return false;
             }
 
-            return !blueprint.containsKey(entry.getKey()) || startPadding(entry.getKey());
+            return !blueprint.containsKey(entry.getKey()) || TaskSpatialRules.startPadding(module, entry.getKey());
         });
 
         // Remove old done tasks that are far away
@@ -99,13 +96,13 @@ public class TaskManager {
         BlockState currentState = mc.world.getBlockState(blockPos);
 
         // Start padding - don't break behind player
-        if (startPadding(blockPos)) return;
+        if (TaskSpatialRules.startPadding(module, blockPos)) return;
 
         // Don't override container task
         if (blockPos.equals(module.containerHandler.containerTask.blockPos)) return;
 
         // Ignored blocks
-        if (shouldBeIgnored(blockPos, currentState)) {
+        if (TaskSpatialRules.shouldBeIgnored(module, blockPos, currentState)) {
             BlockTask blockTask = new BlockTask(blockPos, TaskState.DONE, currentState.getBlock());
             addTask(blockTask, blueprintTask);
             return;
@@ -165,7 +162,7 @@ public class TaskManager {
             return;
         }
 
-        if (!isWithinMiningHeight(blockPos)) {
+        if (!stateRules.isWithinMiningHeight(blockPos)) {
             // Mining-up limit: intentionally ignored.
             BlockTask ignored = new BlockTask(blockPos, TaskState.DONE, currentState.getBlock());
             addTask(ignored, blueprintTask);
@@ -178,40 +175,12 @@ public class TaskManager {
         addTask(blockTask, blueprintTask);
     }
 
-    private double getBreakReachDistance(BlockPos pos) {
-        if (mc.player == null) return Double.MAX_VALUE;
-        Vec3d eyePos = mc.player.getEyePos();
-        double best = eyePos.distanceTo(Vec3d.ofCenter(pos));
-        for (Direction side : Direction.values()) {
-            double dist = eyePos.distanceTo(HWUtils.getHitVec(pos, side));
-            if (dist < best) best = dist;
-        }
-        return best;
-    }
-
-    private boolean isWithinMiningReach(BlockPos pos) {
-        return getBreakReachDistance(pos) <= getEffectiveMiningReach() + MINING_REACH_EPSILON;
-    }
-
-    private boolean isWithinMiningHeight(BlockPos pos) {
-        if (mc.player == null) return false;
-        int playerY = mc.player.getBlockY();
-        return pos.getY() <= playerY + module.miningRangeUp.get()
-            && pos.getY() >= playerY - 1;
-    }
-
-    private boolean isWithinMiningBounds(BlockPos pos) {
-        return isWithinMiningReach(pos) && isWithinMiningHeight(pos);
-    }
-
     public boolean isWithinActiveMiningBounds(BlockPos pos) {
-        return isWithinMiningBounds(pos);
+        return stateRules.isWithinMiningBounds(pos);
     }
 
     public double getEffectiveMiningReach() {
-        double configured = module.miningReach.get();
-        double placeReach = module.maxReach.get();
-        return Math.min(configured, Math.min(placeReach, VANILLA_STRICT_BREAK_REACH));
+        return stateRules.getEffectiveMiningReach();
     }
 
     public void addTask(BlockTask blockTask, BlueprintTask blueprintTask) {
@@ -225,47 +194,12 @@ public class TaskManager {
 
         BlockTask existing = tasks.get(blockTask.blockPos);
         if (existing != null) {
-            if (shouldReplaceExistingTask(existing, blockTask)) {
+            if (stateRules.shouldReplaceExistingTask(existing, blockTask)) {
                 tasks.put(blockTask.blockPos, blockTask);
             }
         } else {
             tasks.put(blockTask.blockPos, blockTask);
         }
-    }
-
-    private boolean shouldReplaceExistingTask(BlockTask existing, BlockTask next) {
-        if (existing == null || next == null) return true;
-
-        if (existing.getStuckTicks() > existing.taskState.stuckTimeout) return true;
-        if (next.taskState == TaskState.LIQUID) return true;
-        if (existing.targetBlock != next.targetBlock) return true;
-        if (existing.taskState == TaskState.DONE || existing.taskState == TaskState.IMPOSSIBLE_PLACE) return true;
-
-        if (existing.taskState != next.taskState) {
-            // Critical recovery: never keep stale PLACE/PENDING_PLACE when
-            // blueprint regeneration says the block must be broken.
-            if (isBreakLikeState(next.taskState) && isPlaceLikeState(existing.taskState)) return true;
-
-            if (existing.taskState == TaskState.PLACE && !HWUtils.isPlaceable(existing.blockPos)) return true;
-        }
-
-        return false;
-    }
-
-    private boolean isBreakLikeState(TaskState state) {
-        return switch (state) {
-            case BREAK, BREAKING, PENDING_BREAK -> true;
-            case LIQUID -> true;
-            default -> false;
-        };
-    }
-
-    private boolean isPlaceLikeState(TaskState state) {
-        return switch (state) {
-            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
-            case LIQUID -> true;
-            default -> false;
-        };
     }
 
     private void updateTaskData(BlockTask blockTask) {
@@ -277,7 +211,7 @@ public class TaskManager {
             .distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
         blockTask.setEyeDistance(mc.player.getEyePos().distanceTo(Vec3d.ofCenter(blockTask.blockPos)));
 
-        if (isSequenceDrivenState(blockTask.taskState)) {
+        if (stateRules.isSequenceDrivenState(blockTask.taskState)) {
             long now = System.currentTimeMillis();
             long recalcInterval = blockTask.taskState == TaskState.IMPOSSIBLE_PLACE
                 ? 40L
@@ -321,35 +255,32 @@ public class TaskManager {
         if (containerTask.taskState != TaskState.DONE) {
             updateTaskData(containerTask);
             if (containerTask.getStuckTicks() > containerTask.taskState.stuckTimeout) {
-                recoverContainerTask(containerTask);
+                TaskContainerRecovery.recoverContainerTask(module, containerTask);
             } else {
                 module.taskExecutor.doTask(containerTask, false);
             }
             return;
         }
 
-        // Check tools restock
         if (module.storageManagement.get()) {
-            // Could add pickaxe/food restock checks here
         }
 
-        // Run normal tasks
         if (module.inventoryHandler.waitTicks > 0) module.inventoryHandler.waitTicks--;
 
         List<BlockTask> sorted = new ArrayList<>(tasks.values());
         for (BlockTask task : sorted) {
-            sanitizeBreakTaskState(task);
+            stateRules.sanitizeBreakTaskState(task);
             module.taskExecutor.doTask(task, true);
             if (task.taskState != TaskState.DONE) {
                 updateTaskData(task);
             }
         }
 
-        sorted.sort(blockTaskComparator());
+        sorted.sort(priorityPlanner.comparator());
 
-        BlockTask liquidTask = findTopPriorityLiquidTask(sorted);
+        BlockTask liquidTask = priorityPlanner.findTopPriorityLiquidTask(sorted);
         if (liquidTask != null) {
-            if (checkStuckTimeout(liquidTask)) {
+            if (stateRules.checkStuckTimeout(liquidTask)) {
                 if (liquidTask.taskState != TaskState.DONE && module.inventoryHandler.waitTicks > 0) return;
                 module.taskExecutor.doTask(liquidTask, false);
             }
@@ -358,20 +289,18 @@ public class TaskManager {
 
         int actionsThisTick = 0;
         int maxActions = module.blocksPerTick.get();
-        // Do not place while there are unresolved break-phase tasks in active bounds.
-        // This prevents "skip nearest break -> try place into solid block" behavior.
         boolean hasBreakPhaseTasks = hasActiveBreakWork();
 
         for (BlockTask task : sorted) {
             if (hasBreakPhaseTasks) {
-                if (!isBreakPhaseState(task)) continue;
-                if (!isBreakPhaseActionableNow(task)) continue;
-            } else if (!isPlacePhaseState(task)) {
+                if (!stateRules.isBreakPhaseState(task)) continue;
+                if (!stateRules.isBreakPhaseActionableNow(task)) continue;
+            } else if (!stateRules.isPlacePhaseState(task)) {
                 continue;
-            } else if (!isPlacePhaseActionableNow(task)) {
+            } else if (!stateRules.isPlacePhaseActionableNow(task)) {
                 continue;
             }
-            if (!checkStuckTimeout(task)) continue;
+            if (!stateRules.checkStuckTimeout(task)) continue;
             if (task.taskState != TaskState.DONE && module.inventoryHandler.waitTicks > 0) return;
 
             module.taskExecutor.doTask(task, false);
@@ -385,60 +314,9 @@ public class TaskManager {
         }
     }
 
-    private boolean checkStuckTimeout(BlockTask blockTask) {
-        int timeout = blockTask.taskState.stuckTimeout;
-        if (blockTask.getStuckTicks() < timeout) return true;
-        if (blockTask.taskState == TaskState.DONE) return true;
-
-        if (blockTask.taskState == TaskState.PENDING_BREAK) {
-            blockTask.updateState(TaskState.BREAK);
-            return false;
-        }
-
-        if (blockTask.taskState == TaskState.PENDING_PLACE) {
-            blockTask.updateState(TaskState.PLACE);
-            return false;
-        }
-
-        switch (blockTask.taskState) {
-            case BREAK, BREAKING -> {
-                // Never drop break tasks as DONE on timeout: retry from BREAK state.
-                blockTask.miningSide = null;
-                blockTask.updateState(TaskState.BREAK);
-            }
-            case PLACE -> {
-                if (module.dynamicDelay.get() && module.blockPlacer.extraPlaceDelay < 10
-                    && module.pathfinder.moveState != MovementState.BRIDGE) {
-                    module.blockPlacer.extraPlaceDelay += 1;
-                }
-            }
-            case LIQUID -> {
-                if (mc.world != null && !mc.world.getFluidState(blockTask.blockPos).isEmpty()) {
-                    // Never mark active liquid mitigation as DONE on timeout.
-                    // Keep it alive and retry with refreshed supports.
-                    blockTask.resetStuck();
-                    blockTask.updateState(TaskState.LIQUID);
-                } else {
-                    if (blockTask.targetBlock == Blocks.AIR) blockTask.updateState(TaskState.DONE);
-                    else blockTask.updateState(TaskState.PLACE);
-                }
-            }
-            case IMPOSSIBLE_PLACE -> {
-                blockTask.sequence.clear();
-                blockTask.updateState(TaskState.PLACE);
-            }
-            case PICKUP -> {
-                blockTask.updateState(TaskState.DONE);
-                module.pathfinder.moveState = MovementState.RUNNING;
-            }
-            default -> blockTask.updateState(TaskState.DONE);
-        }
-        return false;
-    }
-
     public boolean hasActiveBreakWork() {
         for (BlockTask task : tasks.values()) {
-            if (!isBreakPhaseState(task)) continue;
+            if (!stateRules.isBreakPhaseState(task)) continue;
             if (!isWithinActiveMiningBounds(task.blockPos)) continue;
             if (task.taskState == TaskState.DONE) continue;
             return true;
@@ -446,217 +324,8 @@ public class TaskManager {
         return false;
     }
 
-    private boolean isSequenceDrivenState(TaskState state) {
-        return switch (state) {
-            case PLACE, LIQUID, IMPOSSIBLE_PLACE -> true;
-            default -> false;
-        };
-    }
-
-    private boolean isBreakPhaseState(BlockTask task) {
-        return switch (task.taskState) {
-            case BREAK, BREAKING, PENDING_BREAK -> true;
-            // Liquid tasks targeting AIR are effectively "clear this cell" and should
-            // be processed before normal placement to avoid break/place thrashing.
-            case LIQUID -> task.targetBlock == Blocks.AIR;
-            default -> false;
-        };
-    }
-
-    private boolean isBreakPhaseActionableNow(BlockTask task) {
-        if (mc.player == null || task == null) return false;
-
-        if (task.taskState == TaskState.LIQUID && task.targetBlock == Blocks.AIR) {
-            return mc.player.getEyePos().distanceTo(Vec3d.ofCenter(task.blockPos))
-                <= module.maxReach.get() + 0.8;
-        }
-
-        if (!isWithinActiveMiningBounds(task.blockPos)) return false;
-
-        double reachLimit = getEffectiveMiningReach() + MINING_REACH_EPSILON;
-        double best = getBreakReachDistance(task.blockPos);
-        return best <= reachLimit;
-    }
-
-    private boolean isPlacePhaseActionableNow(BlockTask task) {
-        if (mc.player == null || task == null) return false;
-        double dist = mc.player.getEyePos().distanceTo(Vec3d.ofCenter(task.blockPos));
-        double placeReach = module.maxReach.get() + 0.8;
-
-        return switch (task.taskState) {
-            case PLACE, PENDING_PLACE -> dist <= placeReach;
-            case IMPOSSIBLE_PLACE -> dist <= placeReach && !task.sequence.isEmpty();
-            case LIQUID -> task.targetBlock != Blocks.AIR && dist <= placeReach;
-            default -> false;
-        };
-    }
-
-    private boolean isPlacePhaseState(BlockTask task) {
-        return switch (task.taskState) {
-            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
-            case LIQUID -> task.targetBlock != Blocks.AIR;
-            default -> false;
-        };
-    }
-
-    private void sanitizeBreakTaskState(BlockTask task) {
-        if (mc.world == null || task == null || !isBreakPhaseState(task)) return;
-
-        BlockState state = mc.world.getBlockState(task.blockPos);
-        boolean isAirLike = state.isAir() || state.isReplaceable();
-        boolean hasFluid = !mc.world.getFluidState(task.blockPos).isEmpty();
-
-        if (task.taskState == TaskState.LIQUID && task.targetBlock == Blocks.AIR) {
-            if (!hasFluid) {
-                if (isAirLike) task.updateState(TaskState.DONE);
-                else task.updateState(TaskState.BREAK);
-            }
-            return;
-        }
-
-        if (isAirLike) {
-            if (task.targetBlock == Blocks.AIR) task.updateState(TaskState.DONE);
-            else task.updateState(TaskState.PLACE);
-        }
-    }
-
-    private BlockTask findTopPriorityLiquidTask(List<BlockTask> sorted) {
-        if (mc.player == null) return null;
-
-        Vec3d eyePos = mc.player.getEyePos();
-        double maxReach = module.maxReach.get() + 0.8;
-        double maxForward = module.miningReach.get() + 1.5;
-
-        for (BlockTask task : sorted) {
-            if (task.taskState != TaskState.LIQUID) continue;
-            if (eyePos.distanceTo(Vec3d.ofCenter(task.blockPos)) > maxReach) continue;
-            if (getForwardPriority(task.blockPos) > maxForward) continue;
-            return task;
-        }
-
-        return null;
-    }
-
-    private void recoverContainerTask(BlockTask containerTask) {
-        if (mc.world == null) return;
-
-        containerTask.resetStuck();
-        BlockState state = mc.world.getBlockState(containerTask.blockPos);
-        boolean isAirLike = state.isAir() || state.isReplaceable();
-        boolean isShulker = state.getBlock() instanceof ShulkerBoxBlock;
-
-        switch (containerTask.taskState) {
-            case BREAK, BREAKING, PENDING_BREAK -> {
-                if (isAirLike) {
-                    containerTask.updateState(TaskState.PICKUP);
-                    module.pathfinder.moveState = MovementState.PICKUP;
-                } else {
-                    containerTask.updateState(TaskState.BREAK);
-                    module.pathfinder.moveState = MovementState.RESTOCK;
-                }
-            }
-            case PICKUP -> module.pathfinder.moveState = MovementState.PICKUP;
-            case OPEN_CONTAINER, RESTOCK -> {
-                if (isShulker) {
-                    containerTask.updateState(TaskState.OPEN_CONTAINER);
-                    module.pathfinder.moveState = MovementState.RESTOCK;
-                } else {
-                    if (module.containerHandler.tryRelocateContainerPlacement()) {
-                        module.pathfinder.moveState = MovementState.RESTOCK;
-                    } else {
-                        containerTask.updateState(TaskState.PICKUP);
-                        module.pathfinder.moveState = MovementState.PICKUP;
-                    }
-                }
-            }
-            case PLACE, PENDING_PLACE, IMPOSSIBLE_PLACE, PLACED -> {
-                if (!module.containerHandler.tryRelocateContainerPlacement()) {
-                    containerTask.updateState(TaskState.PLACE);
-                }
-                module.pathfinder.moveState = MovementState.RESTOCK;
-            }
-            default -> {
-                // Intentionally no transition to DONE: never skip unfinished container cycle.
-            }
-        }
-    }
-
-    private boolean startPadding(BlockPos c) {
-        HWDirection dir = module.pathfinder.startingDirection;
-        BlockPos origin = module.pathfinder.currentBlockPos;
-        return dir.forwardProgress(origin, c) < -BACKWARD_TASK_PADDING;
-    }
-
     public boolean isBehindPos(BlockPos origin, BlockPos check) {
-        HWDirection dir = module.pathfinder.startingDirection;
-        int width = module.width.get();
-
-        HWDirection ccw = dir.counterClockwise(2);
-        HWDirection cw = dir.clockwise(2);
-
-        BlockPos a = origin.add(
-            ccw.directionVec.getX() * width, 0, ccw.directionVec.getZ() * width);
-        BlockPos b = origin.add(
-            cw.directionVec.getX() * width, 0, cw.directionVec.getZ() * width);
-
-        return ((b.getX() - a.getX()) * (check.getZ() - a.getZ())
-            - (b.getZ() - a.getZ()) * (check.getX() - a.getX())) > 0;
-    }
-
-    private boolean shouldBeIgnored(BlockPos blockPos, BlockState currentState) {
-        String regName = Registries.BLOCK.getId(currentState.getBlock()).toString();
-        return module.getIgnoreBlocks().contains(regName)
-            && !module.blueprintGenerator.isInsideBlueprintBuild(blockPos)
-            && !module.pathfinder.currentBlockPos.add(
-                module.pathfinder.startingDirection.directionVec).equals(blockPos);
-    }
-
-    private Comparator<BlockTask> blockTaskComparator() {
-        return Comparator.comparingInt((BlockTask t) -> t.taskState.ordinal())
-            .thenComparingInt(BlockTask::getStuckTicks)
-            .thenComparingInt(t -> t.isLiquidSource ? 0 : 1)
-            .thenComparingDouble(t -> {
-                if (module.pathfinder.moveState == MovementState.BRIDGE) {
-                    return t.sequence.isEmpty() ? 69 : t.sequence.size();
-                } else if (isBreakPhaseState(t)) {
-                    // Break nearest forward slice first to avoid leaving close blocks behind.
-                    return getForwardPriority(t.blockPos);
-                } else if (isClosingPlacementState(t.taskState)) {
-                    // Prioritize nearest forward slice first (close holes before extending).
-                    return getForwardPriority(t.blockPos);
-                } else {
-                    return module.multiBuilding.get() ? t.getShuffle() : t.getStartDistance();
-                }
-            })
-            .thenComparingDouble(t -> isBreakPhaseState(t)
-                ? getLateralPriority(t.blockPos) // center lane first while breaking
-                : 0.0)
-            .thenComparingDouble(t -> isClosingPlacementState(t.taskState)
-                ? getLateralPriority(t.blockPos) // center lane first, edges/railings later
-                : 0.0)
-            .thenComparingDouble(BlockTask::getEyeDistance)
-            .thenComparingDouble(BlockTask::getStartDistance);
-    }
-
-    private boolean isClosingPlacementState(TaskState state) {
-        return switch (state) {
-            case PLACE, LIQUID, PENDING_PLACE, IMPOSSIBLE_PLACE -> true;
-            default -> false;
-        };
-    }
-
-    private double getForwardPriority(BlockPos pos) {
-        HWDirection dir = module.pathfinder.startingDirection;
-        BlockPos origin = module.pathfinder.currentBlockPos;
-        double progress = dir.forwardProgress(origin, pos);
-        if (progress < 0.0) return 10_000.0 + Math.abs(progress);
-        return progress;
-    }
-
-    private double getLateralPriority(BlockPos pos) {
-        HWDirection dir = module.pathfinder.startingDirection;
-        BlockPos origin = module.pathfinder.currentBlockPos;
-        return Math.abs(dir.lateralOffset(origin, pos));
+        return TaskSpatialRules.isBehindPos(module, origin, check);
     }
 
     public void clearTasks() {
@@ -666,3 +335,5 @@ public class TaskManager {
         module.containerHandler.grindCycles = 0;
     }
 }
+
+

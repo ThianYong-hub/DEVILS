@@ -1,11 +1,16 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
-import com.example.addon.util.SyncCrypto;
-import com.example.addon.util.SyncRequestSigner;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import com.example.addon.modules.chesttracker.ChestTrackerBridge;
+import com.example.addon.modules.chesttracker.ChestTrackerSettingsManager;
+import com.example.addon.modules.chesttracker.ChestTrackerSnapshotStore;
+import com.example.addon.modules.chesttracker.ChestTrackerStreamController;
+import com.example.addon.modules.chesttracker.ChestTrackerSyncApi;
+import com.example.addon.modules.chesttracker.ChestTrackerSupport.Snapshot;
+import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncPull;
+import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncPush;
+import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncResult;
+import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncRuntimeConfig;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -23,47 +28,14 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.nbt.NbtElement;
-import net.minecraft.nbt.NbtIo;
-import net.minecraft.nbt.NbtList;
-import net.minecraft.nbt.NbtSizeTracker;
-import net.minecraft.registry.RegistryKeys;
 import net.minecraft.util.Util;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.security.MessageDigest;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HexFormat;
-import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.zip.GZIPInputStream;
-import java.util.zip.GZIPOutputStream;
 
 public class ChestTrackerModule extends Module {
     private static final String RUNTIME_STATE_CLASS = "com.example.addon.chesttracker.impl.gui.util.ChestTrackerRuntimeState";
@@ -85,14 +57,6 @@ public class ChestTrackerModule extends Module {
     private static final long RECONNECT_MS = 5_000;
     private static final long STREAM_UNSUPPORTED_BACKOFF_MS = 300_000;
     private static final long REMOTE_APPLY_SKEW_MS = 2_000;
-    private static final String ENDER_CHEST_SUFFIX = ":ender_chest";
-    private static final String SKYBLOCK_ENDER_CHEST_SUFFIX = ":skyblock_ender_chest";
-    private static final String SHARE_ENDER_CHEST_NAMESPACE = "shareenderchest:";
-    private static final String LOCAL_MODULE_SETTINGS_FILE = "module-settings.json";
-    private static final int DEVILS_THEME_ACCENT_R = 92;
-    private static final int DEVILS_THEME_ACCENT_G = 0;
-    private static final int DEVILS_THEME_ACCENT_B = 0;
-    private static final int DEVILS_THEME_ACCENT_A = 255;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgTheme = settings.createGroup("Devils Theme");
@@ -118,7 +82,7 @@ public class ChestTrackerModule extends Module {
     private final Setting<SettingColor> accentColor = sgTheme.add(new ColorSetting.Builder()
         .name("accent-color")
         .description("Primary crimson accent color for ChestTracker GUI.")
-        .defaultValue(new SettingColor(DEVILS_THEME_ACCENT_R, DEVILS_THEME_ACCENT_G, DEVILS_THEME_ACCENT_B, DEVILS_THEME_ACCENT_A))
+        .defaultValue(new SettingColor(92, 0, 0, 255))
         .onChanged(v -> onModuleSettingChanged(true))
         .build()
     );
@@ -149,7 +113,37 @@ public class ChestTrackerModule extends Module {
         .build()
     );
 
+    private final ChestTrackerBridge bridge = new ChestTrackerBridge(RUNTIME_STATE_CLASS, CONFIG_CLASS, BACKEND_TYPE_CLASS);
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    private final ChestTrackerBridge.ScreenLauncher screenLauncher = new ChestTrackerBridge.ScreenLauncher(CHEST_TRACKER_CLASS, CONFIG_SCREEN_BUILDER_CLASS);
+    private final ChestTrackerSettingsManager settingsManager = new ChestTrackerSettingsManager(
+        bridge,
+        this::isActive,
+        inventoryButton,
+        devilsTheme,
+        accentColor,
+        overlayAlpha,
+        asyncSaving,
+        syncVerbose
+    );
+    private final ChestTrackerSnapshotStore snapshotStore = new ChestTrackerSnapshotStore(
+        MEMORY_ACCESS_CLASS,
+        STRINGS_CLASS,
+        SNAPSHOT_SCHEMA,
+        REMOTE_APPLY_SKEW_MS
+    );
+    private final ChestTrackerSyncApi syncApi = new ChestTrackerSyncApi(http, SYNC_MODULE, SYNC_PULL_PATH, SYNC_PUSH_PATH);
+    private final ChestTrackerStreamController streamController = new ChestTrackerStreamController(
+        http,
+        SYNC_MODULE,
+        SYNC_STREAM_PATH,
+        SYNC_STREAM_PATH_LEGACY,
+        RECONNECT_MS,
+        STREAM_UNSUPPORTED_BACKOFF_MS,
+        this::info,
+        () -> syncVerbose.get()
+    );
+
     private int syncTickCounter;
     private boolean syncBootstrap = true;
     private boolean syncInFlight;
@@ -158,18 +152,6 @@ public class ChestTrackerModule extends Module {
     private String lastFingerprint = "";
     private String activeNamespace = "";
     private String activeBankId = "";
-    private CompletableFuture<Void> streamFuture;
-    private volatile boolean streamStop;
-    private volatile boolean streamConnected;
-    private volatile boolean streamConnecting;
-    private volatile boolean streamUpdatePending;
-    private volatile long streamPendingRevision = -1;
-    private volatile long streamReconnectAtMs;
-    private volatile String streamConnectionKey = "";
-    private volatile boolean streamUseLegacyPath;
-    private volatile boolean streamUnsupported;
-    private volatile long streamUnsupportedUntilMs;
-    private boolean loadingLocalModuleSettings;
 
     public ChestTrackerModule() {
         super(
@@ -178,30 +160,30 @@ public class ChestTrackerModule extends Module {
             "Devils-integrated ChestTracker module with custom theme and storage controls."
         );
         runInMainMenu = true;
-        loadLocalModuleSettings();
+        settingsManager.loadLocalSettings(snapshotStore.storageDir());
     }
 
     @Override
     public void onActivate() {
-        loadLocalModuleSettings();
+        settingsManager.loadLocalSettings(snapshotStore.storageDir());
         resetSyncState();
-        applySettings(false);
-        saveLocalModuleSettings();
+        settingsManager.applySettings(false);
+        settingsManager.saveLocalSettings(snapshotStore.storageDir());
     }
 
     @Override
     public void onDeactivate() {
-        stopStream();
-        flushLoadedBankToDisk();
-        setRuntimeEnabled(false);
-        saveChestTrackerConfig();
-        saveLocalModuleSettings();
+        streamController.stop();
+        snapshotStore.flushLoadedBankToDisk();
+        settingsManager.setRuntimeEnabled(false);
+        settingsManager.saveChestTrackerConfig();
+        settingsManager.saveLocalSettings(snapshotStore.storageDir());
     }
 
     @Override
     public Module fromTag(NbtCompound tag) {
         super.fromTag(tag);
-        loadLocalModuleSettings();
+        settingsManager.loadLocalSettings(snapshotStore.storageDir());
         return this;
     }
 
@@ -215,10 +197,10 @@ public class ChestTrackerModule extends Module {
     @EventHandler
     private void onGameLeft(GameLeftEvent event) {
         if (!isActive()) return;
-        flushLoadedBankToDisk();
-        stopStream();
-        saveChestTrackerConfig();
-        saveLocalModuleSettings();
+        snapshotStore.flushLoadedBankToDisk();
+        streamController.stop();
+        settingsManager.saveChestTrackerConfig();
+        settingsManager.saveLocalSettings(snapshotStore.storageDir());
         activeNamespace = "";
         activeBankId = "";
         syncBootstrap = true;
@@ -229,7 +211,7 @@ public class ChestTrackerModule extends Module {
         if (!isActive()) return;
         if (++syncTickCounter < SYNC_TICK_RATE) return;
         syncTickCounter = 0;
-        flushLoadedBankToDisk();
+        snapshotStore.flushLoadedBankToDisk();
         handleSyncTick();
     }
 
@@ -246,7 +228,7 @@ public class ChestTrackerModule extends Module {
 
         WButton openFolder = list.add(theme.button("Open Data Folder")).expandX().widget();
         openFolder.action = () -> {
-            Path path = storageDir();
+            Path path = snapshotStore.storageDir();
             Util.getOperatingSystem().open(path.toUri().toString());
         };
 
@@ -255,10 +237,7 @@ public class ChestTrackerModule extends Module {
 
     private void openTrackerGui() {
         try {
-            Class<?> chestTracker = Class.forName(CHEST_TRACKER_CLASS);
-            Method openInGame = chestTracker.getMethod("openInGame", MinecraftClient.class, Screen.class);
-            MinecraftClient mc = MinecraftClient.getInstance();
-            openInGame.invoke(null, mc, mc.currentScreen);
+            screenLauncher.openTrackerGui();
         } catch (Throwable t) {
             error("Failed to open ChestTracker GUI: " + t.getClass().getSimpleName());
             AddonTemplate.LOG.error("[Devils/ChestTracker] open GUI failed.", t);
@@ -267,154 +246,17 @@ public class ChestTrackerModule extends Module {
 
     private void openTrackerConfig() {
         try {
-            Class<?> builder = Class.forName(CONFIG_SCREEN_BUILDER_CLASS);
-            Method build = builder.getMethod("build", Screen.class);
-            MinecraftClient mc = MinecraftClient.getInstance();
-            Object built = build.invoke(null, mc.currentScreen);
-            if (built instanceof Screen screen) mc.setScreen(screen);
+            screenLauncher.openTrackerConfig();
         } catch (Throwable t) {
             error("Failed to open ChestTracker config: " + t.getClass().getSimpleName());
             AddonTemplate.LOG.error("[Devils/ChestTracker] open config failed.", t);
         }
     }
 
-    private void applySettings(boolean save) {
-        setRuntimeEnabled(isActive());
-        applyRuntimeTheme();
-        applyConfigState(save);
-    }
-
     private void onModuleSettingChanged(boolean applyChestTrackerConfig) {
-        if (loadingLocalModuleSettings) return;
-        if (applyChestTrackerConfig) applySettings(false);
-        saveLocalModuleSettings();
-    }
-
-    private Path localModuleSettingsPath() {
-        return storageDir().resolve(LOCAL_MODULE_SETTINGS_FILE);
-    }
-
-    private void loadLocalModuleSettings() {
-        Path path = localModuleSettingsPath();
-        if (!Files.isRegularFile(path)) return;
-
-        loadingLocalModuleSettings = true;
-        try {
-            JsonObject json = parseJsonObject(Files.readString(path, StandardCharsets.UTF_8));
-            if (json == null) return;
-
-            inventoryButton.set(readBoolean(json, "inventoryButton", inventoryButton.get()));
-            devilsTheme.set(readBoolean(json, "devilsTheme", devilsTheme.get()));
-
-            int r = readInt(json, "accentR", accentColor.get().r);
-            int g = readInt(json, "accentG", accentColor.get().g);
-            int b = readInt(json, "accentB", accentColor.get().b);
-            int a = readInt(json, "accentA", accentColor.get().a);
-            if (isLegacyAccentDefault(r, g, b, a)) {
-                r = DEVILS_THEME_ACCENT_R;
-                g = DEVILS_THEME_ACCENT_G;
-                b = DEVILS_THEME_ACCENT_B;
-                a = DEVILS_THEME_ACCENT_A;
-            }
-            accentColor.set(new SettingColor(clampColor(r), clampColor(g), clampColor(b), clampColor(a)));
-
-            overlayAlpha.set(clampColor(readInt(json, "overlayAlpha", overlayAlpha.get())));
-            asyncSaving.set(readBoolean(json, "asyncSaving", asyncSaving.get()));
-            syncVerbose.set(readBoolean(json, "syncVerbose", syncVerbose.get()));
-        } catch (Throwable t) {
-            AddonTemplate.LOG.warn("[Devils/ChestTracker] Failed to load local module settings from {}", path, t);
-        } finally {
-            loadingLocalModuleSettings = false;
-        }
-    }
-
-    private void saveLocalModuleSettings() {
-        if (loadingLocalModuleSettings) return;
-
-        try {
-            JsonObject json = new JsonObject();
-            json.addProperty("version", 1);
-            json.addProperty("inventoryButton", inventoryButton.get());
-            json.addProperty("devilsTheme", devilsTheme.get());
-            json.addProperty("accentR", accentColor.get().r);
-            json.addProperty("accentG", accentColor.get().g);
-            json.addProperty("accentB", accentColor.get().b);
-            json.addProperty("accentA", accentColor.get().a);
-            json.addProperty("overlayAlpha", overlayAlpha.get());
-            json.addProperty("asyncSaving", asyncSaving.get());
-            json.addProperty("syncVerbose", syncVerbose.get());
-
-            writeAtomically(localModuleSettingsPath(), json.toString().getBytes(StandardCharsets.UTF_8));
-        } catch (Throwable t) {
-            AddonTemplate.LOG.warn("[Devils/ChestTracker] Failed to save local module settings.", t);
-        }
-    }
-
-    private boolean isLegacyAccentDefault(int r, int g, int b, int a) {
-        return r == 142 && g == 16 && b == 33 && a == 255;
-    }
-
-    private void setRuntimeEnabled(boolean enabled) {
-        try {
-            Class<?> runtime = Class.forName(RUNTIME_STATE_CLASS);
-            Method setEnabled = runtime.getMethod("setModuleEnabled", boolean.class);
-            setEnabled.invoke(null, enabled);
-        } catch (Throwable t) {
-            AddonTemplate.LOG.debug("[Devils/ChestTracker] Runtime bridge unavailable for moduleEnabled.", t);
-        }
-    }
-
-    private void applyRuntimeTheme() {
-        try {
-            Class<?> runtime = Class.forName(RUNTIME_STATE_CLASS);
-            runtime.getMethod("setDevilsThemeEnabled", boolean.class).invoke(null, devilsTheme.get());
-            runtime.getMethod("setDevilsAccentColor", int.class).invoke(null, rgb(accentColor.get()));
-            runtime.getMethod("setDevilsOverlayAlpha", int.class).invoke(null, overlayAlpha.get());
-        } catch (Throwable t) {
-            AddonTemplate.LOG.debug("[Devils/ChestTracker] Runtime bridge unavailable for theme settings.", t);
-        }
-    }
-
-    private void applyConfigState(boolean save) {
-        try {
-            Object handler = getConfigHandler();
-            if (handler == null) return;
-
-            Object config = handler.getClass().getMethod("instance").invoke(handler);
-            Object gui = getField(config, "gui");
-            Object storage = getField(config, "storage");
-
-            setBoolean(gui, "inventoryButton", "enabled", inventoryButton.get() && isActive());
-            setBoolean(gui, "devilsTheme", devilsTheme.get());
-            setInt(gui, "devilsAccentColor", rgb(accentColor.get()));
-            setInt(gui, "devilsOverlayAlpha", overlayAlpha.get());
-
-            setBoolean(storage, "AsyncSaving", asyncSaving.get());
-            setBoolean(storage, "entityMemories", false);
-            setBoolean(storage, "readableJsonMemories", false);
-
-            Class<?> backendTypeClass = Class.forName(BACKEND_TYPE_CLASS);
-            @SuppressWarnings({"unchecked", "rawtypes"})
-            Object backendType = Enum.valueOf((Class<? extends Enum>) backendTypeClass, "NBT");
-            Field backendField = storage.getClass().getField("storageBackend");
-            backendField.set(storage, backendType);
-
-            Method validate = config.getClass().getMethod("validate");
-            validate.invoke(config);
-
-            if (save) handler.getClass().getMethod("save").invoke(handler);
-        } catch (Throwable t) {
-            AddonTemplate.LOG.debug("[Devils/ChestTracker] Config bridge unavailable.", t);
-        }
-    }
-
-    private void saveChestTrackerConfig() {
-        try {
-            Object handler = getConfigHandler();
-            if (handler != null) handler.getClass().getMethod("save").invoke(handler);
-        } catch (Throwable t) {
-            AddonTemplate.LOG.debug("[Devils/ChestTracker] Failed to save ChestTracker config.", t);
-        }
+        if (settingsManager.isLoading()) return;
+        if (applyChestTrackerConfig) settingsManager.applySettings(false);
+        settingsManager.saveLocalSettings(snapshotStore.storageDir());
     }
 
     private void handleSyncTick() {
@@ -427,13 +269,13 @@ public class ChestTrackerModule extends Module {
         String serverKey = currentServerKey();
         if (serverKey.isBlank()) return;
 
-        String normalizedServer = normalizeServer(serverKey);
-        String bankId = resolveSyncBankId(normalizedServer);
+        String normalizedServer = snapshotStore.normalizeServer(serverKey);
+        String bankId = snapshotStore.resolveSyncBankId(normalizedServer);
         if (bankId.isBlank()) return;
-        String namespace = SYNC_MODULE + ":" + namespaceKey(normalizedServer);
+        String namespace = SYNC_MODULE + ":" + snapshotStore.namespaceKey(normalizedServer);
 
         if (!namespace.equals(activeNamespace) || !bankId.equals(activeBankId)) {
-            stopStream();
+            streamController.stop();
             activeNamespace = namespace;
             activeBankId = bankId;
             lastKnownRevision = -1;
@@ -442,30 +284,29 @@ public class ChestTrackerModule extends Module {
             lastPullAttemptMs = 0;
         }
 
-        if (cfg.useStream()) ensureStream(baseUrl, cfg, namespace);
-        else stopStream();
+        if (cfg.useStream()) streamController.ensureStream(baseUrl, cfg, namespace, lastKnownRevision);
+        else streamController.stop();
 
-        Snapshot local = readLocalSnapshot(bankId, normalizedServer);
-        String localFp = fingerprint(local);
-        boolean localChanged = !localFp.equals(lastFingerprint);
-        boolean streamPull = consumeStreamSignal();
-        // Stream mode must be event-driven: no periodic pull polling while stream sync is enabled.
+        Snapshot local = snapshotStore.readLocalSnapshot(bankId, normalizedServer);
+        String localFingerprint = snapshotStore.fingerprint(local);
+        boolean localChanged = !localFingerprint.equals(lastFingerprint);
+        boolean streamTriggeredPull = streamController.consumeStreamSignal(lastKnownRevision);
         long now = System.currentTimeMillis();
         boolean periodicPull = !cfg.useStream() && (now - lastPullAttemptMs) >= PULL_FALLBACK_INTERVAL_MS;
         boolean streamFallbackPull = cfg.useStream()
-            && !streamConnected
-            && !streamConnecting
+            && !streamController.isConnected()
+            && !streamController.isConnecting()
             && (now - lastPullAttemptMs) >= STREAM_FALLBACK_PULL_INTERVAL_MS;
-        boolean shouldPull = syncBootstrap || streamPull || periodicPull || streamFallbackPull;
+        boolean shouldPull = syncBootstrap || streamTriggeredPull || periodicPull || streamFallbackPull;
         boolean shouldRun = shouldPull || localChanged;
         if (!shouldRun) return;
 
         syncInFlight = true;
         boolean bootstrapMode = syncBootstrap;
-        lastPullAttemptMs = System.currentTimeMillis();
+        lastPullAttemptMs = now;
         CompletableFuture
-            .supplyAsync(() -> runSyncCycle(baseUrl, cfg, namespace, normalizedServer, bankId, local, localFp, shouldPull, localChanged, bootstrapMode))
-            .exceptionally(e -> new SyncResult(local, localFp, false, "sync-error:" + e.getClass().getSimpleName(), null, false))
+            .supplyAsync(() -> runSyncCycle(baseUrl, cfg, namespace, normalizedServer, bankId, local, localFingerprint, shouldPull, localChanged, bootstrapMode))
+            .exceptionally(e -> new SyncResult(local, localFingerprint, false, "sync-error:" + e.getClass().getSimpleName(), null, false))
             .thenAccept(result -> MinecraftClient.getInstance().execute(() -> finishSyncCycle(bankId, result)));
     }
 
@@ -476,14 +317,14 @@ public class ChestTrackerModule extends Module {
         String serverKey,
         String bankId,
         Snapshot local,
-        String localFp,
+        String localFingerprint,
         boolean shouldPull,
         boolean localChanged,
         boolean bootstrapMode
     ) {
         Snapshot effective = local;
-        String effectiveFp = localFp;
-        boolean localHasData = snapshotHasSyncData(local);
+        String effectiveFingerprint = localFingerprint;
+        boolean localHasData = snapshotStore.snapshotHasSyncData(local);
         boolean remoteApplied = false;
         String error = null;
         SyncPush push = null;
@@ -491,16 +332,21 @@ public class ChestTrackerModule extends Module {
         long pushBaseRevision = lastKnownRevision;
 
         if (shouldPull) {
-            SyncPull pull = pull(baseUrl, cfg, namespace);
-            if (!pull.ok) return new SyncResult(local, localFp, false, "pull:" + pull.error, null, false);
-            if (pull.revision >= 0) pushBaseRevision = pull.revision;
-            Snapshot remote = selectRemoteSnapshot(pull.rows, bankId, serverKey);
+            SyncPull pull = syncApi.pull(baseUrl, cfg, namespace, lastKnownRevision);
+            if (!pull.ok()) return new SyncResult(local, localFingerprint, false, "pull:" + pull.error(), null, false);
+            if (pull.revision() >= 0) {
+                pushBaseRevision = pull.revision();
+                lastKnownRevision = Math.max(lastKnownRevision, pull.revision());
+            }
+            Snapshot remote = snapshotStore.selectRemoteSnapshot(pull.rows(), bankId, serverKey);
             if (remote != null) {
-                String remoteFp = fingerprint(remote);
-                boolean remoteHasData = snapshotHasSyncData(remote);
-                if (!remoteFp.equals(localFp) && shouldApplyRemote(local, remote, localHasData, remoteHasData) && writeSnapshot(remote)) {
+                String remoteFingerprint = snapshotStore.fingerprint(remote);
+                boolean remoteHasData = snapshotStore.snapshotHasSyncData(remote);
+                if (!remoteFingerprint.equals(localFingerprint)
+                    && snapshotStore.shouldApplyRemote(local, remote, localHasData, remoteHasData)
+                    && snapshotStore.writeSnapshot(remote)) {
                     effective = remote;
-                    effectiveFp = remoteFp;
+                    effectiveFingerprint = remoteFingerprint;
                     localHasData = remoteHasData;
                     remoteApplied = true;
                 }
@@ -509,213 +355,51 @@ public class ChestTrackerModule extends Module {
 
         if (!remoteApplied && localChanged) {
             if (bootstrapMode && !localHasData) {
-                // Protect remote state: on relog bootstrap local bank can be recreated empty before real data is pulled.
                 skipBootstrapEmptyPush = true;
             } else {
-                push = push(baseUrl, cfg, namespace, pushBaseRevision, toRows(local));
-                if (!push.ok) error = "push:" + push.error;
+                push = syncApi.push(baseUrl, cfg, namespace, pushBaseRevision, snapshotStore.toRows(local));
+                if (!push.ok()) error = "push:" + push.error();
             }
         }
 
-        return new SyncResult(effective, effectiveFp, remoteApplied, error, push, skipBootstrapEmptyPush);
+        return new SyncResult(effective, effectiveFingerprint, remoteApplied, error, push, skipBootstrapEmptyPush);
     }
 
     private void finishSyncCycle(String bankId, SyncResult result) {
         syncInFlight = false;
         if (result == null) return;
-        if (result.error != null) {
-            if (syncVerbose.get()) info("ChestTracker sync %s", result.error);
+        if (result.error() != null) {
+            if (syncVerbose.get()) info("ChestTracker sync %s", result.error());
             return;
         }
 
-        if (result.remoteApplied) {
-            lastFingerprint = result.fingerprint;
+        if (result.remoteApplied()) {
+            lastFingerprint = result.fingerprint();
             syncBootstrap = false;
-            reloadLoadedBankFromDisk(bankId);
+            snapshotStore.reloadLoadedBankFromDisk(bankId);
             if (syncVerbose.get()) info("ChestTracker sync pull applied (rev=%d).", lastKnownRevision);
             return;
         }
 
-        if (result.skipBootstrapEmptyPush) {
-            lastFingerprint = result.fingerprint;
+        if (result.skipBootstrapEmptyPush()) {
+            lastFingerprint = result.fingerprint();
             syncBootstrap = false;
             if (syncVerbose.get()) info("ChestTracker sync guarded bootstrap-empty state (push skipped).");
             return;
         }
 
-        if (result.push != null && result.push.ok && result.push.applied) {
-            if (result.push.revision >= 0) lastKnownRevision = Math.max(lastKnownRevision, result.push.revision);
-            lastFingerprint = result.fingerprint;
+        if (result.push() != null && result.push().ok() && result.push().applied()) {
+            if (result.push().revision() >= 0) lastKnownRevision = Math.max(lastKnownRevision, result.push().revision());
+            lastFingerprint = result.fingerprint();
             syncBootstrap = false;
             if (syncVerbose.get()) info("ChestTracker sync push ok (rev=%d).", lastKnownRevision);
             return;
         }
 
-        if (result.push != null && result.push.ok && !result.push.applied) {
-            // A concurrent writer advanced the revision: force an early pull on next tick.
+        if (result.push() != null && result.push().ok() && !result.push().applied()) {
             syncBootstrap = true;
-            if (syncVerbose.get()) info("ChestTracker sync push conflict (%s). Pulling remote...", result.push.error);
+            if (syncVerbose.get()) info("ChestTracker sync push conflict (%s). Pulling remote...", result.push().error());
         }
-    }
-
-    private SyncPull pull(String baseUrl, SyncRuntimeConfig cfg, String namespace) {
-        try {
-            JsonObject payload = new JsonObject();
-            payload.addProperty("deviceId", cfg.deviceId());
-            payload.addProperty("knownRevision", lastKnownRevision);
-            payload.addProperty("module", SYNC_MODULE);
-            payload.addProperty("namespace", namespace);
-            HttpResponse<String> response = http.send(buildRequest(baseUrl + SYNC_PULL_PATH, cfg, payload.toString()), HttpResponse.BodyHandlers.ofString());
-            return parsePull(response, cfg.encryptionKey());
-        } catch (Throwable t) {
-            return new SyncPull(false, -1, List.of(), t.getClass().getSimpleName());
-        }
-    }
-
-    private SyncPush push(String baseUrl, SyncRuntimeConfig cfg, String namespace, long baseRevision, List<Row> rows) {
-        try {
-            JsonObject payload = new JsonObject();
-            payload.addProperty("deviceId", cfg.deviceId());
-            payload.addProperty("baseRevision", baseRevision);
-            payload.addProperty("module", SYNC_MODULE);
-            payload.addProperty("namespace", namespace);
-            payload.add("profiles", SyncCrypto.encryptProfiles(toJsonArray(rows), cfg.encryptionKey(), SYNC_MODULE));
-            HttpResponse<String> response = http.send(buildRequest(baseUrl + SYNC_PUSH_PATH, cfg, payload.toString()), HttpResponse.BodyHandlers.ofString());
-            return parsePush(response);
-        } catch (Throwable t) {
-            return new SyncPush(false, false, -1, t.getClass().getSimpleName());
-        }
-    }
-
-    private void ensureStream(String baseUrl, SyncRuntimeConfig cfg, String namespace) {
-        long now = System.currentTimeMillis();
-        if (streamUnsupported && streamUnsupportedUntilMs > now) return;
-        if (streamUnsupported && streamUnsupportedUntilMs <= now) {
-            streamUnsupported = false;
-            streamUnsupportedUntilMs = 0;
-        }
-
-        String key = baseUrl
-            + "|"
-            + namespace
-            + "|"
-            + cfg.deviceId()
-            + "|"
-            + cfg.timeoutSec()
-            + "|"
-            + cfg.streamWaitMs()
-            + "|"
-            + (streamUseLegacyPath ? "legacy" : "v1")
-            + "|"
-            + Integer.toHexString(cfg.signingKey().hashCode());
-        if ((streamConnected || streamConnecting) && !key.equals(streamConnectionKey)) stopStream();
-        if (streamConnected || streamConnecting || streamReconnectAtMs > System.currentTimeMillis()) return;
-        streamStop = false;
-        streamConnecting = true;
-        streamConnectionKey = key;
-        streamFuture = CompletableFuture.runAsync(() -> runStream(baseUrl, cfg, namespace));
-    }
-
-    private void runStream(String baseUrl, SyncRuntimeConfig cfg, String namespace) {
-        String error = null;
-        try {
-            String streamPath = streamUseLegacyPath ? SYNC_STREAM_PATH_LEGACY : SYNC_STREAM_PATH;
-            URI uri = URI.create(baseUrl + streamPath
-                + "?deviceId=" + encode(cfg.deviceId())
-                + "&module=" + encode(SYNC_MODULE)
-                + "&namespace=" + encode(namespace)
-                + "&knownRevision=" + lastKnownRevision
-                + "&waitMs=" + Math.max(1_000, cfg.streamWaitMs()));
-
-            HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofSeconds(Math.max(10, cfg.timeoutSec() + 25)))
-                .header("Accept", "text/event-stream")
-                .GET();
-            if (!cfg.token().isBlank()) builder.header("Authorization", "Bearer " + cfg.token().trim());
-            SyncRequestSigner.applySignedHeaders(builder, uri, "GET", "", cfg.signingKey());
-
-            HttpResponse<InputStream> response = http.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                String errorBody = "";
-                try (InputStream input = response.body()) {
-                    if (input != null) errorBody = new String(input.readNBytes(512), StandardCharsets.UTF_8);
-                }
-                if (response.statusCode() == 404 && !streamUseLegacyPath) {
-                    streamUseLegacyPath = true;
-                    throw new IllegalStateException("stream-404-switching-to-legacy");
-                }
-                if (response.statusCode() == 404 && streamUseLegacyPath) {
-                    streamUnsupported = true;
-                    streamUnsupportedUntilMs = System.currentTimeMillis() + STREAM_UNSUPPORTED_BACKOFF_MS;
-                    throw new IllegalStateException("stream-unsupported:http-404");
-                }
-                throw new IllegalStateException(parseHttpError(response.statusCode(), errorBody));
-            }
-
-            MinecraftClient.getInstance().execute(() -> {
-                streamConnecting = false;
-                streamConnected = true;
-            });
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-                String line;
-                StringBuilder data = new StringBuilder();
-                while (!streamStop && (line = reader.readLine()) != null) {
-                    if (line.startsWith("data:")) {
-                        if (data.length() > 0) data.append('\n');
-                        data.append(line.substring(5).stripLeading());
-                        continue;
-                    }
-
-                    if (line.isBlank() && data.length() > 0) {
-                        JsonObject json = parseJsonObject(data.toString());
-                        long revision = readLong(json, "revision", -1);
-                        if (revision > lastKnownRevision) {
-                            streamPendingRevision = revision;
-                            streamUpdatePending = true;
-                        }
-                        data.setLength(0);
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            if (!streamStop) error = t.getClass().getSimpleName() + ":" + (t.getMessage() == null ? "" : t.getMessage());
-        } finally {
-            String finalError = error;
-            MinecraftClient.getInstance().execute(() -> {
-                streamConnected = false;
-                streamConnecting = false;
-                streamFuture = null;
-                if (!streamStop) {
-                    if (streamUnsupported && streamUnsupportedUntilMs > System.currentTimeMillis()) {
-                        streamReconnectAtMs = streamUnsupportedUntilMs;
-                    } else {
-                        streamReconnectAtMs = System.currentTimeMillis() + RECONNECT_MS;
-                    }
-                    if (syncVerbose.get() && finalError != null) info("ChestTracker stream disconnected: %s", finalError);
-                }
-            });
-        }
-    }
-
-    private boolean consumeStreamSignal() {
-        if (!streamUpdatePending) return false;
-        streamUpdatePending = false;
-        return streamPendingRevision > lastKnownRevision;
-    }
-
-    private void stopStream() {
-        streamStop = true;
-        streamConnected = false;
-        streamConnecting = false;
-        streamUpdatePending = false;
-        streamPendingRevision = -1;
-        streamReconnectAtMs = 0;
-        streamConnectionKey = "";
-
-        CompletableFuture<Void> future = streamFuture;
-        streamFuture = null;
-        if (future != null) future.cancel(true);
     }
 
     private SyncRuntimeConfig resolveSyncConfig() {
@@ -750,216 +434,6 @@ public class ChestTrackerModule extends Module {
         return mc.getCurrentServerEntry().address.trim();
     }
 
-    private Path storageDir() {
-        return FabricLoader.getInstance().getGameDir().resolve("devils-addon").resolve("chesttracker");
-    }
-
-    private Snapshot readLocalSnapshot(String bankId, String serverKey) {
-        try {
-            Path nbt = storageDir().resolve(bankId + ".nbt");
-            if (!Files.isRegularFile(nbt)) return null;
-
-            byte[] nbtBytes = Files.readAllBytes(nbt);
-            byte[] syncSafeNbtBytes = stripPrivateEnderChestMemories(nbtBytes);
-            long updated = lastModified(nbt);
-
-            // Sync payload intentionally carries only real memory data (NBT).
-            // Metadata contains ticking fields (loadedTime/lastModified) and would cause constant false diffs.
-            return new Snapshot(bankId, serverKey, updated, zipBase64(syncSafeNbtBytes), "");
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private boolean writeSnapshot(Snapshot snapshot) {
-        if (snapshot == null) return false;
-        try {
-            byte[] nbtBytes = unzipBase64(snapshot.nbt);
-            if (nbtBytes.length == 0) return false;
-            byte[] normalized = normalizeCompressedMemoryBankNbt(nbtBytes);
-            if (normalized.length == 0) return false;
-            writeAtomically(storageDir().resolve(snapshot.bankId + ".nbt"), normalized);
-            return true;
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private Snapshot selectRemoteSnapshot(List<Row> rows, String bankId, String serverKey) {
-        if (rows == null || rows.isEmpty()) return null;
-        Snapshot newest = null;
-
-        for (Row row : rows) {
-            if (!row.enabled || !normalizeServer(row.server).equals(normalizeServer(serverKey))) continue;
-            JsonObject payload = parseJsonObject(row.payload);
-            if (payload == null) continue;
-            if (!SNAPSHOT_SCHEMA.equals(readString(payload, "schema", ""))) continue;
-
-            Snapshot snapshot = new Snapshot(
-                bankId,
-                serverKey,
-                Math.max(0, readLong(payload, "updatedAt", 0)),
-                sanitizeSnapshotNbt(readString(payload, "nbt", "")),
-                readString(payload, "meta", "")
-            );
-            if (snapshot.nbt.isBlank()) continue;
-            if (newest == null || snapshot.updatedAt >= newest.updatedAt) newest = snapshot;
-        }
-
-        return newest;
-    }
-
-    private List<Row> toRows(Snapshot snapshot) {
-        if (snapshot == null) return List.of();
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("schema", SNAPSHOT_SCHEMA);
-        payload.addProperty("bankId", snapshot.bankId);
-        payload.addProperty("server", snapshot.serverKey);
-        payload.addProperty("updatedAt", snapshot.updatedAt);
-        payload.addProperty("nbt", snapshot.nbt);
-        if (!snapshot.meta.isBlank()) payload.addProperty("meta", snapshot.meta);
-
-        return List.of(new Row(true, "bank:" + snapshot.bankId, snapshot.serverKey, payload.toString(), 0));
-    }
-
-    private static String fingerprint(Snapshot snapshot) {
-        if (snapshot == null) return "";
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            digest.update(snapshot.bankId.getBytes(StandardCharsets.UTF_8));
-            digest.update((byte) '|');
-            digest.update(snapshot.serverKey.getBytes(StandardCharsets.UTF_8));
-            digest.update((byte) '|');
-            digest.update(stableNbtFingerprintBytes(snapshot.nbt));
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (Throwable ignored) {
-            return Integer.toHexString(snapshot.hashCode());
-        }
-    }
-
-    private static boolean shouldApplyRemote(Snapshot local, Snapshot remote, boolean localHasData, boolean remoteHasData) {
-        if (remote == null) return false;
-        if (!remoteHasData) return false;
-        String localFingerprint = fingerprint(local);
-        String remoteFingerprint = fingerprint(remote);
-        if (localFingerprint.equals(remoteFingerprint)) return false;
-        if (local == null) return true;
-        if (!localHasData) return true;
-        if (remote.updatedAt > 0 && local.updatedAt > 0 && remote.updatedAt + REMOTE_APPLY_SKEW_MS < local.updatedAt) return false;
-        return true;
-    }
-
-    private static boolean snapshotHasSyncData(Snapshot snapshot) {
-        if (snapshot == null || snapshot.nbt == null || snapshot.nbt.isBlank()) return false;
-        try {
-            byte[] raw = unzipBase64(snapshot.nbt);
-            if (raw.length == 0) return false;
-            NbtCompound root = readMemoryBankNbt(raw);
-            if (root == null || root.isEmpty()) return false;
-            removePrivateEnderChestKeys(root);
-            return hasNestedNbtData(root);
-        } catch (Throwable ignored) {
-            // If payload cannot be parsed, treat it as meaningful to avoid destructive assumptions.
-            return true;
-        }
-    }
-
-    private static boolean hasNestedNbtData(NbtElement element) {
-        if (element == null) return false;
-        if (element instanceof NbtCompound compound) {
-            for (String key : compound.getKeys()) {
-                if (hasNestedNbtData(compound.get(key))) return true;
-            }
-            return false;
-        }
-        if (element instanceof NbtList list) {
-            for (int i = 0; i < list.size(); i++) {
-                if (hasNestedNbtData(list.get(i))) return true;
-            }
-            return false;
-        }
-        return true;
-    }
-
-    private SyncPull parsePull(HttpResponse<String> response, String encryptionKey) {
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            return new SyncPull(false, -1, List.of(), "http-" + response.statusCode());
-        }
-
-        JsonObject json = parseJsonObject(response.body());
-        if (json == null) return new SyncPull(false, -1, List.of(), "bad-json");
-
-        boolean ok = readBoolean(json, "ok", true);
-        long revision = readLong(json, "revision", -1);
-        if (revision >= 0) lastKnownRevision = Math.max(lastKnownRevision, revision);
-        try {
-            return new SyncPull(ok, revision, readRows(json, encryptionKey), readString(json, "error", ""));
-        } catch (Exception decryptError) {
-            return new SyncPull(false, revision, List.of(), "decrypt:" + decryptError.getClass().getSimpleName());
-        }
-    }
-
-    private SyncPush parsePush(HttpResponse<String> response) {
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            return new SyncPush(false, false, -1, "http-" + response.statusCode());
-        }
-
-        JsonObject json = parseJsonObject(response.body());
-        if (json == null) return new SyncPush(false, false, -1, "bad-json");
-
-        boolean ok = readBoolean(json, "ok", true);
-        boolean applied = readBoolean(json, "applied", ok);
-        long revision = readLong(json, "revision", -1);
-        return new SyncPush(ok, applied, revision, readString(json, "error", ""));
-    }
-
-    private List<Row> readRows(JsonObject json, String encryptionKey) throws Exception {
-        JsonArray array = readArray(json, "profiles");
-        if (array == null) return List.of();
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, SYNC_MODULE);
-
-        ArrayList<Row> rows = new ArrayList<>();
-        for (int i = 0; i < array.size(); i++) {
-            if (!array.get(i).isJsonObject()) continue;
-            JsonObject profile = array.get(i).getAsJsonObject();
-            rows.add(new Row(
-                readBoolean(profile, "enabled", true),
-                readString(profile, "username", ""),
-                readString(profile, "server", ""),
-                readString(profile, "password", ""),
-                readInt(profile, "delay", 0)
-            ));
-        }
-        return rows;
-    }
-
-    private JsonArray toJsonArray(List<Row> rows) {
-        JsonArray array = new JsonArray();
-        for (Row row : rows) {
-            JsonObject profile = new JsonObject();
-            profile.addProperty("enabled", row.enabled);
-            profile.addProperty("username", row.username);
-            profile.addProperty("server", row.server);
-            profile.addProperty("mode", "LOGIN");
-            profile.addProperty("password", row.payload);
-            profile.addProperty("delay", row.delay);
-            array.add(profile);
-        }
-        return array;
-    }
-
-    private HttpRequest buildRequest(String url, SyncRuntimeConfig cfg, String body) {
-        URI uri = URI.create(url);
-        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
-            .timeout(Duration.ofSeconds(Math.max(3, cfg.timeoutSec())))
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json");
-        if (!cfg.token().isBlank()) builder.header("Authorization", "Bearer " + cfg.token().trim());
-        SyncRequestSigner.applySignedHeaders(builder, uri, "POST", body, cfg.signingKey());
-        return builder.POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
-    }
-
     private void resetSyncState() {
         syncTickCounter = 0;
         syncBootstrap = true;
@@ -969,10 +443,7 @@ public class ChestTrackerModule extends Module {
         lastFingerprint = "";
         activeNamespace = "";
         activeBankId = "";
-        streamUseLegacyPath = false;
-        streamUnsupported = false;
-        streamUnsupportedUntilMs = 0;
-        stopStream();
+        streamController.reset();
     }
 
     private static String normalizeBaseUrl(String url) {
@@ -981,523 +452,6 @@ public class ChestTrackerModule extends Module {
         while (base.endsWith("/")) base = base.substring(0, base.length() - 1);
         return base;
     }
-
-    private static String normalizeServer(String value) {
-        if (value == null) return "";
-        String out = value.trim().toLowerCase(Locale.ROOT);
-        while (out.endsWith(".")) out = out.substring(0, out.length() - 1);
-        if (out.isBlank()) return "";
-
-        // Normalize default Minecraft port so "host" and "host:25565" share one sync namespace.
-        if (out.startsWith("[")) {
-            int end = out.indexOf(']');
-            if (end > 0 && out.length() > end + 2 && out.charAt(end + 1) == ':') {
-                String port = out.substring(end + 2).trim();
-                if ("25565".equals(port)) out = out.substring(0, end + 1);
-            }
-            return out;
-        }
-
-        int firstColon = out.indexOf(':');
-        int lastColon = out.lastIndexOf(':');
-        if (firstColon > 0 && firstColon == lastColon && lastColon + 1 < out.length()) {
-            String port = out.substring(lastColon + 1).trim();
-            boolean numericPort = !port.isEmpty() && port.chars().allMatch(Character::isDigit);
-            if (numericPort && "25565".equals(port)) out = out.substring(0, lastColon);
-        }
-        return out;
-    }
-
-    private static String namespaceKey(String value) {
-        String out = normalizeServer(value).replaceAll("[^a-z0-9._-]+", "_");
-        return out.isBlank() ? "unknown" : out;
-    }
-
-    private String bankIdForServer(String server) {
-        String source = namespaceKey(server);
-        try {
-            Class<?> stringsClass = Class.forName(STRINGS_CLASS);
-            Method sanitize = stringsClass.getMethod("sanitizeForPath", String.class);
-            Object sanitized = sanitize.invoke(null, source);
-            if (sanitized instanceof String value && !value.isBlank()) source = value;
-        } catch (Throwable ignored) {
-        }
-        return "multiplayer/" + source;
-    }
-
-    private String legacyBankIdForServer(String server) {
-        String source = namespaceKey(server);
-        try {
-            Class<?> stringsClass = Class.forName(STRINGS_CLASS);
-            Method sanitize = stringsClass.getMethod("sanitizeForPath", String.class);
-            Object sanitized = sanitize.invoke(null, source);
-            if (sanitized instanceof String value && !value.isBlank()) source = value;
-        } catch (Throwable ignored) {
-        }
-        return "server-" + source;
-    }
-
-    private String resolveSyncBankId(String normalizedServer) {
-        String loaded = getLoadedBankId();
-        if (!loaded.isBlank()) return loaded;
-
-        String canonical = bankIdForServer(normalizedServer);
-        if (bankFilesExist(canonical)) return canonical;
-
-        String portVariant = portVariantBankIdForServer(normalizedServer);
-        if (!portVariant.isBlank() && bankFilesExist(portVariant)) return portVariant;
-
-        String legacy = legacyBankIdForServer(normalizedServer);
-        if (bankFilesExist(legacy)) return legacy;
-
-        // Wait for provider-driven bank selection/load instead of guessing a new empty file ID.
-        return "";
-    }
-
-    private String portVariantBankIdForServer(String server) {
-        if (server == null || server.isBlank()) return "";
-
-        String base = server.trim().toLowerCase(Locale.ROOT);
-        while (base.endsWith(".")) base = base.substring(0, base.length() - 1);
-        if (base.isBlank()) return "";
-
-        String withPort;
-        if (base.startsWith("[")) {
-            if (!base.endsWith("]")) return "";
-            withPort = base + ":25565";
-        } else if (base.indexOf(':') >= 0) {
-            return "";
-        } else {
-            withPort = base + ":25565";
-        }
-
-        String source = withPort.replaceAll("[^a-z0-9._-]+", "_");
-        try {
-            Class<?> stringsClass = Class.forName(STRINGS_CLASS);
-            Method sanitize = stringsClass.getMethod("sanitizeForPath", String.class);
-            Object sanitized = sanitize.invoke(null, source);
-            if (sanitized instanceof String value && !value.isBlank()) source = value;
-        } catch (Throwable ignored) {
-        }
-        return "multiplayer/" + source;
-    }
-
-    private String getLoadedBankId() {
-        try {
-            Class<?> accessClass = Class.forName(MEMORY_ACCESS_CLASS);
-            Object instance = accessClass.getField("INSTANCE").get(null);
-            Object optional = accessClass.getMethod("getLoadedInternal").invoke(instance);
-            if (!(optional instanceof Optional<?> loadedOpt) || loadedOpt.isEmpty()) return "";
-            Object loaded = loadedOpt.get();
-            Object idObj = loaded.getClass().getMethod("getId").invoke(loaded);
-            return idObj instanceof String id ? id : "";
-        } catch (Throwable ignored) {
-            return "";
-        }
-    }
-
-    private boolean bankFilesExist(String id) {
-        if (id == null || id.isBlank()) return false;
-        Path root = storageDir();
-        return Files.isRegularFile(root.resolve(id + ".nbt"))
-            || Files.isRegularFile(root.resolve(id + ".nbt.meta"))
-            || Files.isRegularFile(root.resolve(id + ".json"))
-            || Files.isRegularFile(root.resolve(id + ".json.meta"));
-    }
-
-    private static void writeAtomically(Path path, byte[] data) throws Exception {
-        if (path.getParent() != null) Files.createDirectories(path.getParent());
-        if (data == null || data.length == 0) {
-            Files.deleteIfExists(path);
-            return;
-        }
-
-        Path tmp = path.resolveSibling(path.getFileName() + ".sync.tmp");
-        Files.write(tmp, data);
-        try {
-            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (AtomicMoveNotSupportedException ignored) {
-            Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING);
-        }
-    }
-
-    private static long lastModified(Path path) {
-        try {
-            return Files.isRegularFile(path) ? Files.getLastModifiedTime(path).toMillis() : 0;
-        } catch (Throwable ignored) {
-            return 0;
-        }
-    }
-
-    private static String zipBase64(byte[] bytes) throws Exception {
-        if (bytes == null || bytes.length == 0) return "";
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
-            gzip.write(bytes);
-        }
-        return Base64.getEncoder().encodeToString(out.toByteArray());
-    }
-
-    private static byte[] unzipBase64(String value) throws Exception {
-        if (value == null || value.isBlank()) return new byte[0];
-        byte[] compressed = Base64.getDecoder().decode(value);
-        try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
-            return gzip.readAllBytes();
-        }
-    }
-
-    private static String sanitizeSnapshotNbt(String base64GzipNbt) {
-        if (base64GzipNbt == null || base64GzipNbt.isBlank()) return "";
-        try {
-            byte[] decoded = unzipBase64(base64GzipNbt);
-            byte[] sanitized = stripPrivateEnderChestMemories(decoded);
-            return zipBase64(sanitized);
-        } catch (Throwable ignored) {
-            return base64GzipNbt;
-        }
-    }
-
-    private static byte[] stableNbtFingerprintBytes(String base64GzipNbt) {
-        if (base64GzipNbt == null || base64GzipNbt.isBlank()) return new byte[0];
-        try {
-            byte[] raw = unzipBase64(base64GzipNbt);
-            NbtCompound root = readMemoryBankNbt(raw);
-            if (root == null) return raw;
-
-            // Keep fingerprint stable by removing private ender data and serializing without gzip headers.
-            removePrivateEnderChestKeys(root);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            try (DataOutputStream dataOut = new DataOutputStream(out)) {
-                NbtIo.writeCompound(root, dataOut);
-            }
-            return out.toByteArray();
-        } catch (Throwable ignored) {
-            try {
-                return unzipBase64(base64GzipNbt);
-            } catch (Throwable ignoredAgain) {
-                return base64GzipNbt.getBytes(StandardCharsets.UTF_8);
-            }
-        }
-    }
-
-    private static byte[] stripPrivateEnderChestMemories(byte[] rawNbtBytes) {
-        if (rawNbtBytes == null || rawNbtBytes.length == 0) return new byte[0];
-
-        try {
-            NbtCompound root = readMemoryBankNbt(rawNbtBytes);
-            if (root == null || root.isEmpty()) return rawNbtBytes;
-
-            boolean changed = removePrivateEnderChestKeys(root);
-            if (!changed) return rawNbtBytes;
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            NbtIo.writeCompressed(root, out);
-            return out.toByteArray();
-        } catch (Throwable ignored) {
-            return rawNbtBytes;
-        }
-    }
-
-    private static NbtCompound readMemoryBankNbt(byte[] rawNbtBytes) throws Exception {
-        try (ByteArrayInputStream in = new ByteArrayInputStream(rawNbtBytes)) {
-            return NbtIo.readCompressed(in, NbtSizeTracker.ofUnlimitedBytes());
-        } catch (Throwable compressedReadFailed) {
-            try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(rawNbtBytes))) {
-                return NbtIo.readCompound(in, NbtSizeTracker.ofUnlimitedBytes());
-            }
-        }
-    }
-
-    private static byte[] normalizeCompressedMemoryBankNbt(byte[] rawNbtBytes) {
-        if (rawNbtBytes == null || rawNbtBytes.length == 0) return new byte[0];
-
-        try {
-            NbtCompound root = readMemoryBankNbt(rawNbtBytes);
-            if (root == null) return new byte[0];
-            if (looksLikeLegacySingleKeyRoot(root)) {
-                root = wrapLegacySingleKeyRoot(root);
-            }
-            if (!isLikelyMemoryBankRoot(root)) return new byte[0];
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            NbtIo.writeCompressed(root, out);
-            return out.toByteArray();
-        } catch (Throwable ignored) {
-            return new byte[0];
-        }
-    }
-
-    private static boolean looksLikeLegacySingleKeyRoot(NbtCompound root) {
-        if (root == null || root.isEmpty()) return false;
-        boolean hasMemories = root.contains("memories");
-        boolean hasOverrides = root.contains("overrides");
-        if (!hasMemories && !hasOverrides) return false;
-
-        for (String key : root.getKeys()) {
-            if (isResourceLikeKey(key)) return false;
-        }
-        return true;
-    }
-
-    private static boolean isLikelyMemoryBankRoot(NbtCompound root) {
-        if (root == null) return false;
-        if (root.isEmpty()) return true;
-        boolean hasResourceLikeTopKey = false;
-
-        for (String key : root.getKeys()) {
-            if ("memories".equals(key) || "overrides".equals(key)) return false;
-            if (isResourceLikeKey(key)) hasResourceLikeTopKey = true;
-        }
-        return hasResourceLikeTopKey;
-    }
-
-    private static NbtCompound wrapLegacySingleKeyRoot(NbtCompound legacyRoot) {
-        NbtCompound wrapped = new NbtCompound();
-        wrapped.put(inferLegacySingleMemoryKeyId(legacyRoot), legacyRoot.copy());
-        return wrapped;
-    }
-
-    private static String inferLegacySingleMemoryKeyId(NbtCompound legacyRoot) {
-        final String fallback = "minecraft:chest";
-        if (legacyRoot == null || !legacyRoot.contains("memories")) return fallback;
-
-        Optional<NbtCompound> memoriesOpt = legacyRoot.getCompound("memories");
-        if (memoriesOpt.isEmpty()) return fallback;
-        NbtCompound memories = memoriesOpt.get();
-        if (memories.isEmpty()) return fallback;
-
-        java.util.HashMap<String, Integer> counts = new java.util.HashMap<>();
-        for (String posKey : memories.getKeys()) {
-            NbtElement element = memories.get(posKey);
-            if (!(element instanceof NbtCompound memory)) continue;
-            Optional<String> containerOpt = memory.getString("container");
-            if (containerOpt.isEmpty()) continue;
-            String container = containerOpt.get();
-            if (!isResourceLikeKey(container)) continue;
-            counts.put(container, counts.getOrDefault(container, 0) + 1);
-        }
-
-        String best = fallback;
-        int bestCount = -1;
-        for (java.util.Map.Entry<String, Integer> entry : counts.entrySet()) {
-            if (entry.getValue() > bestCount) {
-                best = entry.getKey();
-                bestCount = entry.getValue();
-            }
-        }
-        return best;
-    }
-
-    private static boolean isResourceLikeKey(String value) {
-        if (value == null || value.isBlank()) return false;
-        int colon = value.indexOf(':');
-        if (colon <= 0 || colon >= value.length() - 1) return false;
-        for (int i = 0; i < value.length(); i++) {
-            if (Character.isWhitespace(value.charAt(i))) return false;
-        }
-        return true;
-    }
-
-    private static boolean removePrivateEnderChestKeys(NbtCompound compound) {
-        boolean changed = false;
-
-        ArrayList<String> keysToRemove = new ArrayList<>();
-        for (String key : compound.getKeys()) {
-            if (isPrivateEnderChestMemoryKey(key)) keysToRemove.add(key);
-        }
-
-        for (String key : keysToRemove) {
-            compound.remove(key);
-            changed = true;
-        }
-
-        for (String key : new ArrayList<>(compound.getKeys())) {
-            NbtElement child = compound.get(key);
-            if (child instanceof NbtCompound childCompound) {
-                if (removePrivateEnderChestKeys(childCompound)) changed = true;
-            } else if (child instanceof NbtList childList) {
-                if (removePrivateEnderChestKeys(childList)) changed = true;
-            }
-        }
-
-        return changed;
-    }
-
-    private static boolean removePrivateEnderChestKeys(NbtList list) {
-        boolean changed = false;
-        for (int i = 0; i < list.size(); i++) {
-            NbtElement child = list.get(i);
-            if (child instanceof NbtCompound childCompound) {
-                if (removePrivateEnderChestKeys(childCompound)) changed = true;
-            } else if (child instanceof NbtList childList) {
-                if (removePrivateEnderChestKeys(childList)) changed = true;
-            }
-        }
-        return changed;
-    }
-
-    private static boolean isPrivateEnderChestMemoryKey(String rawKey) {
-        if (rawKey == null || rawKey.isBlank()) return false;
-        String key = rawKey.trim().toLowerCase(Locale.ROOT);
-        return key.equals("ender_chest")
-            || key.endsWith(ENDER_CHEST_SUFFIX)
-            || key.endsWith(SKYBLOCK_ENDER_CHEST_SUFFIX)
-            || key.startsWith(SHARE_ENDER_CHEST_NAMESPACE);
-    }
-
-    private static String encode(String value) {
-        return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
-    }
-
-    private void flushLoadedBankToDisk() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.world == null || client.player == null) return;
-
-        try {
-            if (client.world.getRegistryManager().getOptional(RegistryKeys.ENCHANTMENT).isEmpty()) return;
-        } catch (Throwable ignored) {
-            return;
-        }
-
-        try {
-            Class<?> accessClass = Class.forName(MEMORY_ACCESS_CLASS);
-            Object instance = accessClass.getField("INSTANCE").get(null);
-            accessClass.getMethod("save").invoke(instance);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private void reloadLoadedBankFromDisk(String bankId) {
-        try {
-            Class<?> accessClass = Class.forName(MEMORY_ACCESS_CLASS);
-            Object instance = accessClass.getField("INSTANCE").get(null);
-            Object optional = accessClass.getMethod("getLoadedInternal").invoke(instance);
-            if (!(optional instanceof Optional<?> loadedOpt) || loadedOpt.isEmpty()) return;
-
-            Object loaded = loadedOpt.get();
-            Object loadedId = loaded.getClass().getMethod("getId").invoke(loaded);
-            if (!(loadedId instanceof String id) || !bankId.equals(id)) return;
-
-            Field loadedField = accessClass.getDeclaredField("loaded");
-            loadedField.setAccessible(true);
-            loadedField.set(null, null);
-            accessClass.getMethod("loadOrCreate", String.class, String.class).invoke(instance, bankId, bankId);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private Object getConfigHandler() throws Exception {
-        Class<?> configClass = Class.forName(CONFIG_CLASS);
-        return configClass.getField("INSTANCE").get(null);
-    }
-
-    private static Object getField(Object owner, String fieldName) throws Exception {
-        return owner.getClass().getField(fieldName).get(owner);
-    }
-
-    private static void setBoolean(Object owner, String fieldName, boolean value) throws Exception {
-        Field field = owner.getClass().getField(fieldName);
-        field.setBoolean(owner, value);
-    }
-
-    private static void setInt(Object owner, String fieldName, int value) throws Exception {
-        Field field = owner.getClass().getField(fieldName);
-        field.setInt(owner, value);
-    }
-
-    private static void setBoolean(Object owner, String nestedField, String fieldName, boolean value) throws Exception {
-        Object nested = getField(owner, nestedField);
-        setBoolean(nested, fieldName, value);
-    }
-
-    private static String parseHttpError(int statusCode, String body) {
-        String safeBody = body == null ? "" : body.replaceAll("\\s+", " ").trim();
-        if (safeBody.length() > 120) safeBody = safeBody.substring(0, 120) + "...";
-        if (!safeBody.isBlank()) return "http-" + statusCode + "-" + safeBody;
-        return "http-" + statusCode;
-    }
-
-    private static JsonObject parseJsonObject(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            if (!JsonParser.parseString(raw).isJsonObject()) return null;
-            return JsonParser.parseString(raw).getAsJsonObject();
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static JsonArray readArray(JsonObject json, String key) {
-        if (json == null || key == null || !json.has(key) || !json.get(key).isJsonArray()) return null;
-        return json.getAsJsonArray(key);
-    }
-
-    private static String readString(JsonObject json, String key, String fallback) {
-        if (json == null || key == null || !json.has(key) || json.get(key).isJsonNull()) return fallback;
-        try {
-            return json.get(key).getAsString();
-        } catch (Throwable ignored) {
-            return fallback;
-        }
-    }
-
-    private static int readInt(JsonObject json, String key, int fallback) {
-        if (json == null || key == null || !json.has(key) || json.get(key).isJsonNull()) return fallback;
-        try {
-            return json.get(key).getAsInt();
-        } catch (Throwable ignored) {
-            return fallback;
-        }
-    }
-
-    private static long readLong(JsonObject json, String key, long fallback) {
-        if (json == null || key == null || !json.has(key) || json.get(key).isJsonNull()) return fallback;
-        try {
-            return json.get(key).getAsLong();
-        } catch (Throwable ignored) {
-            return fallback;
-        }
-    }
-
-    private static boolean readBoolean(JsonObject json, String key, boolean fallback) {
-        if (json == null || key == null || !json.has(key) || json.get(key).isJsonNull()) return fallback;
-        try {
-            return json.get(key).getAsBoolean();
-        } catch (Throwable ignored) {
-            return fallback;
-        }
-    }
-
-    private record SyncRuntimeConfig(String baseUrl, String token, String deviceId, boolean useStream, int timeoutSec, int streamWaitMs, String encryptionKey, String signingKey) {
-    }
-
-    private record Snapshot(String bankId, String serverKey, long updatedAt, String nbt, String meta) {
-    }
-
-    private record Row(boolean enabled, String username, String server, String payload, int delay) {
-    }
-
-    private record SyncPull(boolean ok, long revision, List<Row> rows, String error) {
-    }
-
-    private record SyncPush(boolean ok, boolean applied, long revision, String error) {
-    }
-
-    private record SyncResult(
-        Snapshot snapshot,
-        String fingerprint,
-        boolean remoteApplied,
-        String error,
-        SyncPush push,
-        boolean skipBootstrapEmptyPush
-    ) {
-    }
-
-    private static int clampColor(int value) {
-        return Math.max(0, Math.min(255, value));
-    }
-
-    private static int rgb(SettingColor color) {
-        return ((color.r & 0xFF) << 16) | ((color.g & 0xFF) << 8) | (color.b & 0xFF);
-    }
 }
+
+

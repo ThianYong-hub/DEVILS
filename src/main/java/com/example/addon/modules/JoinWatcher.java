@@ -2,9 +2,9 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.audio.JoinSoundPlayer;
-import com.example.addon.settings.TrackEventMode;
 import com.example.addon.settings.TrackerPlayerRule;
 import com.example.addon.settings.TrackerPlayersSetting;
+import com.example.addon.settings.TrackerPlayerRule.TrackEventMode;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
@@ -38,7 +38,7 @@ public class JoinWatcher extends Module {
     private final SettingGroup sgSoundDefaults = settings.createGroup("Sound Defaults");
     private final SettingGroup sgAutomation = settings.createGroup("Automation");
 
-    private final Setting<List<TrackerPlayerRule>> trackerPlayers = sgGeneral.add(new TrackerPlayersSetting.Builder()
+    private final Setting<List<TrackerPlayerRule>> trackerPlayers = sgGeneral.add(new TrackerPlayerRule.SettingBuilder()
         .name("tracker-players")
         .description("Per-player tracking rules: event, sound, send command, and sound source.")
         .build()
@@ -318,3 +318,5 @@ public class JoinWatcher extends Module {
         Death
     }
 }
+
+
