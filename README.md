@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.31`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.31/devils-addon-0.0.31.jar)
+- Current build (`v0.0.32`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32/devils-addon-0.0.32.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -98,7 +98,7 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.31`)
+## Release Notes (`v0.0.32`)
 
 - Added pre-launch log-spam filtering bootstrap to prevent early-init crashes while suppressing repeated font/entity-class warning floods.
 - Fixed pre-launch mixin stability by isolating early logger filter installation from addon bootstrap class loading.
