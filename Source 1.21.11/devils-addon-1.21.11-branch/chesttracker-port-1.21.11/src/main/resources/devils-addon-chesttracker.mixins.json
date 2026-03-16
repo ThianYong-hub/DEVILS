@@ -1,0 +1,32 @@
+{
+  "required": true,
+  "package": "com.example.addon.chesttracker.mixins",
+  "compatibilityLevel": "JAVA_17",
+  "plugin": "com.example.addon.chesttracker.impl.mixinplugin.ChestTrackerMixinPlugin",
+  "client": [
+    "AbstractContainerScreenMixin",
+    "AbstractRecipeBookScreenAccessor",
+    "AbstractWidgetAccessor",
+    "BlockEntityTypeAccessor",
+    "BlockItemMixin",
+    "BlockMixin",
+    "ClientPacketListenerMixin",
+    "EditBoxAccessor",
+    "KeyMappingAccessor",
+    "ScreenMixin",
+    "compat.chesttracker.ExternalChestTrackerInitMixin",
+    "compat.chesttracker.ExternalChestTrackerJadePluginMixin",
+    "compat.chesttracker.ExternalChestTrackerModMenuMixin",
+    "compat.chesttracker.ExternalChestTrackerShulkerTooltipMixin",
+    "compat.chesttracker.ExternalChestTrackerWhereIsItPluginMixin",
+    "compat.chesttracker.ExternalChestTrackerWthitPluginMixin",
+    "compat.litematica.GuiMaterialListMixin",
+    "compat.litematica.MaterialListUtilsMixin",
+    "compat.litematica.WidgetMaterialListEntryMixin",
+    "datafix.V1460Mixin",
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

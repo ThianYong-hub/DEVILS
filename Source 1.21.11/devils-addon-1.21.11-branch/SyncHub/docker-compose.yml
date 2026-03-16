@@ -1,0 +1,36 @@
+services:
+  sync-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SYNC_HOST: 0.0.0.0
+      SYNC_PORT: 7878
+      SYNC_STATE_FILE: /data/sync-hub-state.json
+      SYNC_NAMESPACES_DIR: /data/modules
+      SYNC_REQUIRE_SIGNED: ${SYNC_REQUIRE_SIGNED:-true}
+      SYNC_SIGN_WINDOW_SEC: ${SYNC_SIGN_WINDOW_SEC:-30}
+      SYNC_NONCE_TTL_SEC: ${SYNC_NONCE_TTL_SEC:-120}
+      SYNC_NONCE_CACHE_MAX: ${SYNC_NONCE_CACHE_MAX:-200000}
+      SYNC_TLS_CERT_FILE: ${SYNC_TLS_CERT_FILE:-}
+      SYNC_TLS_KEY_FILE: ${SYNC_TLS_KEY_FILE:-}
+      SYNC_TLS_MIN_VERSION: ${SYNC_TLS_MIN_VERSION:-TLSv1_3}
+    ports:
+      - "${SYNC_BIND_IP:-0.0.0.0}:${SYNC_EXPOSE_PORT:-7878}:7878"
+    volumes:
+      - "${SYNC_DATA_DIR:-./data}:/data"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json,os,ssl,sys,urllib.request;scheme='https' if os.getenv('SYNC_TLS_CERT_FILE') else 'http';ctx=ssl._create_unverified_context() if scheme=='https' else None;u=urllib.request.urlopen(f'{scheme}://127.0.0.1:7878/health', timeout=3, context=ctx);d=json.load(u);sys.exit(0 if d.get('ok') else 1)"
+        ]
+      interval: ${SYNC_HEALTHCHECK_INTERVAL:-6h}
+      timeout: ${SYNC_HEALTHCHECK_TIMEOUT:-5s}
+      retries: ${SYNC_HEALTHCHECK_RETRIES:-3}
+      start_period: ${SYNC_HEALTHCHECK_START_PERIOD:-20s}

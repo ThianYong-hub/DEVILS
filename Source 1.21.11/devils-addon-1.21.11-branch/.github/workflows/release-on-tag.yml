@@ -1,0 +1,325 @@
+name: Release From Tag
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag in format vX.Y.Z"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+
+      - name: Resolve Release Tag
+        id: resolve_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_value="${{ inputs.tag }}"
+
+          if [[ ! "${tag_value}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid release tag '${tag_value}'. Expected format vX.Y.Z."
+            exit 1
+          fi
+
+          echo "release_tag=${tag_value}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set APP_VERSION From Tag
+        id: app_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_version="${{ steps.resolve_tag.outputs.release_tag }}"
+          app_version="${app_version#v}"
+          echo "APP_VERSION=${app_version}" >> "${GITHUB_ENV}"
+          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: 21
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Run tests
+        run: ./gradlew --no-daemon test
+
+      - name: Build with Gradle
+        run: ./gradlew --no-daemon build -x test
+
+      - name: Prepare release artifact name
+        id: prepare_asset
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jar_path="$(find build/libs -maxdepth 1 -type f -name '*.jar' | head -n1)"
+          if [[ -z "${jar_path}" ]]; then
+            echo "::error::No .jar artifact found in build/libs."
+            exit 1
+          fi
+
+          asset_path="build/libs/devils-addon-${{ steps.app_version.outputs.app_version }}.jar"
+          if [[ "${jar_path}" != "${asset_path}" ]]; then
+            cp "${jar_path}" "${asset_path}"
+          fi
+
+          echo "release_asset=${asset_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_tag="${{ steps.resolve_tag.outputs.release_tag }}"
+          prev_tag="$(
+            git tag -l 'v*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | awk -v current="${current_tag}" '
+                  $0 == current { print prev; found=1; exit }
+                  { prev=$0 }
+                  END { if (!found) print prev }
+                '
+          )"
+
+          if [[ -n "${prev_tag}" ]]; then
+            range="${prev_tag}..${current_tag}"
+          else
+            range="${current_tag}"
+          fi
+
+          export CURRENT_TAG="${current_tag}"
+          export PREV_TAG="${prev_tag}"
+          export RANGE="${range}"
+          export REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          current_tag = os.environ["CURRENT_TAG"]
+          prev_tag = os.environ.get("PREV_TAG", "")
+          commit_range = os.environ["RANGE"]
+          repo_url = os.environ["REPO_URL"]
+
+          def run_lines(cmd):
+              return subprocess.check_output(
+                  cmd,
+                  text=True,
+                  encoding="utf-8",
+                  errors="replace",
+              ).splitlines()
+
+          def sentence(text):
+              text = re.sub(r"\s+", " ", text).strip()
+              if not text:
+                  return ""
+              text = text[0].upper() + text[1:]
+              if not text.endswith("."):
+                  text += "."
+              return text
+
+          def prettify_scope(scope):
+              scope = scope.strip()
+              if not scope:
+                  return ""
+              aliases = {
+                  "auto-cev": "AutoCev",
+                  "auto-wasp": "AutoWasp",
+                  "anti-wasp": "AntiWasp",
+                  "chest-tracker": "ChestTracker",
+                  "sync-hub": "SyncHub",
+              }
+              lowered = scope.lower()
+              if lowered in aliases:
+                  return aliases[lowered]
+              parts = [part for part in re.split(r"[^a-zA-Z0-9]+", scope) if part]
+              if not parts:
+                  return scope
+              return "".join(part[:1].upper() + part[1:] for part in parts)
+
+          ignore_patterns = [
+              r"^docs:\s*sync readme download link\b",
+              r"^auto_sync_",
+              r"^switch_readme_sync",
+              r"^fix_readme_sync",
+              r"^ci\(release\):",
+          ]
+
+          prefix_re = re.compile(
+              r"^(?P<kind>feat|fix|refactor|perf|docs|build|ci|chore|test)"
+              r"(?:\((?P<scope>[^)]+)\))?:\s*(?P<subject>.+)$",
+              re.IGNORECASE
+          )
+
+          try:
+              raw_subjects = run_lines(["git", "log", "--no-merges", "--pretty=%s", commit_range])
+          except subprocess.CalledProcessError:
+              raw_subjects = []
+
+          bullets = []
+          seen = set()
+
+          for subject in raw_subjects:
+              subject = subject.strip()
+              if not subject:
+                  continue
+
+              lowered = subject.lower().strip()
+              if any(re.search(p, lowered) for p in ignore_patterns):
+                  continue
+
+              match = prefix_re.match(subject)
+              kind = ""
+              scope = ""
+              body = subject
+              if match:
+                  kind = match.group("kind").lower()
+                  scope = (match.group("scope") or "").strip()
+                  body = (match.group("subject") or "").strip()
+
+              body_sentence = sentence(body)
+              if not body_sentence:
+                  continue
+
+              scope_title = prettify_scope(scope)
+              body_no_dot = body_sentence[:-1]
+              kind_to_verb = {
+                  "feat": "Added",
+                  "fix": "Fixed",
+                  "refactor": "Improved",
+                  "perf": "Improved",
+                  "docs": "Updated",
+              }
+
+              if kind in ("build", "ci", "chore", "test"):
+                  continue
+
+              if kind in kind_to_verb:
+                  verb = kind_to_verb[kind]
+                  if scope_title:
+                      bullet = f"{verb} {scope_title}: {body_no_dot}."
+                  else:
+                      bullet = f"{verb}: {body_no_dot}."
+              else:
+                  bullet = body_sentence
+
+              normalized = re.sub(r"\s+", " ", bullet).strip().lower()
+              if not normalized or normalized in seen:
+                  continue
+              seen.add(normalized)
+              bullets.append(bullet)
+
+          max_bullets = 10
+          lines = [f"## What's New in {current_tag}", ""]
+
+          for bullet in bullets[:max_bullets]:
+              lines.append(f"- {bullet}")
+
+          if len(bullets) > max_bullets:
+              lines.append(f"- Plus {len(bullets) - max_bullets} additional internal change(s).")
+
+          if not bullets:
+              lines.append("- Maintenance release.")
+
+          lines.append("")
+
+          if prev_tag:
+              lines.append("## Full Changelog")
+              lines.append(f"[{prev_tag}...{current_tag}]({repo_url}/compare/{prev_tag}...{current_tag})")
+              lines.append("")
+
+          Path("RELEASE_NOTES.md").write_text("\n".join(lines), encoding="utf-8")
+          PY
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-${{ steps.resolve_tag.outputs.release_tag }}
+          path: ${{ steps.prepare_asset.outputs.release_asset }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.resolve_tag.outputs.release_tag }}
+          name: Release ${{ steps.resolve_tag.outputs.release_tag }}
+          draft: false
+          prerelease: false
+          body_path: RELEASE_NOTES.md
+          files: ${{ steps.prepare_asset.outputs.release_asset }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync README Links On Default Branch
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.resolve_tag.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          default_branch="${{ github.event.repository.default_branch }}"
+          git fetch origin "${default_branch}"
+          git checkout -B "readme-sync-${RELEASE_TAG}" "origin/${default_branch}"
+
+          python3 - <<'PY'
+          import glob
+          import os
+          import re
+          from pathlib import Path
+
+          release_tag = os.environ["RELEASE_TAG"]
+          version = release_tag[1:]
+          new_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{version}.jar"
+
+          files = [Path("README.md")] + [Path(p) for p in glob.glob("docs/i18n/*.md")]
+          url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-addon-\d+\.\d+\.\d+\.jar")
+          ver_plain_re = re.compile(r"\(v\d+\.\d+\.\d+\)")
+          ver_backtick_re = re.compile(r"\(`v\d+\.\d+\.\d+`\)")
+
+          for file in files:
+            if not file.exists():
+              continue
+            text = file.read_text(encoding="utf-8")
+            text = url_re.sub(new_url, text)
+            text = ver_backtick_re.sub(f"(`v{version}`)", text)
+            text = ver_plain_re.sub(f"(v{version})", text)
+            file.write_text(text, encoding="utf-8")
+          PY
+
+          if git diff --quiet; then
+            echo "No README changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/i18n/*.md
+          git commit -m "docs: sync README download link for ${RELEASE_TAG}"
+          git push origin "HEAD:${default_branch}"

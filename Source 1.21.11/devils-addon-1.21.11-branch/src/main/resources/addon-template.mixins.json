@@ -1,0 +1,22 @@
+{
+  "required": true,
+  "package": "com.example.addon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ClientConnectionMixin",
+    "ClientPlayerInteractionManagerInvoker",
+    "ExampleMixin",
+    "GuiMapXaeroSyncMixin",
+    "HudModSafeModFileMixin",
+    "XaeroCommonFabricPlatformHelperMixin",
+    "WorldMapFabricSafeModFileMixin",
+    "ScreenXaeroSyncMixin",
+    "PlayerTrackerPingNameMixin",
+    "ItemListSettingScreenMixin",
+    "ModulesScreenIconsMixin",
+    "ModulesNameCollisionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

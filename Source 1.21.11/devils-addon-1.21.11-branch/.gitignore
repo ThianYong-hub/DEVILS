@@ -1,0 +1,69 @@
+# gradle
+
+.gradle/
+.gradle-codex/
+.gradle-home/
+build/
+out/
+classes/
+
+# eclipse
+
+*.launch
+
+
+logs/
+
+# idea
+
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# vscode
+
+.settings/
+.vscode/
+bin/
+.classpath
+.project
+
+# macos
+
+*.DS_Store
+
+# fabric
+
+run/
+src/test/
+
+# local refs and root icons
+icon.png
+category_icon.png
+.tmp_meteor_src/
+.claude/
+embedded-libs/
+
+# local server sources and reverse-engineering workdirs
+Folia-ver-1.21.8/
+NoCheatPlus/
+Source/
+_tmp_*.txt
+_tmp_classdump/
+_tmp_meteor_ref/
+_tmp_meteor_src/
+_tmp_mio_extract/
+_tmp_mio_1218_decomp/
+*_javap*.txt
+*waypointrender*_javap*.txt
+nametag_javap.txt
+
+# local AutoLogin sync backend playground
+local-autologin-sync/
+
+# local SyncHub backend runtime artifacts
+SyncHub/.env
+SyncHub/data/
+SyncHub/__pycache__/
+SyncHub/tests/__pycache__/

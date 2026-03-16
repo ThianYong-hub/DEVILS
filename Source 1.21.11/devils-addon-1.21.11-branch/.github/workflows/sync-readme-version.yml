@@ -1,0 +1,87 @@
+name: Sync README Version
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-readmes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Default Branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Update README version links
+        id: resolve_release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RELEASE_TAG:-}" ]]; then
+            RELEASE_TAG="$(
+              curl -fsSL \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" \
+                | jq -r '.tag_name'
+            )"
+          fi
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Skip: non-semver release tag '${RELEASE_TAG}'."
+            exit 0
+          fi
+
+          echo "release_tag=${RELEASE_TAG}" >> "${GITHUB_OUTPUT}"
+
+          python3 - <<'PY'
+          import glob
+          import os
+          import re
+          from pathlib import Path
+
+          release_tag = os.environ["RELEASE_TAG"]
+          version = release_tag[1:]
+          new_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{version}.jar"
+
+          files = [Path("README.md")] + [Path(p) for p in glob.glob("docs/i18n/*.md")]
+          url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-addon-\d+\.\d+\.\d+\.jar")
+          ver_plain_re = re.compile(r"\(v\d+\.\d+\.\d+\)")
+          ver_backtick_re = re.compile(r"\(`v\d+\.\d+\.\d+`\)")
+
+          for file in files:
+            if not file.exists():
+              continue
+            text = file.read_text(encoding="utf-8")
+            text = url_re.sub(new_url, text)
+            text = ver_backtick_re.sub(f"(`v{version}`)", text)
+            text = ver_plain_re.sub(f"(v{version})", text)
+            file.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit and Push if changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "No README changes."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md docs/i18n/*.md
+          git commit -m "docs: sync README download link for ${{ steps.resolve_release.outputs.release_tag }}"
+          git push
