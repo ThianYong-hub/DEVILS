@@ -7,22 +7,15 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
-import java.lang.reflect.Method;
 import java.util.function.Predicate;
 
 public class PathfinderHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final double RESTOCK_NEAR_RANGE = 3.0;
-    private static final double RESTOCK_CENTER_TOLERANCE = 0.04;
-    private static final int RUNNING_STALL_TICKS = 16;
-    private static final double RUNNING_STALL_MOVE_EPSILON_SQ = 0.0004;
-    private static final double RUNNING_NUDGE_MIN_DIST_SQ = 0.04;
     private static final double MAX_PROGRESS_UPDATE_DIST_SQ = 9.0;
     private static final double STEP_FORWARD_DIST_SQ = 3.24;
     private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
     private static final double BREAK_REACH_EPSILON = 0.05;
-    private static final int RESTOCK_STALL_TICKS = 8;
-    private static final double RESTOCK_STALL_MOVE_EPSILON_SQ = 0.00025;
 
     private final HighwayBuilder module;
 
@@ -33,70 +26,16 @@ public class PathfinderHandler {
     public long rubberbandTimer = 0;
 
     private BlockPos goal = null;
-    private BlockPos minerGoal = null; // External goal from EChestMiner — takes priority
-    private boolean baritoneActive = false;
-    private boolean baritoneAvailable = false;
-
-    // Cached reflection objects for Baritone
-    private Object baritoneInstance;
-    private Method setGoalAndPathMethod;
-    private Method setGoalMethod;
-    private java.lang.reflect.Constructor<?> goalBlockConstructor;
-
-    // FollowProcess for item pickup
-    private Object followProcess;
-    private Method pickupMethod;
-    private Method followCancelMethod;
-    private boolean pickupActive = false;
-    private int runningStallTicks = 0;
-    private Vec3d lastRunningPos = null;
-    private int restockStallTicks = 0;
-    private Vec3d lastRestockPos = null;
+    private BlockPos minerGoal = null;
+    private final PathfinderBaritoneBridge baritone;
+    private final PathfinderMovementController movement;
 
     public PathfinderHandler(HighwayBuilder module) {
         this.module = module;
-        initBaritoneReflection();
+        this.baritone = new PathfinderBaritoneBridge(module);
+        this.movement = new PathfinderMovementController(module);
     }
 
-    private void initBaritoneReflection() {
-        try {
-            Class<?> apiClass = Class.forName("baritone.api.BaritoneAPI");
-            Method getProvider = apiClass.getMethod("getProvider");
-            Object provider = getProvider.invoke(null);
-            Method getPrimary = provider.getClass().getMethod("getPrimaryBaritone");
-            baritoneInstance = getPrimary.invoke(provider);
-
-            Method getCustomGoalProcess = baritoneInstance.getClass().getMethod("getCustomGoalProcess");
-            Object process = getCustomGoalProcess.invoke(baritoneInstance);
-
-            Class<?> goalClass = Class.forName("baritone.api.pathing.goals.Goal");
-            Class<?> goalBlockClass = Class.forName("baritone.api.pathing.goals.GoalBlock");
-            goalBlockConstructor = goalBlockClass.getConstructor(BlockPos.class);
-
-            setGoalAndPathMethod = process.getClass().getMethod("setGoalAndPath", goalClass);
-            setGoalMethod = process.getClass().getMethod("setGoal", goalClass);
-
-            baritoneAvailable = true;
-        } catch (Exception e) {
-            baritoneAvailable = false;
-        }
-
-        // FollowProcess for item pickup — separate try so it can't break core pathing
-        if (baritoneAvailable) {
-            try {
-                Method getFollowProcess = baritoneInstance.getClass().getMethod("getFollowProcess");
-                followProcess = getFollowProcess.invoke(baritoneInstance);
-
-                pickupMethod = followProcess.getClass().getMethod("pickup", Predicate.class);
-                followCancelMethod = followProcess.getClass().getMethod("cancel");
-            } catch (Exception e) {
-                // Pickup not available — EChestMiner will fall back to manual collection
-                followProcess = null;
-                pickupMethod = null;
-                followCancelMethod = null;
-            }
-        }
-    }
 
     public void setupPathing() {
         if (mc.player == null) return;
@@ -104,10 +43,8 @@ public class PathfinderHandler {
         startingBlockPos = mc.player.getBlockPos();
         currentBlockPos = startingBlockPos;
         startingDirection = HWDirection.fromYaw(mc.player.getYaw());
-        runningStallTicks = 0;
-        lastRunningPos = mc.player.getPos();
-        restockStallTicks = 0;
-        lastRestockPos = mc.player.getPos();
+        movement.clearRunningTracking();
+        movement.resetRestockTracking();
     }
 
     public void setMinerGoal(BlockPos pos) {
@@ -122,53 +59,29 @@ public class PathfinderHandler {
         return minerGoal != null;
     }
 
-    /**
-     * Start Baritone's FollowProcess in pickup mode — it will automatically
-     * path to all matching dropped items (GoalComposite of GoalBlocks).
-     */
+
     public void startPickup(Predicate<net.minecraft.item.ItemStack> filter) {
-        pickupActive = true;
-        if (!baritoneAvailable || pickupMethod == null || followProcess == null) return;
-
-        try {
-            // Cancel any custom goal pathing first
-            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
-                .invoke(baritoneInstance);
-            setGoalMethod.invoke(process, (Object) null);
-            baritoneActive = false;
-
-            pickupMethod.invoke(followProcess, (Predicate<?>) filter);
-        } catch (Exception e) {
-            // Fallback handled by EChestMiner if pickup doesn't work
-        }
+        baritone.startPickup(filter);
     }
 
-    /**
-     * Stop Baritone's FollowProcess pickup mode.
-     */
     public void stopPickup() {
-        pickupActive = false;
-        if (!baritoneAvailable || followCancelMethod == null) return;
-
-        try {
-            followCancelMethod.invoke(followProcess);
-        } catch (Exception ignored) {}
+        baritone.stopPickup();
     }
 
     public boolean isPickupActive() {
-        return pickupActive;
+        return baritone.isPickupActive();
     }
 
     public void updatePathing() {
         if (mc.player == null || mc.world == null) return;
 
         // Guard against stale FollowProcess lock.
-        if (pickupActive && (module.echestMiner == null || !module.echestMiner.isActive())) {
+        if (baritone.isPickupActive() && (module.echestMiner == null || !module.echestMiner.isActive())) {
             stopPickup();
         }
 
         // Baritone FollowProcess is handling pickup — don't interfere
-        if (pickupActive) return;
+        if (baritone.isPickupActive()) return;
 
         // External goal from EChest miner — bypass normal movement logic
         if (minerGoal != null) {
@@ -192,22 +105,22 @@ public class PathfinderHandler {
                 boolean canInteract = module.containerHandler != null
                     && module.containerHandler.canInteractWithContainerFromCurrentPos();
 
-                if (horizontalDistanceSq(mc.player.getPos(), standTarget)
+                if (movement.horizontalDistanceSq(mc.player.getEntityPos(), standTarget)
                     <= RESTOCK_NEAR_RANGE * RESTOCK_NEAR_RANGE) {
                     goal = null;
-                    if (isCenteredOn(standTarget)) {
+                    if (movement.isCenteredOn(standTarget)) {
                         if (canInteract) {
-                            stopHorizontalMovement();
+                            movement.stopHorizontalMovement();
                         } else {
                             // Center target is not actually usable, force a new candidate.
                             if (module.containerHandler != null) {
                                 module.containerHandler.invalidateRestockStandTarget();
                                 standTarget = module.containerHandler.getRestockStandPos();
                             }
-                            moveTo(standTarget);
+                            movement.moveTo(standTarget);
                         }
                     } else {
-                        moveTo(standTarget);
+                        movement.moveTo(standTarget);
                     }
                 } else {
                     goal = new BlockPos(
@@ -217,17 +130,17 @@ public class PathfinderHandler {
                     );
                 }
 
-                applyRestockStallRecovery(standTarget, canInteract);
+                movement.applyRestockStallRecovery(moveState, standTarget, canInteract);
             }
         }
 
         updateBaritoneGoal();
-        applyRunningStallNudge();
+        movement.applyRunningStallNudge(goal, moveState, module.taskManager::populateTasks, this::refreshAfterRunningStall);
     }
 
     private void updateRunning() {
         goal = currentBlockPos;
-        double distToCurrentSq = horizontalDistanceSq(mc.player.getPos(), Vec3d.ofCenter(currentBlockPos));
+        double distToCurrentSq = movement.horizontalDistanceSq(mc.player.getEntityPos(), Vec3d.ofCenter(currentBlockPos));
 
         // Don't advance while there is still reachable work (break/place/liquid) to do.
         // This forces the bot to finish ALL tasks within mining reach before moving,
@@ -417,7 +330,7 @@ public class PathfinderHandler {
                 0,
                 startingDirection.directionVec.getZ()
             );
-            moveTo(target);
+            movement.moveTo(target);
         } else if (!isAboveAir) {
             moveState = MovementState.RUNNING;
         }
@@ -495,22 +408,12 @@ public class PathfinderHandler {
         return true;
     }
 
-    private void moveTo(Vec3d target) {
-        if (mc.player == null) return;
-        double speed = module.moveSpeed.get();
-        mc.player.setVelocity(
-            Math.max(-speed, Math.min(speed, target.x - mc.player.getX())),
-            mc.player.getVelocity().y,
-            Math.max(-speed, Math.min(speed, target.z - mc.player.getZ()))
-        );
-    }
-
     public boolean isCenteredForRestock() {
         if (mc.player == null) return false;
         Vec3d standTarget = module.containerHandler != null
             ? module.containerHandler.getRestockStandPos()
             : Vec3d.ofCenter(currentBlockPos);
-        if (!isCenteredOn(standTarget)) return false;
+        if (!movement.isCenteredOn(standTarget)) return false;
 
         if (module.containerHandler != null
             && module.containerHandler.containerTask.taskState != TaskState.DONE
@@ -523,45 +426,10 @@ public class PathfinderHandler {
         return true;
     }
 
-    private boolean isCenteredOn(Vec3d target) {
-        if (mc.player == null) return false;
-        return horizontalDistanceSq(target, mc.player.getPos())
-            <= RESTOCK_CENTER_TOLERANCE * RESTOCK_CENTER_TOLERANCE;
-    }
-
-    private void stopHorizontalMovement() {
-        if (mc.player == null) return;
-        mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
-    }
-
-    private double horizontalDistanceSq(Vec3d a, Vec3d b) {
-        double dx = a.x - b.x;
-        double dz = a.z - b.z;
-        return dx * dx + dz * dz;
-    }
-
     private void updateBaritoneGoal() {
-        if (!baritoneAvailable) {
-            if (goal != null) moveTo(Vec3d.ofCenter(goal));
-            return;
-        }
-
-        try {
-            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
-                .invoke(baritoneInstance);
-
-            if (goal != null) {
-                Object goalBlock = goalBlockConstructor.newInstance(goal);
-                setGoalAndPathMethod.invoke(process, goalBlock);
-                baritoneActive = true;
-            } else if (baritoneActive) {
-                setGoalMethod.invoke(process, (Object) null);
-                baritoneActive = false;
-            }
-        } catch (Exception e) {
-            if (goal != null) moveTo(Vec3d.ofCenter(goal));
-        }
+        baritone.updateGoal(goal, movement::moveTo);
     }
+
 
     private void normalizeMovementState() {
         if (module.containerHandler == null) return;
@@ -573,8 +441,7 @@ public class PathfinderHandler {
         }
 
         if (moveState != MovementState.RESTOCK) {
-            restockStallTicks = 0;
-            lastRestockPos = mc.player != null ? mc.player.getPos() : null;
+            movement.resetRestockTracking();
         }
 
         // Guard against stale external goals from EChest miner.
@@ -583,110 +450,12 @@ public class PathfinderHandler {
         }
     }
 
-    private void applyRunningStallNudge() {
-        if (mc.player == null || goal == null || moveState != MovementState.RUNNING) {
-            runningStallTicks = 0;
-            lastRunningPos = mc.player != null ? mc.player.getPos() : null;
-            return;
-        }
-
-        Vec3d currentPos = mc.player.getPos();
-        Vec3d goalCenter = Vec3d.ofCenter(goal);
-        double distSq = horizontalDistanceSq(currentPos, goalCenter);
-        if (distSq <= RUNNING_NUDGE_MIN_DIST_SQ) {
-            runningStallTicks = 0;
-            lastRunningPos = currentPos;
-            return;
-        }
-
-        if (lastRunningPos != null
-            && horizontalDistanceSq(currentPos, lastRunningPos) <= RUNNING_STALL_MOVE_EPSILON_SQ) {
-            runningStallTicks++;
-        } else {
-            runningStallTicks = 0;
-        }
-        lastRunningPos = currentPos;
-
-        if (runningStallTicks >= RUNNING_STALL_TICKS) {
-            // Safety fallback for occasional goal-processing stalls.
-            module.taskManager.populateTasks();
-            resetBaritone();
-            updateBaritoneGoal();
-            moveTo(goalCenter);
-            runningStallTicks = 0;
-        }
-    }
-
-    private void applyRestockStallRecovery(Vec3d standTarget, boolean canInteract) {
-        if (mc.player == null || module.containerHandler == null || moveState != MovementState.RESTOCK) {
-            restockStallTicks = 0;
-            lastRestockPos = mc.player != null ? mc.player.getPos() : null;
-            return;
-        }
-
-        if (isCenteredOn(standTarget) && canInteract) {
-            restockStallTicks = 0;
-            lastRestockPos = mc.player.getPos();
-            return;
-        }
-
-        Vec3d currentPos = mc.player.getPos();
-        if (lastRestockPos != null
-            && horizontalDistanceSq(currentPos, lastRestockPos) <= RESTOCK_STALL_MOVE_EPSILON_SQ) {
-            restockStallTicks++;
-        } else {
-            restockStallTicks = 0;
-        }
-        lastRestockPos = currentPos;
-
-        if (restockStallTicks < RESTOCK_STALL_TICKS) return;
-
-        module.containerHandler.invalidateRestockStandTarget();
-        if (!module.containerHandler.tryRelocateContainerPlacement()) {
-            Vec3d refreshed = module.containerHandler.getRestockStandPos();
-            moveTo(refreshed);
-        }
-
-        restockStallTicks = 0;
-    }
-
     public void setupBaritone() {
-        if (!baritoneAvailable) return;
-
-        try {
-            Class<?> apiClass = Class.forName("baritone.api.BaritoneAPI");
-            Method getSettings = apiClass.getMethod("getSettings");
-            Object settings = getSettings.invoke(null);
-
-            setBaritoneField(settings, "allowPlace", false);
-            setBaritoneField(settings, "allowBreak", false);
-            setBaritoneField(settings, "renderGoal", module.goalRender.get());
-            setBaritoneField(settings, "allowInventory", false);
-        } catch (Exception e) {
-            // Baritone settings not available
-        }
-    }
-
-    private void setBaritoneField(Object settings, String fieldName, Object value) {
-        try {
-            var field = settings.getClass().getField(fieldName);
-            var setting = field.get(settings);
-            var valueField = setting.getClass().getField("value");
-            valueField.set(setting, value);
-        } catch (Exception ignored) {}
+        baritone.setupSettings();
     }
 
     public void resetBaritone() {
-        if (!baritoneAvailable) return;
-
-        try {
-            Object process = baritoneInstance.getClass().getMethod("getCustomGoalProcess")
-                .invoke(baritoneInstance);
-            setGoalMethod.invoke(process, (Object) null);
-            baritoneActive = false;
-        } catch (Exception ignored) {}
-
-        if (pickupActive) stopPickup();
+        baritone.reset();
     }
 
     public boolean pauseCheck() {
@@ -701,11 +470,16 @@ public class PathfinderHandler {
     }
 
     public void clearProcess() {
-        baritoneActive = false;
+        baritone.clearProcess();
         goal = null;
         minerGoal = null;
-        runningStallTicks = 0;
-        lastRunningPos = null;
-        if (pickupActive) stopPickup();
+        movement.clearRunningTracking();
+    }
+
+    private void refreshAfterRunningStall() {
+        resetBaritone();
+        updateBaritoneGoal();
     }
 }
+
+

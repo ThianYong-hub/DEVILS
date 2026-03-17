@@ -1,9 +1,20 @@
+import java.io.File
 import java.net.URI
+import java.util.zip.ZipFile
 
 plugins {
-    id("fabric-loom") version "1.11-SNAPSHOT"
+    id("fabric-loom") version "1.14.10"
     java
 }
+
+val xaeroPatchSourceSet = sourceSets.create("xaeroPatch") {
+    java.srcDir("xaero-patch-src")
+    compileClasspath += sourceSets["main"].compileClasspath + sourceSets["main"].output
+    runtimeClasspath += output + compileClasspath
+}
+
+configurations[xaeroPatchSourceSet.compileOnlyConfigurationName].extendsFrom(configurations["compileOnly"])
+configurations[xaeroPatchSourceSet.implementationConfigurationName].extendsFrom(configurations["compileOnly"])
 
 fun runGit(vararg args: String): String? {
     return try {
@@ -93,6 +104,7 @@ val xaeroPlusVersion = properties["xaeroplus_version"] as String
 val xaeroMinimapJar = "xaeros-minimap-$xaeroMinimapVersion.jar"
 val xaeroWorldMapJar = "xaeros-world-map-$xaeroWorldMapVersion.jar"
 val xaeroPlusJar = "xaeroplus-$xaeroPlusVersion.jar"
+val xaeroAerolibJar = file("tools/xaerolib-fabric-1.21.11-1.1.0.jar")
 
 java {
     toolchain {
@@ -182,6 +194,11 @@ dependencies {
     // Meteor
     modImplementation("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
 
+    // Xaero compile stubs for typed mixins against embedded jars.
+    modCompileOnly("maven.modrinth:xaeros-minimap:$xaeroMinimapVersion")
+    modCompileOnly("maven.modrinth:xaeros-world-map:$xaeroWorldMapVersion")
+    modCompileOnly(files(xaeroAerolibJar))
+
     // Local OGG playback (jar-in-jar)
     implementation("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
     include("com.googlecode.soundlibs:vorbisspi:1.0.3.3")
@@ -233,6 +250,86 @@ tasks {
         }
     }
 
+    val xaeroPatchClassesJar by registering(Jar::class) {
+        dependsOn(named("compileXaeroPatchJava"))
+        from(xaeroPatchSourceSet.output)
+        archiveBaseName.set("xaero-patch-classes")
+        archiveVersion.set("1")
+        archiveClassifier.set("named")
+        destinationDirectory.set(layout.buildDirectory.dir("tmp/xaero-remap"))
+    }
+
+    val remapXaeroPatchClassesJar by registering(net.fabricmc.loom.task.RemapJarTask::class) {
+        dependsOn(xaeroPatchClassesJar)
+        inputFile.set(xaeroPatchClassesJar.flatMap { it.archiveFile })
+        archiveBaseName.set("xaero-patch-classes")
+        archiveVersion.set("1")
+        archiveClassifier.set("intermediary")
+        destinationDirectory.set(layout.buildDirectory.dir("tmp/xaero-remap"))
+        addNestedDependencies.set(false)
+    }
+
+    val patchEmbeddedXaeroJars by registering {
+        dependsOn(prepareEmbeddedXaeroJars, remapXaeroPatchClassesJar)
+
+        val minimapJarName = xaeroMinimapJar
+        val worldMapJarName = xaeroWorldMapJar
+        val remappedPatchJarFile = remapXaeroPatchClassesJar.flatMap { it.archiveFile }
+        val minimapClasses = listOf(
+            "xaero/hud/minimap/waypoint/render/WaypointMapRenderer.class",
+            "xaero/hud/minimap/waypoint/render/WaypointMapRenderer\$Builder.class",
+            "xaero/hud/minimap/waypoint/render/world/WaypointWorldRenderer.class",
+            "xaero/hud/minimap/waypoint/render/world/WaypointWorldRenderer\$Builder.class"
+        )
+        val worldMapClasses = listOf(
+            "xaero/map/mods/gui/WaypointRenderer.class",
+            "xaero/map/mods/gui/WaypointRenderer\$Builder.class"
+        )
+
+        fun resolvePatchedClassBytes(relativePath: String): ByteArray {
+            val remappedJar = remappedPatchJarFile.get().asFile
+            if (!remappedJar.isFile) {
+                error("Remapped patch jar not found: ${remappedJar.absolutePath}")
+            }
+            ZipFile(remappedJar).use { zip ->
+                val entry = zip.getEntry(relativePath)
+                    ?: error("Patched class not found in remapped jar: $relativePath")
+                return zip.getInputStream(entry).readBytes()
+            }
+        }
+
+        fun patchJar(jarName: String, classPaths: List<String>) {
+            val patchDir = layout.buildDirectory.dir("tmp/xaero-jar-patch/$jarName").get().asFile
+            patchDir.deleteRecursively()
+            patchDir.mkdirs()
+
+            classPaths.forEach { classPath ->
+                val classBytes = resolvePatchedClassBytes(classPath)
+                val destination = patchDir.resolve(classPath.replace('/', File.separatorChar))
+                destination.parentFile.mkdirs()
+                destination.writeBytes(classBytes)
+            }
+
+            val jarExecutable = File(System.getProperty("java.home"), "bin/jar").absolutePath
+            val command = mutableListOf(jarExecutable, "uf", file("embedded-libs/$jarName").absolutePath)
+            command.addAll(classPaths)
+            val process = ProcessBuilder(command)
+                .directory(patchDir)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                error("Failed to patch $jarName with patched Xaero classes:\n$output")
+            }
+        }
+
+        doLast {
+            patchJar(minimapJarName, minimapClasses)
+            patchJar(worldMapJarName, worldMapClasses)
+        }
+    }
+
     val cleanLibsJars by registering(Delete::class) {
         delete(fileTree(layout.buildDirectory.dir("libs")) { include("*.jar") })
     }
@@ -256,7 +353,7 @@ tasks {
     }
 
     jar {
-        dependsOn(cleanLibsJars, prepareEmbeddedXaeroJars)
+        dependsOn(cleanLibsJars, patchEmbeddedXaeroJars)
         inputs.property("archivesName", project.base.archivesName.get())
 
         from("LICENSE") {
@@ -290,5 +387,12 @@ tasks {
         options.release = 21
         options.compilerArgs.add("-Xlint:deprecation")
         options.compilerArgs.add("-Xlint:unchecked")
+    }
+
+    named<JavaCompile>("compileXaeroPatchJava") {
+        // The xaeroPatch source-set classpath can be sparse with Loom remapped mods,
+        // so explicitly piggyback main compile classpath + main outputs + remapped aerolib jars.
+        classpath = sourceSets["main"].compileClasspath +
+            sourceSets["main"].output
     }
 }

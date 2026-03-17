@@ -72,7 +72,7 @@ public class MaceSpoof extends Module {
         if (disableWhenBlocked.get() && (target.isBlocking() || target.isInvulnerable() || target.isInCreativeMode()))
             return;
 
-        previousPos = mc.player.getPos();
+        previousPos = mc.player.getEntityPos();
         int blocks = getMaxHeightAbovePlayer();
         if (blocks <= 0) return;
 
@@ -147,3 +147,5 @@ public class MaceSpoof extends Module {
             && !mc.world.getBlockState(pos).isOf(Blocks.POWDER_SNOW);
     }
 }
+
+

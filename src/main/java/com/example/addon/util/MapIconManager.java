@@ -11,6 +11,7 @@ import net.minecraft.client.texture.TextureManager;
 import net.minecraft.util.Identifier;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -19,9 +20,11 @@ import java.util.Map;
 
 public final class MapIconManager {
     public static final String ICONS_FOLDER = "devils-addon/icons";
-    public static final String DEFAULT_EMBEDDED_ICON_PATH = "assets/devils-addon/textures/gui/devils_map_icon.png";
+    public static final String DEFAULT_EMBEDDED_ICON_PATH = "assets/devils-addon/textures/gui/devils_ping_icon_white.png";
+    private static final String LEGACY_EMBEDDED_ICON_PATH = "assets/devils-addon/textures/gui/devils_map_icon.png";
     private static final int TARGET_ICON_TEXTURE_SIZE = 128;
     private static final int ALPHA_CROP_THRESHOLD = 12;
+    private static final int ALPHA_SOLID_THRESHOLD = 24;
 
     private static final String DYNAMIC_TEXTURE_PREFIX = "dynamic/devils-map-icon/";
     private static final Map<String, CachedIcon> CACHE = new HashMap<>();
@@ -41,7 +44,11 @@ public final class MapIconManager {
 
     public static String normalizeIconPath(String raw) {
         if (raw == null) return "";
-        return raw.trim().replace('\\', '/');
+        String normalized = raw.trim().replace('\\', '/');
+        if (normalized.equalsIgnoreCase(LEGACY_EMBEDDED_ICON_PATH)) {
+            return DEFAULT_EMBEDDED_ICON_PATH;
+        }
+        return normalized;
     }
 
     public static boolean drawCustomIcon(DrawContext drawContext, String iconPath, int x, int y, int size, int color) {
@@ -141,8 +148,9 @@ public final class MapIconManager {
         try (InputStream input = Files.newInputStream(path)) {
             NativeImage image = NativeImage.read(input);
             if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) return null;
+            boolean forceOpaqueWhite = hasTransparency(image);
             Crop crop = computeOpaqueCrop(image);
-            NativeImage prepared = prepareIconImage(image, crop, TARGET_ICON_TEXTURE_SIZE);
+            NativeImage prepared = prepareIconImage(image, crop, TARGET_ICON_TEXTURE_SIZE, forceOpaqueWhite);
             image.close();
             if (prepared == null || prepared.getWidth() <= 0 || prepared.getHeight() <= 0) return null;
             Crop preparedCrop = computeOpaqueCrop(prepared);
@@ -152,6 +160,7 @@ public final class MapIconManager {
             TextureManager textureManager = mc.getTextureManager();
             textureManager.destroyTexture(id);
             textureManager.registerTexture(id, texture);
+            forceNearestFilter(texture);
             return new CachedIcon(
                 id,
                 texture,
@@ -178,8 +187,9 @@ public final class MapIconManager {
             if (input == null) return null;
             NativeImage image = NativeImage.read(input);
             if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) return null;
+            boolean forceOpaqueWhite = hasTransparency(image);
             Crop crop = computeOpaqueCrop(image);
-            NativeImage prepared = prepareIconImage(image, crop, TARGET_ICON_TEXTURE_SIZE);
+            NativeImage prepared = prepareIconImage(image, crop, TARGET_ICON_TEXTURE_SIZE, forceOpaqueWhite);
             image.close();
             if (prepared == null || prepared.getWidth() <= 0 || prepared.getHeight() <= 0) return null;
             Crop preparedCrop = computeOpaqueCrop(prepared);
@@ -189,6 +199,7 @@ public final class MapIconManager {
             TextureManager textureManager = mc.getTextureManager();
             textureManager.destroyTexture(id);
             textureManager.registerTexture(id, texture);
+            forceNearestFilter(texture);
             return new CachedIcon(
                 id,
                 texture,
@@ -231,7 +242,20 @@ public final class MapIconManager {
         return new Crop(minX, minY, Math.max(1, maxX - minX + 1), Math.max(1, maxY - minY + 1));
     }
 
-    private static NativeImage prepareIconImage(NativeImage image, Crop crop, int targetSize) {
+    private static boolean hasTransparency(NativeImage image) {
+        if (image == null) return false;
+        int width = image.getWidth();
+        int height = image.getHeight();
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int alpha = (image.getColorArgb(x, y) >>> 24) & 0xFF;
+                if (alpha <= 250) return true;
+            }
+        }
+        return false;
+    }
+
+    private static NativeImage prepareIconImage(NativeImage image, Crop crop, int targetSize, boolean forceOpaqueWhite) {
         if (image == null) return null;
         int srcWidth = image.getWidth();
         int srcHeight = image.getHeight();
@@ -259,14 +283,46 @@ public final class MapIconManager {
                 sampleX = clamp(sampleX, 0, srcWidth - 1);
                 int argb = image.getColorArgb(sampleX, sampleY);
                 int alpha = (argb >>> 24) & 0xFF;
-                if (alpha < ALPHA_CROP_THRESHOLD) {
+                if (alpha < ALPHA_SOLID_THRESHOLD) {
                     normalized.setColorArgb(x, y, 0);
+                } else if (forceOpaqueWhite) {
+                    normalized.setColorArgb(x, y, 0xFFFFFFFF);
                 } else {
-                    normalized.setColorArgb(x, y, argb);
+                    normalized.setColorArgb(x, y, argb | 0xFF000000);
                 }
             }
         }
         return normalized;
+    }
+
+    private static void forceNearestFilter(NativeImageBackedTexture texture) {
+        if (texture == null) return;
+
+        try {
+            Method legacy = texture.getClass().getMethod("setFilter", boolean.class, boolean.class);
+            legacy.setAccessible(true);
+            legacy.invoke(texture, false, false);
+            return;
+        } catch (Throwable ignored) {
+        }
+
+        for (Method method : texture.getClass().getMethods()) {
+            if (!method.getName().equals("setFilter")) continue;
+            Class<?>[] params = method.getParameterTypes();
+            if (params.length == 0) continue;
+            try {
+                method.setAccessible(true);
+                if (params.length == 1 && params[0] == boolean.class) {
+                    method.invoke(texture, false);
+                    return;
+                }
+                if (params.length == 2 && params[0] == boolean.class && params[1] == boolean.class) {
+                    method.invoke(texture, false, false);
+                    return;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private static int clamp(int value, int min, int max) {
@@ -355,3 +411,5 @@ public final class MapIconManager {
         long sizeBytes
     ) {}
 }
+
+

@@ -8,22 +8,17 @@ import net.minecraft.fluid.FluidState;
 import net.minecraft.registry.Registries;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 public class TaskExecutor {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private static final double CONTAINER_BREAK_EXTRA_REACH = 0.75;
-    private static final int CONTAINER_STUCK_RELOCATE_THRESHOLD = 3;
-    private static final int CONTAINER_STUCK_REPATH_THRESHOLD = 2;
-    private static final double CONTAINER_NUDGE_MIN_SPEED = 0.22;
-    private static final double CONTAINER_NUDGE_MAX_SPEED = 0.42;
-    private static final double CONTAINER_ESCAPE_DISTANCE = 1.30;
 
     private final HighwayBuilder module;
+    private final TaskExecutionSupport executionSupport;
 
     public TaskExecutor(HighwayBuilder module) {
         this.module = module;
+        this.executionSupport = new TaskExecutionSupport(module);
     }
 
     public void doTask(BlockTask blockTask, boolean updateOnly) {
@@ -34,13 +29,13 @@ public class TaskExecutor {
             case PICKUP -> { if (!updateOnly) doPickup(); }
             case OPEN_CONTAINER -> { if (!updateOnly) doOpenContainer(); }
             case BREAKING -> doBreaking(blockTask, updateOnly);
-            case BROKEN -> doBroken(blockTask);
-            case PLACED -> doPlaced(blockTask);
+            case BROKEN -> executionSupport.handleBroken(blockTask);
+            case PLACED -> executionSupport.handlePlaced(blockTask);
             case BREAK -> doBreak(blockTask, updateOnly);
             case PLACE, LIQUID -> doPlace(blockTask, updateOnly);
-            case PENDING_BREAK -> doPendingBreak(blockTask);
-            case PENDING_PLACE -> doPendingPlace(blockTask);
-            case IMPOSSIBLE_PLACE -> { if (!updateOnly) doImpossiblePlace(); }
+            case PENDING_BREAK -> executionSupport.handlePendingBreak(blockTask);
+            case PENDING_PLACE -> executionSupport.handlePendingPlace(blockTask);
+            case IMPOSSIBLE_PLACE -> { if (!updateOnly) executionSupport.handleImpossiblePlace(); }
             case DONE -> { /* nothing */ }
         }
     }
@@ -75,7 +70,7 @@ public class TaskExecutor {
             return;
         }
 
-        if (shouldSkipBreakForRange(blockTask)) {
+        if (executionSupport.shouldSkipBreakForRange(blockTask)) {
             if (containerBreakTask) {
                 blockTask.resetStuck();
                 return;
@@ -101,84 +96,6 @@ public class TaskExecutor {
                 mc.player.setVelocity(0.0, mc.player.getVelocity().y, 0.0);
             }
             module.blockBreaker.mineBlock(blockTask);
-        }
-    }
-
-    private void doBroken(BlockTask blockTask) {
-        if (mc.world == null) return;
-
-        if (mc.world.getBlockState(blockTask.blockPos).getBlock() != Blocks.AIR) {
-            blockTask.updateState(TaskState.BREAK);
-            return;
-        }
-
-        // Finalize any silent tool swap after successful break completion.
-        module.inventoryHandler.restoreSilentSwap();
-
-        module.statistics.totalBlocksBroken++;
-
-        // Reset stuck on all break tasks
-        for (BlockTask task : module.taskManager.getTasks().values()) {
-            if (task.taskState == TaskState.BREAK) task.resetStuck();
-        }
-
-        module.statistics.simpleMovingAverageBreaks.add(System.currentTimeMillis());
-
-        BlockTask containerTask = module.containerHandler.containerTask;
-        if (blockTask == containerTask) {
-            if (containerTask.collect) {
-                module.pathfinder.moveState = MovementState.PICKUP;
-                blockTask.updateState(TaskState.PICKUP);
-            } else {
-                blockTask.updateState(TaskState.DONE);
-            }
-            return;
-        }
-
-        if (blockTask.targetBlock == Blocks.AIR) {
-            blockTask.updateState(TaskState.DONE);
-        } else {
-            blockTask.updateState(TaskState.PLACE);
-        }
-    }
-
-    private void doPlaced(BlockTask blockTask) {
-        if (mc.world == null) return;
-        BlockState currentState = mc.world.getBlockState(blockTask.blockPos);
-        Block currentBlock = currentState.getBlock();
-        BlockTask containerTask = module.containerHandler.containerTask;
-
-        if ((blockTask.targetBlock == currentBlock || blockTask.isFiller)
-            && !currentState.isReplaceable()) {
-            // Successfully placed
-            module.statistics.totalBlocksPlaced++;
-            module.statistics.simpleMovingAveragePlaces.add(System.currentTimeMillis());
-
-            if (module.dynamicDelay.get() && module.blockPlacer.extraPlaceDelay > 0) {
-                module.blockPlacer.extraPlaceDelay /= 2;
-            }
-
-            if (blockTask == containerTask) {
-                if (containerTask.destroy) {
-                    containerTask.updateState(TaskState.BREAK);
-                } else {
-                    containerTask.updateState(TaskState.OPEN_CONTAINER);
-                    // Give the server a few ticks to fully register the placed block
-                    // before attempting to interact/open it.
-                    module.containerHandler.setOpenDelay(4);
-                }
-            } else {
-                blockTask.updateState(TaskState.DONE);
-            }
-
-            // Reset stuck on place tasks
-            for (BlockTask task : module.taskManager.getTasks().values()) {
-                if (task.taskState == TaskState.PLACE) task.resetStuck();
-            }
-        } else if (blockTask.targetBlock == Blocks.AIR && currentBlock != Blocks.AIR) {
-            blockTask.updateState(TaskState.BREAK);
-        } else {
-            blockTask.updateState(TaskState.PLACE);
         }
     }
 
@@ -237,7 +154,7 @@ public class TaskExecutor {
             return;
         }
 
-        if (shouldSkipBreakForRange(blockTask)) {
+        if (executionSupport.shouldSkipBreakForRange(blockTask)) {
             return;
         }
 
@@ -371,10 +288,11 @@ public class TaskExecutor {
                 return;
             }
 
-            nudgeAwayFromPlacementBlock(blockTask, blockTask == containerTask);
+            ContainerPlacementRecovery.nudgeAwayFromPlacementBlock(module, blockTask, blockTask == containerTask);
             blockTask.onStuck(2);
 
-            if (blockTask == containerTask && tryRecoverContainerPlacementStuck(blockTask)) {
+            if (blockTask == containerTask
+                && ContainerPlacementRecovery.tryRecoverContainerPlacementStuck(module, blockTask)) {
                 return;
             }
             return;
@@ -393,9 +311,9 @@ public class TaskExecutor {
                     return;
                 }
 
-                nudgeAwayFromPlacementBlock(blockTask, true);
+                ContainerPlacementRecovery.nudgeAwayFromPlacementBlock(module, blockTask, true);
                 blockTask.onStuck(2);
-                if (tryRecoverContainerPlacementStuck(blockTask)) {
+                if (ContainerPlacementRecovery.tryRecoverContainerPlacementStuck(module, blockTask)) {
                     return;
                 }
                 return;
@@ -433,9 +351,10 @@ public class TaskExecutor {
             }
 
             if (mc.player != null && mc.player.getBoundingBox().intersects(new Box(blockTask.blockPos))) {
-                nudgeAwayFromPlacementBlock(blockTask, blockTask == containerTask);
+                ContainerPlacementRecovery.nudgeAwayFromPlacementBlock(module, blockTask, blockTask == containerTask);
                 blockTask.onStuck(2);
-                if (blockTask == containerTask && tryRecoverContainerPlacementStuck(blockTask)) {
+                if (blockTask == containerTask
+                    && ContainerPlacementRecovery.tryRecoverContainerPlacementStuck(module, blockTask)) {
                     return;
                 }
                 return;
@@ -448,7 +367,7 @@ public class TaskExecutor {
                 // Don't destroy the container task if placement spot is temporarily blocked
                 // (usually by player positioning while centering).
                 containerTask.onStuck(2);
-                if (tryRecoverContainerPlacementStuck(containerTask)) {
+                if (ContainerPlacementRecovery.tryRecoverContainerPlacementStuck(module, containerTask)) {
                     return;
                 }
             } else {
@@ -472,57 +391,6 @@ public class TaskExecutor {
         module.blockPlacer.placeBlock(blockTask);
     }
 
-    private void doPendingBreak(BlockTask blockTask) {
-        if (mc.world == null) { blockTask.onStuck(); return; }
-
-        Block currentBlock = mc.world.getBlockState(blockTask.blockPos).getBlock();
-        if (currentBlock == Blocks.AIR) {
-            // Block is gone — confirmed broken
-            module.inventoryHandler.waitTicks = module.breakDelay.get();
-            blockTask.updateState(TaskState.BROKEN);
-        } else {
-            blockTask.onStuck();
-        }
-    }
-
-    private void doPendingPlace(BlockTask blockTask) {
-        if (mc.world == null) { blockTask.onStuck(); return; }
-
-        BlockState currentState = mc.world.getBlockState(blockTask.blockPos);
-        if ((blockTask.targetBlock == currentState.getBlock() || blockTask.isFiller)
-            && !currentState.isReplaceable()) {
-            // Block already placed — skip waiting
-            blockTask.updateState(TaskState.PLACED);
-        } else if (!currentState.isAir()
-            && !currentState.isReplaceable()
-            && blockTask.targetBlock != Blocks.AIR
-            && blockTask.targetBlock != currentState.getBlock()) {
-            // Wrong solid block in cell: break first instead of waiting for timeout.
-            blockTask.updateState(TaskState.BREAK);
-        } else if ((currentState.isAir() || currentState.isReplaceable())
-            && blockTask.targetBlock != Blocks.AIR) {
-            // Placement did not land (lag/packet drop). Retry immediately instead of sitting in black state.
-            blockTask.updateState(TaskState.PLACE);
-        } else {
-            blockTask.onStuck();
-        }
-    }
-
-    private void doImpossiblePlace() {
-        if (mc.player == null) return;
-
-        if (module.pathfinder.shouldBridge()
-            && module.pathfinder.moveState != MovementState.RESTOCK
-            && mc.player.getPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos)) < 1) {
-            module.pathfinder.moveState = MovementState.BRIDGE;
-        }
-    }
-
-    private boolean shouldSkipBreakForRange(BlockTask blockTask) {
-        if (isContainerBreakTask(blockTask)) return !isContainerBreakInRange(blockTask.blockPos);
-        return !module.taskManager.isWithinActiveMiningBounds(blockTask.blockPos);
-    }
-
     private boolean isContainerBreakTask(BlockTask blockTask) {
         BlockTask containerTask = module.containerHandler.containerTask;
         return blockTask == containerTask
@@ -531,127 +399,6 @@ public class TaskExecutor {
             && blockTask.blockPos.equals(containerTask.blockPos));
     }
 
-    private void nudgeAwayFromPlacementBlock(BlockTask blockTask, boolean containerPlacement) {
-        if (mc.player == null) return;
-        Vec3d playerPos = mc.player.getPos();
-
-        if (containerPlacement && module.containerHandler != null) {
-            module.containerHandler.invalidateRestockStandTarget();
-            Vec3d standTarget = module.containerHandler.getRestockStandPos();
-
-            Vec3d containerCenter = Vec3d.ofCenter(blockTask.blockPos);
-            double rx = playerPos.x - containerCenter.x;
-            double rz = playerPos.z - containerCenter.z;
-            if (rx * rx + rz * rz < 1.0e-4 && module.pathfinder != null) {
-                rx = -module.pathfinder.startingDirection.directionVec.getX();
-                rz = -module.pathfinder.startingDirection.directionVec.getZ();
-            }
-            if (rx * rx + rz * rz < 1.0e-4) {
-                rx = 1.0;
-                rz = 0.0;
-            }
-            double rLen = Math.sqrt(rx * rx + rz * rz);
-            Vec3d escapeTarget = new Vec3d(
-                containerCenter.x + (rx / rLen) * CONTAINER_ESCAPE_DISTANCE,
-                playerPos.y,
-                containerCenter.z + (rz / rLen) * CONTAINER_ESCAPE_DISTANCE
-            );
-
-            // Prefer the farther target from container center to ensure hitbox
-            // fully exits the placement block before retry.
-            double standDistSq = horizontalDistanceSq(standTarget, containerCenter);
-            double escapeDistSq = horizontalDistanceSq(escapeTarget, containerCenter);
-            Vec3d chosen = standDistSq >= escapeDistSq ? standTarget : escapeTarget;
-
-            double mx = chosen.x - playerPos.x;
-            double mz = chosen.z - playerPos.z;
-            Vec3d selfCenter = Vec3d.ofCenter(mc.player.getBlockPos());
-            mx += (selfCenter.x - playerPos.x) * 0.90;
-            mz += (selfCenter.z - playerPos.z) * 0.90;
-            double mLenSq = mx * mx + mz * mz;
-            if (mLenSq < 0.04) {
-                // Hard fallback when chosen target is too close and player keeps
-                // clipping the placement block: force a larger step directly away.
-                mx = rx;
-                mz = rz;
-                mLenSq = mx * mx + mz * mz;
-            }
-            if (mLenSq > 1.0e-4) {
-                double mLen = Math.sqrt(mLenSq);
-                double speed = Math.max(CONTAINER_NUDGE_MIN_SPEED, Math.min(CONTAINER_NUDGE_MAX_SPEED, module.moveSpeed.get() + 0.10));
-                mc.player.setVelocity((mx / mLen) * speed, mc.player.getVelocity().y, (mz / mLen) * speed);
-                module.pathfinder.moveState = MovementState.RESTOCK;
-                return;
-            }
-        }
-
-        Vec3d targetCenter = Vec3d.ofCenter(blockTask.blockPos);
-        double dx = playerPos.x - targetCenter.x;
-        double dz = playerPos.z - targetCenter.z;
-
-        if (dx * dx + dz * dz < 1.0e-4 && module.pathfinder != null) {
-            dx = -module.pathfinder.startingDirection.directionVec.getX();
-            dz = -module.pathfinder.startingDirection.directionVec.getZ();
-        }
-        if (dx * dx + dz * dz < 1.0e-4) {
-            dx = 1.0;
-            dz = 0.0;
-        }
-
-        double len = Math.sqrt(dx * dx + dz * dz);
-        dx /= len;
-        dz /= len;
-
-        Vec3d selfCenter = Vec3d.ofCenter(mc.player.getBlockPos());
-        dx += (selfCenter.x - playerPos.x) * 0.85;
-        dz += (selfCenter.z - playerPos.z) * 0.85;
-        double correctedLen = Math.sqrt(dx * dx + dz * dz);
-        if (correctedLen > 1.0e-4) {
-            dx /= correctedLen;
-            dz /= correctedLen;
-        }
-
-        double speed = Math.max(0.16, Math.min(0.34, module.moveSpeed.get() + 0.08));
-        mc.player.setVelocity(dx * speed, mc.player.getVelocity().y, dz * speed);
-
-        if (containerPlacement && module.containerHandler != null) {
-            module.pathfinder.moveState = MovementState.RESTOCK;
-        }
-    }
-
-    private boolean tryRecoverContainerPlacementStuck(BlockTask containerTask) {
-        if (containerTask == null || module.containerHandler == null) return false;
-
-        if (containerTask.getStuckTicks() >= CONTAINER_STUCK_REPATH_THRESHOLD) {
-            module.containerHandler.invalidateRestockStandTarget();
-            module.pathfinder.moveState = MovementState.RESTOCK;
-        }
-
-        if (containerTask.getStuckTicks() >= CONTAINER_STUCK_RELOCATE_THRESHOLD
-            && module.containerHandler.tryRelocateContainerPlacement()) {
-            containerTask.resetStuck();
-            return true;
-        }
-
-        return false;
-    }
-
-    private double horizontalDistanceSq(Vec3d a, Vec3d b) {
-        double dx = a.x - b.x;
-        double dz = a.z - b.z;
-        return dx * dx + dz * dz;
-    }
-
-    private boolean isContainerBreakInRange(BlockPos pos) {
-        if (mc.player == null) return false;
-
-        Vec3d eyePos = mc.player.getEyePos();
-        double best = eyePos.distanceTo(Vec3d.ofCenter(pos));
-        for (Direction side : Direction.values()) {
-            double dist = eyePos.distanceTo(HWUtils.getHitVec(pos, side));
-            if (dist < best) best = dist;
-        }
-
-        return best <= module.maxReach.get() + CONTAINER_BREAK_EXTRA_REACH + 0.15;
-    }
 }
+
+

@@ -1,5 +1,5 @@
 plugins {
-    id("fabric-loom") version "1.11-SNAPSHOT"
+    id("fabric-loom") version "1.14.10"
     java
 }
 
@@ -91,31 +91,30 @@ repositories {
 
 dependencies {
     minecraft("com.mojang:minecraft:${project.property("minecraft_version")}")
-    mappings(loom.layered {
-        officialMojangMappings()
-        parchment("org.parchmentmc.data:parchment-1.21.8:2025.09.14@zip")
-    })
+    mappings(loom.officialMojangMappings())
 
     modImplementation("net.fabricmc:fabric-loader:${project.property("loader_version")}")
-    modImplementation("net.fabricmc.fabric-api:fabric-api:0.136.0+1.21.8")
+    modImplementation("net.fabricmc.fabric-api:fabric-api:${project.property("fabric_api_version")}")
 
-    modImplementation("maven.modrinth:where-is-it-port:2.7.3+1.21.6")
-    include("maven.modrinth:where-is-it-port:2.7.3+1.21.6")
+    modImplementation("maven.modrinth:where-is-it-port:2.7.3+1.21.11")
+    include("maven.modrinth:where-is-it-port:2.7.3+1.21.11")
 
-    modImplementation("dev.isxander:yet-another-config-lib:3.7.1+1.21.6-fabric") {
+    modImplementation("dev.isxander:yet-another-config-lib:3.8.1+1.21.11-fabric") {
         exclude(group = "com.terraformersmc", module = "modmenu")
     }
-    include("dev.isxander:yet-another-config-lib:3.7.1+1.21.6-fabric")
+    include("dev.isxander:yet-another-config-lib:3.8.1+1.21.11-fabric")
 
-    modCompileOnly("com.blamejared.searchables:Searchables-fabric-1.21.8:1.0.2") {
+    modCompileOnly("com.blamejared.searchables:Searchables-fabric-1.21.11:1.0.2") {
         exclude(group = "net.fabricmc.fabric-api", module = "fabric-api")
     }
-    include("com.blamejared.searchables:Searchables-fabric-1.21.8:1.0.2")
+    include("com.blamejared.searchables:Searchables-fabric-1.21.11:1.0.2")
 
-    modCompileOnly("com.terraformersmc:modmenu:15.0.0")
-    modCompileOnly("com.misterpemodder:shulkerboxtooltip-fabric:5.2.11+1.21.8")
-    modCompileOnly("mcp.mobius.waila:wthit-api:fabric-16.0.4")
-    modCompileOnly("maven.modrinth:jade:19.3.2+fabric")
+    modCompileOnly("com.terraformersmc:modmenu:17.0.0-beta.1")
+    modCompileOnly("com.misterpemodder:shulkerboxtooltip-fabric:5.2.14+1.21.11")
+    modCompileOnly("mcp.mobius.waila:wthit-api:fabric-18.0.4")
+    modCompileOnly("maven.modrinth:jade:21.0.1+fabric")
+    modCompileOnly("maven.modrinth:litematica:0.25.2")
+    modCompileOnly("maven.modrinth:malilib:0.27.2")
     modCompileOnly(fileTree("libs"))
 }
 

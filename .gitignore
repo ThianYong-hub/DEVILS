@@ -49,6 +49,11 @@ embedded-libs/
 Folia-ver-1.21.8/
 NoCheatPlus/
 Source/
+Source 1.21.11/
+Source 1.21.11/decompiled/
+Source 1.21.11/decompiled-named/
+tools/*
+!tools/xaerolib-fabric-1.21.11-1.1.0.jar
 _tmp_*.txt
 _tmp_classdump/
 _tmp_meteor_ref/

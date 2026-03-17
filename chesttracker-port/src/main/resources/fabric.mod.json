@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "devils-addon-chesttracker",
+  "id": "chesttracker",
   "version": "${version}",
   "name": "Chest Tracker (Unofficial port)",
   "description": "Client side item storage - remember where you've put things. Unofficial port Chest Tracker.",
@@ -21,27 +21,27 @@
   "environment": "client",
   "entrypoints": {
     "client": [
-      "com.example.addon.chesttracker.impl.ChestTracker"
+      "red.jackf.chesttracker.impl.ChestTracker"
     ],
-    "devils_chesttracker": [
-      "com.example.addon.chesttracker.impl.DefaultChestTrackerPlugin"
+    "chesttracker": [
+      "red.jackf.chesttracker.impl.DefaultChestTrackerPlugin"
     ],
     "modmenu": [
-      "com.example.addon.chesttracker.impl.compat.mods.ChestTrackerModMenu"
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerModMenu"
     ],
     "whereisit_client": [
-      "com.example.addon.chesttracker.impl.compat.mods.ChestTrackerWhereIsItPlugin"
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerWhereIsItPlugin"
     ],
     "shulkerboxtooltip": [
-      "com.example.addon.chesttracker.impl.compat.mods.shulkerboxtooltip.ChestTrackerShulkerBoxTooltip"
+      "red.jackf.chesttracker.impl.compat.mods.shulkerboxtooltip.ChestTrackerShulkerBoxTooltip"
     ],
     "jade": [
-      "com.example.addon.chesttracker.impl.compat.mods.jade.ChestTrackerJadePlugin"
+      "red.jackf.chesttracker.impl.compat.mods.jade.ChestTrackerJadePlugin"
     ]
   },
   "mixins": [
     {
-      "config": "devils-addon-chesttracker.mixins.json",
+      "config": "chesttracker.mixins.json",
       "environment": "client"
     }
   ],
@@ -55,12 +55,11 @@
     }
   },
   "depends": {
-    "fabricloader": ">=0.15.0",
-    "minecraft": ">=${mc_version}",
+    "fabricloader": ">=0.17.3",
+    "minecraft": ">=1.21.11",
     "java": ">=21",
     "fabric-api": "*",
-    "yet_another_config_lib_v3": ">=3.6.0",
-    "whereisit": ">=2.6.1"
+    "yet_another_config_lib_v3": ">=3.8.1"
   },
   "recommends": {
     "searchables": "*"

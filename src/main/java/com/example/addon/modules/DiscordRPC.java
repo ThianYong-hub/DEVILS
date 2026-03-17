@@ -130,3 +130,5 @@ public class DiscordRPC extends Module {
         DiscordIPC.setActivity(rpc);
     }
 }
+
+

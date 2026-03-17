@@ -1,6 +1,8 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.antiwasp.AntiWaspPathMath;
+import com.example.addon.modules.antiwasp.AntiWaspPathMath.FlightFigure;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -25,6 +27,7 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.world.RaycastContext;
 
 public class AntiWasp extends Module {
+    private final AntiWaspObstacleAvoidance obstacleAvoidance = new AntiWaspObstacleAvoidance(this);
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgPath = settings.createGroup("Path");
     private final SettingGroup sgMovement = settings.createGroup("Movement");
@@ -120,14 +123,14 @@ public class AntiWasp extends Module {
         .build()
     );
 
-    private final Setting<Boolean> avoidObstacles = sgAvoidance.add(new BoolSetting.Builder()
+    final Setting<Boolean> avoidObstacles = sgAvoidance.add(new BoolSetting.Builder()
         .name("avoid-obstacles")
         .description("Attempts to avoid blocks ahead using climb and side-step logic.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<Double> obstacleLookAhead = sgAvoidance.add(new DoubleSetting.Builder()
+    final Setting<Double> obstacleLookAhead = sgAvoidance.add(new DoubleSetting.Builder()
         .name("obstacle-look-ahead")
         .description("How many blocks ahead to scan for collisions.")
         .defaultValue(8.0)
@@ -138,7 +141,7 @@ public class AntiWasp extends Module {
         .build()
     );
 
-    private final Setting<Double> obstacleClimbHeight = sgAvoidance.add(new DoubleSetting.Builder()
+    final Setting<Double> obstacleClimbHeight = sgAvoidance.add(new DoubleSetting.Builder()
         .name("obstacle-climb-height")
         .description("Preferred climb height while avoiding frontal obstacles.")
         .defaultValue(2.2)
@@ -149,7 +152,7 @@ public class AntiWasp extends Module {
         .build()
     );
 
-    private final Setting<Double> obstacleClimbSpeed = sgAvoidance.add(new DoubleSetting.Builder()
+    final Setting<Double> obstacleClimbSpeed = sgAvoidance.add(new DoubleSetting.Builder()
         .name("obstacle-climb-speed")
         .description("Maximum extra vertical speed used when climbing over obstacles.")
         .defaultValue(1.8)
@@ -160,7 +163,7 @@ public class AntiWasp extends Module {
         .build()
     );
 
-    private final Setting<Double> obstacleSideBias = sgAvoidance.add(new DoubleSetting.Builder()
+    final Setting<Double> obstacleSideBias = sgAvoidance.add(new DoubleSetting.Builder()
         .name("obstacle-side-bias")
         .description("How strongly to strafe sideways when avoiding.")
         .defaultValue(1.2)
@@ -171,7 +174,7 @@ public class AntiWasp extends Module {
         .build()
     );
 
-    private final Setting<Integer> obstacleMemoryTicks = sgAvoidance.add(new IntSetting.Builder()
+    final Setting<Integer> obstacleMemoryTicks = sgAvoidance.add(new IntSetting.Builder()
         .name("obstacle-memory-ticks")
         .description("How long to keep the selected avoid side to prevent jitter.")
         .defaultValue(20)
@@ -256,12 +259,8 @@ public class AntiWasp extends Module {
     private double phase;
     private FlightFigure activeFigure;
 
-    private int figureTicks;
-    private int fireworkTicks;
-    private int takeoffCooldown;
-    private int noRocketWarnCooldown;
-    private int avoidTicks;
-    private int avoidStrafeDir;
+    private int figureTicks, fireworkTicks, takeoffCooldown, noRocketWarnCooldown;
+    int avoidTicks, avoidStrafeDir;
     private Vec3d cameraOverrideDir = Vec3d.ZERO;
 
     private boolean forcedForward;
@@ -288,7 +287,7 @@ public class AntiWasp extends Module {
         forcedForward = false;
         prevForwardState = mc.options.forwardKey.isPressed();
 
-        origin = mc.player.getPos();
+        origin = mc.player.getEntityPos();
     }
 
     @Override
@@ -326,9 +325,9 @@ public class AntiWasp extends Module {
             figureTicks++;
             if (figureTicks >= switchInterval.get()) {
                 figureTicks = 0;
-                activeFigure = nextFigure(activeFigure);
+                activeFigure = AntiWaspPathMath.nextFigure(activeFigure);
                 phase = 0.0;
-                origin = mc.player.getPos();
+                origin = mc.player.getEntityPos();
                 info("Figure: " + activeFigure.name().toLowerCase());
             }
         } else {
@@ -336,9 +335,9 @@ public class AntiWasp extends Module {
         }
 
         double direction = clockwise.get() ? 1.0 : -1.0;
-        double perimeter = getPerimeter(activeFigure, figureSize.get());
+        double perimeter = AntiWaspPathMath.getPerimeter(activeFigure, figureSize.get());
         double progress = (horizontalSpeed.get() * phaseStep.get()) / Math.max(perimeter, 1e-6);
-        phase = wrap01(phase + progress * direction);
+        phase = AntiWaspPathMath.wrap01(phase + progress * direction);
 
         if (rotateCamera.get()) updateCamera();
         handleFireworks();
@@ -364,129 +363,16 @@ public class AntiWasp extends Module {
         if (!mc.player.isGliding()) return;
         if (!isWearingElytra()) return;
 
-        Vec3d target = getPathPoint(phase + lookAhead.get());
+        Vec3d target = AntiWaspPathMath.getPathPoint(origin, activeFigure, phase + lookAhead.get(), figureSize.get(), altitudeOffset.get());
         double xDist = target.x - mc.player.getX();
         double zDist = target.z - mc.player.getZ();
         double yDist = target.y - mc.player.getY();
 
-        double xVel = axisSpeed(xDist, horizontalSpeed.get());
-        double zVel = axisSpeed(zDist, horizontalSpeed.get());
-
-        double absX = Math.abs(xDist);
-        double absZ = Math.abs(zDist);
-        if (absX > 1.0E-5 && absZ > 1.0E-5) {
-            double diag = 1.0 / Math.sqrt(absX * absX + absZ * absZ);
-            xVel *= absX * diag;
-            zVel *= absZ * diag;
-        }
-
-        double yVel = axisSpeed(yDist, verticalSpeed.get());
-        Vec3d adjustedVelocity = applyObstacleAvoidance(new Vec3d(xVel, yVel, zVel));
-        cameraOverrideDir = normalizeOrZero(adjustedVelocity);
+        Vec3d planarVelocity = AntiWaspPathMath.distributePlanarSpeed(xDist, zDist, horizontalSpeed.get());
+        double yVel = AntiWaspPathMath.axisSpeed(yDist, verticalSpeed.get());
+        Vec3d adjustedVelocity = obstacleAvoidance.apply(new Vec3d(planarVelocity.x, yVel, planarVelocity.z));
+        cameraOverrideDir = obstacleAvoidance.normalizeOrZero(adjustedVelocity);
         ((IVec3d) event.movement).meteor$set(adjustedVelocity.x, adjustedVelocity.y, adjustedVelocity.z);
-    }
-
-    private Vec3d applyObstacleAvoidance(Vec3d desired) {
-        if (!avoidObstacles.get()) return desired;
-        if (mc.player == null || mc.world == null) return desired;
-
-        Vec3d horizontal = new Vec3d(desired.x, 0.0, desired.z);
-        double speed = horizontal.length();
-        if (speed < 1.0E-4) return desired;
-
-        Vec3d forward = horizontal.normalize();
-        double look = obstacleLookAhead.get();
-        double forwardClear = getClearDistance(forward, look);
-
-        // Path ahead is mostly clear.
-        if (forwardClear >= look * 0.90) return desired;
-
-        // Obstacle detected in front.
-        avoidTicks = obstacleMemoryTicks.get();
-
-        Vec3d left = new Vec3d(-forward.z, 0.0, forward.x);
-        if (avoidStrafeDir == 0) {
-            Vec3d leftProbe = normalizeOrZero(forward.multiply(0.60).add(left.multiply(0.75)));
-            Vec3d rightProbe = normalizeOrZero(forward.multiply(0.60).add(left.multiply(-0.75)));
-            double leftClear = getClearDistance(leftProbe, look * 0.95);
-            double rightClear = getClearDistance(rightProbe, look * 0.95);
-            avoidStrafeDir = leftClear >= rightClear ? 1 : -1;
-        }
-
-        double y = desired.y;
-        Vec3d adjustedHorizontal = horizontal;
-
-        // Try climbing over the obstacle if space exists.
-        double climbRise = obstacleClimbHeight.get();
-        Vec3d climbDir = normalizeOrZero(new Vec3d(forward.x, climbRise / Math.max(look, 0.1), forward.z));
-        double climbClear = getClearDistance(climbDir, look * 0.9);
-        double overheadClear = getClearDistance(new Vec3d(0.0, 1.0, 0.0), Math.max(climbRise, 0.8));
-        boolean canClimb = climbClear >= look * 0.7 && overheadClear >= climbRise * 0.7;
-
-        if (canClimb) {
-            y = Math.max(y, obstacleClimbSpeed.get());
-            adjustedHorizontal = horizontal.multiply(0.9);
-        } else {
-            // Strafe around and keep small upward bias.
-            Vec3d side = left.multiply(avoidStrafeDir);
-            Vec3d blended = normalizeOrZero(forward.multiply(0.65).add(side.multiply(obstacleSideBias.get())));
-            adjustedHorizontal = blended.multiply(speed);
-            y = Math.max(y, obstacleClimbSpeed.get() * 0.35);
-
-            double sideClear = getClearDistance(blended, look * 0.8);
-            if (sideClear < look * 0.30) {
-                avoidStrafeDir = -avoidStrafeDir;
-                Vec3d otherSide = left.multiply(avoidStrafeDir);
-                Vec3d fallback = normalizeOrZero(forward.multiply(0.65).add(otherSide.multiply(obstacleSideBias.get())));
-                adjustedHorizontal = fallback.multiply(speed);
-            }
-        }
-
-        Vec3d adjustedDir = normalizeOrZero(new Vec3d(adjustedHorizontal.x, 0.0, adjustedHorizontal.z));
-        if (adjustedDir.lengthSquared() > 1.0E-6) {
-            double clear = getClearDistance(adjustedDir, look * 0.75);
-            if (clear < look * 0.18) {
-                // Emergency behavior: slow down and climb harder to avoid face-plant.
-                adjustedHorizontal = adjustedHorizontal.multiply(0.35);
-                y = Math.max(y, obstacleClimbSpeed.get());
-            }
-        }
-
-        return new Vec3d(adjustedHorizontal.x, y, adjustedHorizontal.z);
-    }
-
-    private double getClearDistance(Vec3d direction, double maxDistance) {
-        if (mc.player == null || mc.world == null) return maxDistance;
-        if (maxDistance <= 0) return 0;
-
-        Vec3d dir = normalizeOrZero(direction);
-        if (dir.lengthSquared() < 1.0E-8) return maxDistance;
-
-        double min = maxDistance;
-        double[] heights = { 0.25, 0.95, 1.60 };
-        Vec3d base = mc.player.getPos();
-
-        for (double h : heights) {
-            Vec3d start = base.add(0.0, h, 0.0);
-            Vec3d end = start.add(dir.multiply(maxDistance));
-            HitResult hit = mc.world.raycast(new RaycastContext(
-                start, end,
-                RaycastContext.ShapeType.COLLIDER,
-                RaycastContext.FluidHandling.NONE,
-                mc.player
-            ));
-
-            if (hit.getType() == HitResult.Type.BLOCK) {
-                min = Math.min(min, start.distanceTo(hit.getPos()));
-            }
-        }
-
-        return min;
-    }
-
-    private Vec3d normalizeOrZero(Vec3d vec) {
-        if (vec == null || vec.lengthSquared() < 1.0E-10) return Vec3d.ZERO;
-        return vec.normalize();
     }
 
     private void applyAutoWalkState() {
@@ -505,7 +391,7 @@ public class AntiWasp extends Module {
         if (avoidTicks > 0 && cameraOverrideDir.lengthSquared() > 1.0E-8) {
             lookTarget = mc.player.getEyePos().add(cameraOverrideDir.multiply(12.0));
         } else {
-            lookTarget = getPathPoint(phase + lookAhead.get());
+            lookTarget = AntiWaspPathMath.getPathPoint(origin, activeFigure, phase + lookAhead.get(), figureSize.get(), altitudeOffset.get());
         }
 
         double dx = lookTarget.x - mc.player.getX();
@@ -533,11 +419,6 @@ public class AntiWasp extends Module {
         mc.player.setPitch(currentPitch + Math.copySign(pitchStep, deltaPitch));
     }
 
-    /**
-     * Always tries to recover elytra flight while the module is active.
-     * Unlike autoTakeoff (initial takeoff from ground), this runs unconditionally
-     * so the player never falls when settings are changed mid-flight.
-     */
     private void tryRecoverFlight() {
         if (mc.player == null) return;
         if (!isWearingElytra()) return;
@@ -550,7 +431,6 @@ public class AntiWasp extends Module {
 
         if (takeoffCooldown > 0) return;
 
-        // Always re-open elytra mid-air — prevents falling when settings change
         if (mc.player.getVelocity().y < 0) {
             mc.player.networkHandler.sendPacket(new ClientCommandC2SPacket(
                 mc.player, ClientCommandC2SPacket.Mode.START_FALL_FLYING
@@ -596,87 +476,6 @@ public class AntiWasp extends Module {
         return -1;
     }
 
-    private Vec3d getPathPoint(double phase01Raw) {
-        double p = wrap01(phase01Raw);
-        Vec3d offset = getOffset(activeFigure, p);
-        return new Vec3d(origin.x + offset.x, origin.y + altitudeOffset.get(), origin.z + offset.z);
-    }
-
-    private Vec3d getOffset(FlightFigure type, double p) {
-        double size = figureSize.get();
-        return switch (type) {
-            case Circle -> {
-                double r = size * 0.5;
-                double a = p * Math.PI * 2.0;
-                yield new Vec3d(r * Math.cos(a), 0.0, r * Math.sin(a));
-            }
-            case Square -> {
-                double h = size * 0.5;
-                Vec3d[] v = new Vec3d[] {
-                    new Vec3d(h, 0.0, h),
-                    new Vec3d(-h, 0.0, h),
-                    new Vec3d(-h, 0.0, -h),
-                    new Vec3d(h, 0.0, -h)
-                };
-                yield pointOnPolygon(v, p);
-            }
-            case Triangle -> {
-                // Equilateral triangle with exact side length = size.
-                double circumRadius = size / Math.sqrt(3.0);
-                double a0 = Math.PI * 0.5;
-                double a1 = a0 + Math.PI * 2.0 / 3.0;
-                double a2 = a0 + Math.PI * 4.0 / 3.0;
-                Vec3d[] v = new Vec3d[] {
-                    new Vec3d(circumRadius * Math.cos(a0), 0.0, circumRadius * Math.sin(a0)),
-                    new Vec3d(circumRadius * Math.cos(a1), 0.0, circumRadius * Math.sin(a1)),
-                    new Vec3d(circumRadius * Math.cos(a2), 0.0, circumRadius * Math.sin(a2))
-                };
-                yield pointOnPolygon(v, p);
-            }
-        };
-    }
-
-    private double getPerimeter(FlightFigure type, double size) {
-        return switch (type) {
-            case Circle -> Math.PI * size; // diameter * pi
-            case Square -> size * 4.0;
-            case Triangle -> size * 3.0;
-        };
-    }
-
-    private Vec3d pointOnPolygon(Vec3d[] vertices, double p) {
-        int n = vertices.length;
-        double segPos = p * n;
-        int i = (int) Math.floor(segPos) % n;
-        double t = segPos - Math.floor(segPos);
-        Vec3d a = vertices[i];
-        Vec3d b = vertices[(i + 1) % n];
-        return new Vec3d(
-            a.x + (b.x - a.x) * t,
-            0.0,
-            a.z + (b.z - a.z) * t
-        );
-    }
-
-    private FlightFigure nextFigure(FlightFigure current) {
-        FlightFigure[] values = FlightFigure.values();
-        return values[(current.ordinal() + 1) % values.length];
-    }
-
-    private double axisSpeed(double dist, double maxSpeed) {
-        double abs = Math.abs(dist);
-        if (abs < 1.0E-5) return 0.0;
-        return abs < maxSpeed ? dist : maxSpeed * Math.signum(dist);
-    }
-
-    private double wrap01(double value) {
-        double wrapped = value % 1.0;
-        return wrapped < 0.0 ? wrapped + 1.0 : wrapped;
-    }
-
-    public enum FlightFigure {
-        Circle,
-        Square,
-        Triangle
-    }
 }
+
+

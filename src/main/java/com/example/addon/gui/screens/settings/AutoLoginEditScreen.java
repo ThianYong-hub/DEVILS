@@ -1,6 +1,7 @@
 package com.example.addon.gui.screens.settings;
 
 import com.example.addon.modules.AutoLogin;
+import com.example.addon.modules.autologin.AutoLoginProfile;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.WindowScreen;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
@@ -21,8 +22,8 @@ public class AutoLoginEditScreen extends WindowScreen {
     private static final int WINDOW_MIN_WIDTH = 520;
     private static final int FIELD_MIN_WIDTH = 260;
 
-    private final AutoLogin.AutoLoginProfile target;
-    private final AutoLogin.AutoLoginProfile working;
+    private final AutoLoginProfile target;
+    private final AutoLoginProfile working;
     private final Supplier<String> currentUsernameSupplier;
     private final Supplier<String> currentServerSupplier;
 
@@ -31,7 +32,7 @@ public class AutoLoginEditScreen extends WindowScreen {
 
     public AutoLoginEditScreen(
         GuiTheme theme,
-        AutoLogin.AutoLoginProfile target,
+        AutoLoginProfile target,
         Supplier<String> currentUsernameSupplier,
         Supplier<String> currentServerSupplier
     ) {
@@ -67,7 +68,7 @@ public class AutoLoginEditScreen extends WindowScreen {
         };
 
         WButton selectAccount = accountRow.add(theme.button("Accounts")).widget();
-        selectAccount.action = () -> mc.setScreen(new StringSelectScreen(theme, "Select Account", Arrays.asList(AutoLogin.getAccountOptions()), value -> {
+        selectAccount.action = () -> mc.setScreen(new SelectionScreens.StringSelectScreen(theme, "Select Account", Arrays.asList(AutoLogin.getAccountOptions()), value -> {
             updateAccountValue(value);
             reload();
         }));
@@ -80,7 +81,7 @@ public class AutoLoginEditScreen extends WindowScreen {
         server.actionOnUnfocused = () -> working.server.set(server.get().trim());
 
         WButton selectServer = serverRow.add(theme.button("Servers")).widget();
-        selectServer.action = () -> mc.setScreen(new StringSelectScreen(
+        selectServer.action = () -> mc.setScreen(new SelectionScreens.StringSelectScreen(
             theme,
             "Select Server",
             Arrays.asList(AutoLogin.getServerOptions(currentServerSupplier.get().trim(), working.server.get())),
@@ -161,3 +162,6 @@ public class AutoLoginEditScreen extends WindowScreen {
         return builder.toString().toLowerCase(Locale.ROOT);
     }
 }
+
+
+

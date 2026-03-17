@@ -2,9 +2,9 @@ package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.audio.JoinSoundPlayer;
-import com.example.addon.settings.TrackEventMode;
 import com.example.addon.settings.TrackerPlayerRule;
 import com.example.addon.settings.TrackerPlayersSetting;
+import com.example.addon.settings.TrackerPlayerRule.TrackEventMode;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
@@ -38,7 +38,7 @@ public class JoinWatcher extends Module {
     private final SettingGroup sgSoundDefaults = settings.createGroup("Sound Defaults");
     private final SettingGroup sgAutomation = settings.createGroup("Automation");
 
-    private final Setting<List<TrackerPlayerRule>> trackerPlayers = sgGeneral.add(new TrackerPlayersSetting.Builder()
+    private final Setting<List<TrackerPlayerRule>> trackerPlayers = sgGeneral.add(new TrackerPlayerRule.SettingBuilder()
         .name("tracker-players")
         .description("Per-player tracking rules: event, sound, send command, and sound source.")
         .build()
@@ -139,14 +139,14 @@ public class JoinWatcher extends Module {
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            knownPlayers.put(entry.profile().getId(), entry.profile().getName());
+            knownPlayers.put(entry.profile().id(), entry.profile().name());
         }
 
         if (shouldIgnoreInitialPacket(packet)) return;
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            processRules(entry.profile().getName(), RuleTrigger.Join);
+            processRules(entry.profile().name(), RuleTrigger.Join);
         }
     }
 
@@ -156,7 +156,7 @@ public class JoinWatcher extends Module {
 
             if (playerName == null && mc.getNetworkHandler() != null) {
                 var entry = mc.getNetworkHandler().getPlayerListEntry(playerId);
-                if (entry != null && entry.getProfile() != null) playerName = entry.getProfile().getName();
+                if (entry != null && entry.getProfile() != null) playerName = entry.getProfile().name();
             }
 
             if (playerName != null) processRules(playerName, RuleTrigger.Leave);
@@ -184,7 +184,7 @@ public class JoinWatcher extends Module {
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            if (selfId.equals(entry.profile().getId())) return true;
+            if (selfId.equals(entry.profile().id())) return true;
         }
 
         return false;
@@ -318,3 +318,5 @@ public class JoinWatcher extends Module {
         Death
     }
 }
+
+

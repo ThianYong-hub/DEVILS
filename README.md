@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.32`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32/devils-addon-0.0.32.jar)
+- Current build (`v0.0.33`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.33/devils-addon-0.0.33.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -12,10 +12,10 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 | Component | Required Version |
 | --- | --- |
-| Minecraft | `1.21.8` |
-| Fabric Loader | `0.16.14+` |
+| Minecraft | `1.21.11` |
+| Fabric Loader | `0.18.4+` |
 | Java | `21` |
-| Meteor Client | build for `1.21.8` |
+| Meteor Client | build for `1.21.11` |
 
 ## Installation
 
@@ -23,6 +23,15 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 2. Download the latest `devils-addon-*.jar`.
 3. Put the jar into `.minecraft/mods`.
 4. Start the game and open category `Devils` in Meteor.
+
+## Project Layout
+
+- `src/main/java/com/example/addon/modules`: public module entrypoints and compact facades.
+- `src/main/java/com/example/addon/modules/<feature>`: feature-local planners, sync controllers, render helpers, and storage logic.
+- `src/main/java/com/example/addon/util/xaerosync`: Xaero waypoint and tracked-player support code.
+- `src/main/java/com/example/addon/settings`: tracker rule models and UI helpers.
+- `src/test/java`: larger regression suites for project structure, config, and module-specific behavior.
+- Current codebase rule: Java source files are kept in the `100-500` line range to avoid both monoliths and meaningless tiny wrappers.
 
 ## Module Table
 
@@ -98,12 +107,13 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.32`)
+## Release Notes (`v0.0.33`)
 
-- Added pre-launch log-spam filtering bootstrap to prevent early-init crashes while suppressing repeated font/entity-class warning floods.
-- Fixed pre-launch mixin stability by isolating early logger filter installation from addon bootstrap class loading.
-- Reduced sync overhead in `xaero-sync` and `ping`: stream-first pull strategy, fallback polling only when stream is unavailable, and lower parallel sync pressure.
-- Removed render-loop forced sync in `xaero-sync` and normalized presence update cadence to reduce FPS drops during active sync sessions.
+- Rebuilt the addon into a package-oriented structure: large monolithic modules were split into feature-local controllers, planners, codec helpers, and UI support classes.
+- Normalized repository structure so Java sources stay in the `100-500` line range instead of multi-thousand-line modules or 10-line wrapper files.
+- Consolidated bootstrap pieces such as commands, HUD registration, tracker settings, mixin support, and sync helper models into cleaner facades.
+- Fixed Fabric `preLaunch` startup failures by making the `CrashGuard` entrypoint directly instantiable by the loader.
+- Revalidated the addon with green `compileJava`, `test`, and full `build` runs before the release cut.
 
 ## License
 

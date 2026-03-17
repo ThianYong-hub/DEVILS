@@ -160,7 +160,7 @@ public class LiquidHandler {
 
         boolean isLava = fluidState.isIn(FluidTags.LAVA);
         boolean isSource = fluidState.isStill();
-        double threatDistance = mc.player.getPos().distanceTo(Vec3d.ofCenter(liquidPos));
+        double threatDistance = mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(liquidPos));
         double relationDistance = Vec3d.ofCenter(relatedPos).distanceTo(Vec3d.ofCenter(liquidPos));
 
         return new LiquidCandidate(
@@ -250,3 +250,5 @@ public class LiquidHandler {
         }
     }
 }
+
+

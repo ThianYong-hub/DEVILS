@@ -1,6 +1,6 @@
 package com.example.addon.audio;
 
-import com.example.addon.settings.SoundSourceMode;
+import com.example.addon.settings.TrackerPlayerRule.SoundSourceMode;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.sound.PositionedSoundInstance;
@@ -9,15 +9,7 @@ import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.Identifier;
 
-import javax.sound.sampled.AudioInputStream;
-import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.Clip;
-import javax.sound.sampled.DataLine;
-import javax.sound.sampled.FloatControl;
-import javax.sound.sampled.LineEvent;
-import javax.sound.sampled.LineUnavailableException;
-import javax.sound.sampled.UnsupportedAudioFileException;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -25,10 +17,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,14 +27,42 @@ public final class JoinSoundPlayer {
     public static final String SOUND_FOLDER = "devils-addon/sounds";
     public static final Identifier FALLBACK_SOUND_ID = Identifier.of("minecraft", "entity.experience_orb.pickup");
     public static final int DEFAULT_LOCAL_OGG_VOLUME_PERCENT = 100;
-    private static final Logger LOG = LoggerFactory.getLogger("Devils/JoinSoundPlayer");
-    private static final ExecutorService AUDIO_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+    static final Logger LOG = LoggerFactory.getLogger("Devils/JoinSoundPlayer");
+    static final ExecutorService AUDIO_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "Devils-JoinSoundPlayer");
         thread.setDaemon(true);
         return thread;
     });
 
     private JoinSoundPlayer() {}
+
+    public enum ResolvedType {
+        FILE,
+        SOUND_ID
+    }
+
+    public record ResolvedSound(ResolvedType type, Path filePath, Identifier soundId) {
+    }
+
+    public enum PlaybackStatus {
+        OK,
+        FILE_NOT_FOUND,
+        UNSUPPORTED_FORMAT,
+        LINE_UNAVAILABLE,
+        DECODE_ERROR,
+        FALLBACK_USED
+    }
+
+    public record PlaybackDiagnosticResult(
+        PlaybackStatus status,
+        ResolvedSound resolved,
+        boolean fallbackUsed,
+        String message
+    ) {
+        public boolean isOk() {
+            return status == PlaybackStatus.OK;
+        }
+    }
 
     public static void play(SoundSourceMode sourceMode, String soundValue, String defaultSoundSpec) {
         play(sourceMode, soundValue, defaultSoundSpec, DEFAULT_LOCAL_OGG_VOLUME_PERCENT);
@@ -64,7 +82,7 @@ public final class JoinSoundPlayer {
         String defaultSoundSpec,
         int localOggVolumePercent
     ) {
-        return playInternal(sourceMode, soundValue, defaultSoundSpec, localOggVolumePercent, true, true);
+        return toPublic(playInternal(sourceMode, soundValue, defaultSoundSpec, localOggVolumePercent, true, true));
     }
 
     public static PlaybackDiagnosticResult testPlay(SoundSourceMode sourceMode, String soundValue, String defaultSoundSpec) {
@@ -77,7 +95,7 @@ public final class JoinSoundPlayer {
         String defaultSoundSpec,
         int localOggVolumePercent
     ) {
-        return playInternal(sourceMode, soundValue, defaultSoundSpec, localOggVolumePercent, true, true);
+        return toPublic(playInternal(sourceMode, soundValue, defaultSoundSpec, localOggVolumePercent, true, true));
     }
 
     public static void play(String playerSoundSpec, String defaultSoundSpec) {
@@ -90,7 +108,7 @@ public final class JoinSoundPlayer {
         String defaultSoundSpec,
         Path gameDir
     ) {
-        return resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, false).sound();
+        return toPublic(resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, false).sound());
     }
 
     public static ResolvedSound resolveForPlaybackWithDiagnostics(
@@ -99,10 +117,10 @@ public final class JoinSoundPlayer {
         String defaultSoundSpec,
         Path gameDir
     ) {
-        return resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, true).sound();
+        return toPublic(resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, true).sound());
     }
 
-    private static ResolvedPlayback resolveForPlaybackDetailed(
+    private static JoinSoundResolvedPlayback resolveForPlaybackDetailed(
         SoundSourceMode sourceMode,
         String soundValue,
         String defaultSoundSpec,
@@ -121,21 +139,21 @@ public final class JoinSoundPlayer {
             );
         }
 
-        RuleResolution playerResolved = resolveRuleSound(sourceMode, soundValue, soundsRoot, diagnostics);
+        JoinSoundRuleResolution playerResolved = resolveRuleSound(sourceMode, soundValue, soundsRoot, diagnostics);
         if (playerResolved.sound() != null) {
-            return new ResolvedPlayback(
+            return new JoinSoundResolvedPlayback(
                 playerResolved.sound(),
                 false,
-                PlaybackStatus.OK,
+                JoinSoundPlaybackStatus.OK,
                 "Rule sound played."
             );
         }
 
         if (diagnostics) LOG.warn("Rule sound invalid, trying module default sound.");
 
-        ResolvedSound defaultResolved = resolveLegacySoundSpec(defaultSoundSpec, soundsRoot, diagnostics);
+        JoinSoundResolvedSound defaultResolved = resolveLegacySoundSpec(defaultSoundSpec, soundsRoot, diagnostics);
         if (defaultResolved != null) {
-            return new ResolvedPlayback(
+            return new JoinSoundResolvedPlayback(
                 defaultResolved,
                 true,
                 statusOrFallback(playerResolved.status()),
@@ -144,8 +162,8 @@ public final class JoinSoundPlayer {
         }
 
         if (diagnostics) LOG.warn("Module default sound invalid, falling back to '{}'.", FALLBACK_SOUND_ID);
-        return new ResolvedPlayback(
-            ResolvedSound.fromSoundId(FALLBACK_SOUND_ID),
+        return new JoinSoundResolvedPlayback(
+            JoinSoundResolvedSound.fromSoundId(FALLBACK_SOUND_ID),
             true,
             statusOrFallback(playerResolved.status()),
             nonBlank(playerResolved.message(), "Rule sound was invalid, fallback to builtin.")
@@ -156,7 +174,7 @@ public final class JoinSoundPlayer {
         return resolveForPlayback(SoundSourceMode.ManualId, playerSoundSpec, defaultSoundSpec, gameDir);
     }
 
-    private static PlaybackDiagnosticResult playInternal(
+    private static JoinSoundPlaybackDiagnosticResult playInternal(
         SoundSourceMode sourceMode,
         String soundValue,
         String defaultSoundSpec,
@@ -165,7 +183,7 @@ public final class JoinSoundPlayer {
         boolean waitForFileResult
     ) {
         Path gameDir = safeGameDir();
-        ResolvedPlayback resolved = resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, diagnostics);
+        JoinSoundResolvedPlayback resolved = resolveForPlaybackDetailed(sourceMode, soundValue, defaultSoundSpec, gameDir, diagnostics);
         int sanitizedVolumePercent = sanitizeLocalOggVolumePercent(localOggVolumePercent);
 
         if (diagnostics) {
@@ -183,8 +201,8 @@ public final class JoinSoundPlayer {
             );
         }
 
-        PlaybackStatus playbackStatus = playResolved(resolved.sound(), sanitizedVolumePercent, diagnostics, waitForFileResult);
-        PlaybackStatus finalStatus = toFinalStatus(resolved, playbackStatus);
+        JoinSoundPlaybackStatus playbackStatus = playResolved(resolved.sound(), sanitizedVolumePercent, diagnostics, waitForFileResult);
+        JoinSoundPlaybackStatus finalStatus = toFinalStatus(resolved, playbackStatus);
         String message = messageForStatus(finalStatus, resolved.primaryMessage());
 
         if (diagnostics) {
@@ -192,15 +210,15 @@ public final class JoinSoundPlayer {
                 "Join sound diagnostic result: finalStatus={}, playbackStatus={}, fallbackUsed={}, message='{}'.",
                 finalStatus,
                 playbackStatus,
-                resolved.fallbackUsed() || playbackStatus != PlaybackStatus.OK,
+                resolved.fallbackUsed() || playbackStatus != JoinSoundPlaybackStatus.OK,
                 message
             );
         }
 
-        return new PlaybackDiagnosticResult(
+        return new JoinSoundPlaybackDiagnosticResult(
             finalStatus,
             resolved.sound(),
-            resolved.fallbackUsed() || playbackStatus != PlaybackStatus.OK,
+            resolved.fallbackUsed() || playbackStatus != JoinSoundPlaybackStatus.OK,
             message
         );
     }
@@ -255,28 +273,63 @@ public final class JoinSoundPlayer {
         return root.toAbsolutePath().normalize();
     }
 
-    private static RuleResolution resolveRuleSound(SoundSourceMode sourceMode, String soundValue, Path soundsRoot, boolean diagnostics) {
+    private static PlaybackDiagnosticResult toPublic(JoinSoundPlaybackDiagnosticResult result) {
+        if (result == null) return new PlaybackDiagnosticResult(PlaybackStatus.FALLBACK_USED, null, true, "No diagnostic result.");
+        return new PlaybackDiagnosticResult(
+            toPublic(result.status()),
+            toPublic(result.resolved()),
+            result.fallbackUsed(),
+            result.message()
+        );
+    }
+
+    private static ResolvedSound toPublic(JoinSoundResolvedSound sound) {
+        if (sound == null) return null;
+        return new ResolvedSound(toPublic(sound.type()), sound.filePath(), sound.soundId());
+    }
+
+    private static PlaybackStatus toPublic(JoinSoundPlaybackStatus status) {
+        if (status == null) return PlaybackStatus.FALLBACK_USED;
+        return switch (status) {
+            case OK -> PlaybackStatus.OK;
+            case FILE_NOT_FOUND -> PlaybackStatus.FILE_NOT_FOUND;
+            case UNSUPPORTED_FORMAT -> PlaybackStatus.UNSUPPORTED_FORMAT;
+            case LINE_UNAVAILABLE -> PlaybackStatus.LINE_UNAVAILABLE;
+            case DECODE_ERROR -> PlaybackStatus.DECODE_ERROR;
+            case FALLBACK_USED -> PlaybackStatus.FALLBACK_USED;
+        };
+    }
+
+    private static ResolvedType toPublic(JoinSoundResolvedType type) {
+        if (type == null) return ResolvedType.SOUND_ID;
+        return switch (type) {
+            case FILE -> ResolvedType.FILE;
+            case SOUND_ID -> ResolvedType.SOUND_ID;
+        };
+    }
+
+    private static JoinSoundRuleResolution resolveRuleSound(SoundSourceMode sourceMode, String soundValue, Path soundsRoot, boolean diagnostics) {
         if (sourceMode == null) sourceMode = SoundSourceMode.ManualId;
 
         return switch (sourceMode) {
             case LocalFolder -> {
-                LocalResolution local = resolveLocalOggPathDetailed(soundValue, soundsRoot, diagnostics);
-                if (local.path() != null) yield new RuleResolution(ResolvedSound.fromFile(local.path()), PlaybackStatus.OK, "Local sound resolved.");
+                JoinSoundLocalResolution local = resolveLocalOggPathDetailed(soundValue, soundsRoot, diagnostics);
+                if (local.path() != null) yield new JoinSoundRuleResolution(JoinSoundResolvedSound.fromFile(local.path()), JoinSoundPlaybackStatus.OK, "Local sound resolved.");
                 if (diagnostics) LOG.warn("Local sound could not be resolved from '{}'.", soundValue);
-                yield new RuleResolution(null, local.status(), local.message());
+                yield new JoinSoundRuleResolution(null, local.status(), local.message());
             }
             case GameRegistry, ManualId -> {
                 Identifier id = parseIdentifier(soundValue);
                 if (id == null && diagnostics) {
                     LOG.warn("Sound id '{}' is invalid for source '{}'.", soundValue, sourceMode);
                 }
-                if (id != null) yield new RuleResolution(ResolvedSound.fromSoundId(id), PlaybackStatus.OK, "Sound id resolved.");
-                yield new RuleResolution(null, PlaybackStatus.FALLBACK_USED, "Sound id is invalid.");
+                if (id != null) yield new JoinSoundRuleResolution(JoinSoundResolvedSound.fromSoundId(id), JoinSoundPlaybackStatus.OK, "Sound id resolved.");
+                yield new JoinSoundRuleResolution(null, JoinSoundPlaybackStatus.FALLBACK_USED, "Sound id is invalid.");
             }
         };
     }
 
-    private static ResolvedSound resolveLegacySoundSpec(String soundSpec, Path soundsRoot, boolean diagnostics) {
+    private static JoinSoundResolvedSound resolveLegacySoundSpec(String soundSpec, Path soundsRoot, boolean diagnostics) {
         if (soundSpec == null) return null;
         String value = soundSpec.trim();
         if (value.isEmpty()) return null;
@@ -286,14 +339,14 @@ public final class JoinSoundPlayer {
             if (file == null && diagnostics) {
                 LOG.warn("Default local sound file '{}' could not be resolved.", value);
             }
-            return file != null ? ResolvedSound.fromFile(file) : null;
+            return file != null ? JoinSoundResolvedSound.fromFile(file) : null;
         }
 
         Identifier id = parseIdentifier(value);
         if (id == null && diagnostics) {
             LOG.warn("Default sound id '{}' is invalid.", value);
         }
-        return id != null ? ResolvedSound.fromSoundId(id) : null;
+        return id != null ? JoinSoundResolvedSound.fromSoundId(id) : null;
     }
 
     public static Path resolveLocalOggPath(String value, Path soundsRoot) {
@@ -304,38 +357,38 @@ public final class JoinSoundPlayer {
         return resolveLocalOggPathDetailed(value, soundsRoot, diagnostics).path();
     }
 
-    private static LocalResolution resolveLocalOggPathDetailed(String value, Path soundsRoot, boolean diagnostics) {
+    private static JoinSoundLocalResolution resolveLocalOggPathDetailed(String value, Path soundsRoot, boolean diagnostics) {
         if (soundsRoot == null || value == null) {
-            return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Local sound path is empty.");
+            return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Local sound path is empty.");
         }
         String trimmed = value.trim();
-        if (trimmed.isEmpty()) return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Local sound path is empty.");
+        if (trimmed.isEmpty()) return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Local sound path is empty.");
 
         try {
             Path relative = Path.of(trimmed);
             if (relative.isAbsolute()) {
                 if (diagnostics) LOG.warn("Rejected absolute local sound path '{}'.", trimmed);
-                return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Absolute local path is not allowed.");
+                return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Absolute local path is not allowed.");
             }
 
             Path candidate = soundsRoot.resolve(relative).normalize();
             if (!candidate.startsWith(soundsRoot)) {
                 if (diagnostics) LOG.warn("Rejected path traversal for local sound '{}'.", trimmed);
-                return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Path traversal is not allowed.");
+                return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Path traversal is not allowed.");
             }
             if (!candidate.getFileName().toString().toLowerCase().endsWith(".ogg")) {
                 if (diagnostics) LOG.warn("Rejected non-ogg local sound path '{}'.", trimmed);
-                return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Only .ogg local sounds are supported.");
+                return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Only .ogg local sounds are supported.");
             }
             if (!Files.isRegularFile(candidate)) {
                 if (diagnostics) LOG.warn("Local sound file does not exist '{}'.", candidate);
-                return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Local .ogg file was not found.");
+                return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Local .ogg file was not found.");
             }
 
-            return new LocalResolution(candidate, PlaybackStatus.OK, "Local sound resolved.");
+            return new JoinSoundLocalResolution(candidate, JoinSoundPlaybackStatus.OK, "Local sound resolved.");
         } catch (InvalidPathException ignored) {
             if (diagnostics) LOG.warn("Invalid local sound path '{}'.", trimmed);
-            return new LocalResolution(null, PlaybackStatus.FILE_NOT_FOUND, "Local path is invalid.");
+            return new JoinSoundLocalResolution(null, JoinSoundPlaybackStatus.FILE_NOT_FOUND, "Local path is invalid.");
         }
     }
 
@@ -348,27 +401,27 @@ public final class JoinSoundPlayer {
         }
     }
 
-    private static PlaybackStatus playResolved(
-        ResolvedSound resolved,
+    private static JoinSoundPlaybackStatus playResolved(
+        JoinSoundResolvedSound resolved,
         int localOggVolumePercent,
         boolean diagnostics,
         boolean waitForFileResult
     ) {
-        if (resolved.type() == ResolvedType.FILE) {
+        if (resolved.type() == JoinSoundResolvedType.FILE) {
             if (waitForFileResult) {
-                PlaybackStatus status = playOggBlocking(resolved.filePath(), localOggVolumePercent, diagnostics);
-                if (status != PlaybackStatus.OK) playSoundId(FALLBACK_SOUND_ID);
+                JoinSoundPlaybackStatus status = JoinSoundOggPlayback.playBlocking(resolved.filePath(), localOggVolumePercent, diagnostics);
+                if (status != JoinSoundPlaybackStatus.OK) playSoundId(FALLBACK_SOUND_ID);
                 return status;
             }
 
-            playOggAsync(resolved.filePath(), localOggVolumePercent, diagnostics);
-            return PlaybackStatus.OK;
+            JoinSoundOggPlayback.playAsync(resolved.filePath(), localOggVolumePercent, diagnostics);
+            return JoinSoundPlaybackStatus.OK;
         }
 
-        return playSoundId(resolved.soundId()) ? PlaybackStatus.OK : PlaybackStatus.FALLBACK_USED;
+        return playSoundId(resolved.soundId()) ? JoinSoundPlaybackStatus.OK : JoinSoundPlaybackStatus.FALLBACK_USED;
     }
 
-    private static boolean playSoundId(Identifier id) {
+    static boolean playSoundId(Identifier id) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null) return true;
 
@@ -382,176 +435,26 @@ public final class JoinSoundPlayer {
         }
 
         SoundEvent finalSound = sound;
-        client.execute(() -> client.getSoundManager().play(PositionedSoundInstance.master(finalSound, 1.0f, 1.0f)));
+        client.execute(() -> client.getSoundManager().play(PositionedSoundInstance.ui(finalSound, 1.0f, 1.0f)));
         return exactMatch;
     }
 
-    private static void playOggAsync(Path filePath, int localOggVolumePercent, boolean diagnostics) {
-        AUDIO_EXECUTOR.execute(() -> {
-            PlaybackStatus status = playOggOnAudioThread(filePath, localOggVolumePercent, diagnostics);
-            if (status != PlaybackStatus.OK) {
-                LOG.warn("Failed to play local join sound '{}', status={}. Falling back to '{}'.", filePath, status, FALLBACK_SOUND_ID);
-                playSoundId(FALLBACK_SOUND_ID);
-            }
-
-            if (diagnostics) LOG.info("Diagnostic playback finished for local sound '{}'.", filePath);
-        });
+    private static JoinSoundPlaybackStatus toFinalStatus(JoinSoundResolvedPlayback resolved, JoinSoundPlaybackStatus playbackStatus) {
+        if (playbackStatus != JoinSoundPlaybackStatus.OK) return playbackStatus;
+        if (resolved.primaryStatus() != JoinSoundPlaybackStatus.OK) return resolved.primaryStatus();
+        if (resolved.fallbackUsed()) return JoinSoundPlaybackStatus.FALLBACK_USED;
+        return JoinSoundPlaybackStatus.OK;
     }
 
-    private static PlaybackStatus playOggBlocking(Path filePath, int localOggVolumePercent, boolean diagnostics) {
-        Future<PlaybackStatus> future = AUDIO_EXECUTOR.submit(() -> playOggOnAudioThread(filePath, localOggVolumePercent, diagnostics));
-        try {
-            PlaybackStatus status = future.get();
-            if (diagnostics) LOG.info("Blocking diagnostic playback finished for local sound '{}', status={}.", filePath, status);
-            return status;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn("Audio playback interrupted for '{}'.", filePath, e);
-            return PlaybackStatus.DECODE_ERROR;
-        } catch (ExecutionException e) {
-            LOG.warn("Audio playback execution failed for '{}'.", filePath, e.getCause());
-            return PlaybackStatus.DECODE_ERROR;
-        }
-    }
-
-    private static PlaybackStatus playOggOnAudioThread(Path filePath, int localOggVolumePercent, boolean diagnostics) {
-        Thread thread = Thread.currentThread();
-        ClassLoader previousClassLoader = thread.getContextClassLoader();
-        ClassLoader targetClassLoader = JoinSoundPlayer.class.getClassLoader();
-        int sanitizedVolumePercent = sanitizeLocalOggVolumePercent(localOggVolumePercent);
-
-        thread.setContextClassLoader(targetClassLoader);
-
-        if (diagnostics) {
-            LOG.info(
-                "Audio thread='{}', contextClassLoader='{}', playerClassLoader='{}'.",
-                thread.getName(),
-                thread.getContextClassLoader(),
-                targetClassLoader
-            );
-        }
-
-        try (AudioInputStream inputStream = openPcmAudioStream(filePath)) {
-            Clip clip = openClip(inputStream.getFormat(), diagnostics);
-            clip.addLineListener(event -> {
-                if (event.getType() == LineEvent.Type.STOP || event.getType() == LineEvent.Type.CLOSE) {
-                    clip.close();
-                }
-            });
-            clip.open(inputStream);
-            applyLocalOggVolume(clip, sanitizedVolumePercent, diagnostics);
-            clip.start();
-            return PlaybackStatus.OK;
-        } catch (UnsupportedAudioFileException e) {
-            LOG.warn("Unsupported local sound format '{}'.", filePath, e);
-            return PlaybackStatus.UNSUPPORTED_FORMAT;
-        } catch (LineUnavailableException e) {
-            LOG.warn("Audio line unavailable for local sound '{}'.", filePath, e);
-            return PlaybackStatus.LINE_UNAVAILABLE;
-        } catch (IOException | IllegalArgumentException e) {
-            LOG.warn("Decode/open failure for local sound '{}'.", filePath, e);
-            return PlaybackStatus.DECODE_ERROR;
-        } catch (Exception e) {
-            LOG.warn("Unexpected playback error for local sound '{}'.", filePath, e);
-            return PlaybackStatus.DECODE_ERROR;
-        } finally {
-            thread.setContextClassLoader(previousClassLoader);
-        }
-    }
-
-    private static void applyLocalOggVolume(Clip clip, int volumePercent, boolean diagnostics) {
-        if (!clip.isControlSupported(FloatControl.Type.MASTER_GAIN)) {
-            if (diagnostics) LOG.info("MASTER_GAIN control is not supported by clip. Keeping default gain.");
-            return;
-        }
-
-        try {
-            FloatControl control = (FloatControl) clip.getControl(FloatControl.Type.MASTER_GAIN);
-            float min = control.getMinimum();
-            float max = control.getMaximum();
-
-            float gain;
-            if (volumePercent <= 0) {
-                gain = min;
-            } else {
-                gain = (float) (20.0 * Math.log10(volumePercent / 100.0));
-            }
-
-            if (gain < min) gain = min;
-            if (gain > max) gain = max;
-
-            control.setValue(gain);
-
-            if (diagnostics) {
-                LOG.info("Applied local .ogg volume: {}% -> {} dB (range {}..{}).", volumePercent, gain, min, max);
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to apply local .ogg volume {}%. Continuing with default gain.", volumePercent, e);
-        }
-    }
-
-    private static Clip openClip(AudioFormat format, boolean diagnostics) throws LineUnavailableException {
-        DataLine.Info lineInfo = new DataLine.Info(Clip.class, format);
-
-        try {
-            return (Clip) AudioSystem.getLine(lineInfo);
-        } catch (LineUnavailableException | IllegalArgumentException primary) {
-            if (diagnostics) {
-                LOG.warn("Clip open via DataLine.Info failed, trying AudioSystem.getClip(). format={}", format, primary);
-            }
-
-            try {
-                return AudioSystem.getClip();
-            } catch (LineUnavailableException fallbackLine) {
-                fallbackLine.addSuppressed(primary);
-                throw fallbackLine;
-            } catch (IllegalArgumentException fallbackInvalid) {
-                LineUnavailableException wrapped = new LineUnavailableException("Unable to obtain clip line.");
-                wrapped.addSuppressed(primary);
-                wrapped.addSuppressed(fallbackInvalid);
-                throw wrapped;
-            }
-        }
-    }
-
-    private static AudioInputStream openPcmAudioStream(Path filePath) throws UnsupportedAudioFileException, IOException {
-        AudioInputStream encoded = AudioSystem.getAudioInputStream(filePath.toFile());
-        AudioFormat source = encoded.getFormat();
-
-        AudioFormat pcm = new AudioFormat(
-            AudioFormat.Encoding.PCM_SIGNED,
-            source.getSampleRate(),
-            16,
-            source.getChannels(),
-            source.getChannels() * 2,
-            source.getSampleRate(),
-            false
-        );
-
-        if (!AudioSystem.isConversionSupported(pcm, source)) {
-            encoded.close();
-            throw new UnsupportedAudioFileException("PCM conversion is not supported for source format: " + source);
-        }
-
-        return AudioSystem.getAudioInputStream(pcm, encoded);
-    }
-
-    private static PlaybackStatus toFinalStatus(ResolvedPlayback resolved, PlaybackStatus playbackStatus) {
-        if (playbackStatus != PlaybackStatus.OK) return playbackStatus;
-        if (resolved.primaryStatus() != PlaybackStatus.OK) return resolved.primaryStatus();
-        if (resolved.fallbackUsed()) return PlaybackStatus.FALLBACK_USED;
-        return PlaybackStatus.OK;
-    }
-
-    private static PlaybackStatus statusOrFallback(PlaybackStatus status) {
-        return status == PlaybackStatus.OK ? PlaybackStatus.FALLBACK_USED : status;
+    private static JoinSoundPlaybackStatus statusOrFallback(JoinSoundPlaybackStatus status) {
+        return status == JoinSoundPlaybackStatus.OK ? JoinSoundPlaybackStatus.FALLBACK_USED : status;
     }
 
     private static String nonBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
     }
 
-    private static String messageForStatus(PlaybackStatus status, String primaryMessage) {
+    private static String messageForStatus(JoinSoundPlaybackStatus status, String primaryMessage) {
         return switch (status) {
             case OK -> "Sound played.";
             case FILE_NOT_FOUND -> nonBlank(primaryMessage, "Local .ogg file not found. Fallback played.");
@@ -567,50 +470,7 @@ public final class JoinSoundPlayer {
         if (value > 200) return 200;
         return value;
     }
-
-    public enum ResolvedType {
-        FILE,
-        SOUND_ID
-    }
-
-    public record ResolvedSound(ResolvedType type, Path filePath, Identifier soundId) {
-        public static ResolvedSound fromFile(Path path) {
-            return new ResolvedSound(ResolvedType.FILE, path, null);
-        }
-
-        public static ResolvedSound fromSoundId(Identifier id) {
-            return new ResolvedSound(ResolvedType.SOUND_ID, null, id);
-        }
-    }
-
-    public enum PlaybackStatus {
-        OK,
-        FILE_NOT_FOUND,
-        UNSUPPORTED_FORMAT,
-        LINE_UNAVAILABLE,
-        DECODE_ERROR,
-        FALLBACK_USED
-    }
-
-    public record PlaybackDiagnosticResult(
-        PlaybackStatus status,
-        ResolvedSound resolved,
-        boolean fallbackUsed,
-        String message
-    ) {
-        public boolean isOk() {
-            return status == PlaybackStatus.OK;
-        }
-    }
-
-    private record RuleResolution(ResolvedSound sound, PlaybackStatus status, String message) {}
-
-    private record LocalResolution(Path path, PlaybackStatus status, String message) {}
-
-    private record ResolvedPlayback(
-        ResolvedSound sound,
-        boolean fallbackUsed,
-        PlaybackStatus primaryStatus,
-        String primaryMessage
-    ) {}
 }
+
+
+

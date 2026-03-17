@@ -185,3 +185,5 @@ public class LocalIconSelectScreen extends WindowScreen {
         return fileName.substring(idx + 1).toLowerCase(Locale.ROOT);
     }
 }
+
+
