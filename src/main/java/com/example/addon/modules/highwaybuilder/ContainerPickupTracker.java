@@ -118,7 +118,7 @@ final class ContainerPickupTracker {
             searchBox,
             entity -> entity.getStack().getItem() == handler.containerTask.targetBlock.asItem()
         )) {
-            double dist = itemEntity.getPos().squaredDistanceTo(center);
+            double dist = itemEntity.getEntityPos().squaredDistanceTo(center);
             if (dist < bestDist) {
                 bestDist = dist;
                 closest = itemEntity;

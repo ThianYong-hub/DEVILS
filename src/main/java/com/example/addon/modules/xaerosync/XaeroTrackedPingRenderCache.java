@@ -56,9 +56,9 @@ public final class XaeroTrackedPingRenderCache {
         String targetName = XaeroSyncValueUtils.normalizeKey(rawName);
         if (targetName.isBlank() || MeteorClient.mc == null || MeteorClient.mc.getNetworkHandler() == null) return null;
         for (PlayerListEntry entry : MeteorClient.mc.getNetworkHandler().getPlayerList()) {
-            if (entry == null || entry.getProfile() == null || entry.getProfile().getId() == null) continue;
-            String entryName = XaeroSyncValueUtils.normalizeKey(entry.getProfile().getName());
-            if (entryName.equals(targetName)) return entry.getProfile().getId();
+            if (entry == null || entry.getProfile() == null || entry.getProfile().id() == null) continue;
+            String entryName = XaeroSyncValueUtils.normalizeKey(entry.getProfile().name());
+            if (entryName.equals(targetName)) return entry.getProfile().id();
         }
         return null;
     }

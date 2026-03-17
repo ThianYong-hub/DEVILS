@@ -167,8 +167,8 @@ public final class XaeroEntryFormatting {
 
         String needle = XaeroSyncValueUtils.normalizeKey(entry.name());
         for (PlayerListEntry listEntry : module.client().getNetworkHandler().getPlayerList()) {
-            if (listEntry == null || listEntry.getProfile() == null || listEntry.getProfile().getName() == null) continue;
-            if (needle.equals(XaeroSyncValueUtils.normalizeKey(listEntry.getProfile().getName()))) return listEntry;
+            if (listEntry == null || listEntry.getProfile() == null || listEntry.getProfile().name() == null) continue;
+            if (needle.equals(XaeroSyncValueUtils.normalizeKey(listEntry.getProfile().name()))) return listEntry;
         }
         return null;
     }

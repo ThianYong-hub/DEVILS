@@ -96,7 +96,7 @@ final class EChestMinerPositioning {
     void nudgeAwayFromActionPos() {
         if (mc.player == null || miner.actionPos == null) return;
 
-        Vec3d player = mc.player.getPos();
+        Vec3d player = mc.player.getEntityPos();
         Vec3d center = Vec3d.ofCenter(miner.actionPos);
         double dx = player.x - center.x;
         double dz = player.z - center.z;
@@ -136,7 +136,7 @@ final class EChestMinerPositioning {
             BlockPos candidate = placePos.offset(dir);
             if (!isValidStandPos(candidate, placePos)) continue;
 
-            double distance = mc.player.getPos().squaredDistanceTo(Vec3d.ofCenter(candidate));
+            double distance = mc.player.getEntityPos().squaredDistanceTo(Vec3d.ofCenter(candidate));
             if (distance < bestDist) {
                 bestDist = distance;
                 best = candidate;
@@ -169,7 +169,7 @@ final class EChestMinerPositioning {
             nudgeAwayFromActionPos();
             if (miner.standPos != null) {
                 Vec3d standTarget = getSafeStandPoint(miner.standPos, miner.actionPos);
-                if (horizontalDistanceSq(mc.player.getPos(), standTarget)
+                if (horizontalDistanceSq(mc.player.getEntityPos(), standTarget)
                     <= EChestMinerSupport.MANUAL_CENTER_RANGE * EChestMinerSupport.MANUAL_CENTER_RANGE) {
                     module.pathfinder.clearMinerGoal();
                     moveTowardStandPoint(standTarget);
@@ -189,7 +189,7 @@ final class EChestMinerPositioning {
         if (canOperateFromCurrentPos(miner.actionPos)) {
             module.pathfinder.clearMinerGoal();
             miner.ensureNoMoveTicks = 0;
-            miner.lastEnsurePos = mc.player.getPos();
+            miner.lastEnsurePos = mc.player.getEntityPos();
             return true;
         }
 
@@ -203,7 +203,7 @@ final class EChestMinerPositioning {
         }
 
         Vec3d standTarget = getSafeStandPoint(miner.standPos, miner.actionPos);
-        double distSq = horizontalDistanceSq(mc.player.getPos(), standTarget);
+        double distSq = horizontalDistanceSq(mc.player.getEntityPos(), standTarget);
 
         if (distSq <= EChestMinerSupport.MANUAL_CENTER_RANGE * EChestMinerSupport.MANUAL_CENTER_RANGE) {
             module.pathfinder.clearMinerGoal();
@@ -212,7 +212,7 @@ final class EChestMinerPositioning {
             module.pathfinder.setMinerGoal(miner.standPos);
         }
 
-        Vec3d currentPos = mc.player.getPos();
+        Vec3d currentPos = mc.player.getEntityPos();
         if (miner.lastEnsurePos != null && currentPos.squaredDistanceTo(miner.lastEnsurePos) <= EChestMinerSupport.MOVE_EPSILON_SQ) {
             miner.ensureNoMoveTicks++;
         } else {
@@ -378,7 +378,7 @@ final class EChestMinerPositioning {
             miner.standPos = findStandPos(miner.actionPos);
             if (miner.standPos != null) {
                 Vec3d standTarget = getSafeStandPoint(miner.standPos, miner.actionPos);
-                if (horizontalDistanceSq(mc.player.getPos(), standTarget)
+                if (horizontalDistanceSq(mc.player.getEntityPos(), standTarget)
                     <= EChestMinerSupport.MANUAL_CENTER_RANGE * EChestMinerSupport.MANUAL_CENTER_RANGE) {
                     module.pathfinder.clearMinerGoal();
                     moveTowardStandPoint(standTarget);

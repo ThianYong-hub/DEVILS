@@ -15,7 +15,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.meteor.KeyEvent;
-import meteordevelopment.meteorclient.events.meteor.MouseButtonEvent;
+import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -215,18 +215,18 @@ public class Ping extends Module {
 
     @EventHandler(priority = EventPriority.HIGHEST + 1)
     private void onBindKey(KeyEvent event) {
-        CrashGuard.run(this, "onBindKey", () -> handleBindEvent(true, event.key, event.modifiers, event.action, event));
+        CrashGuard.run(this, "onBindKey", () -> handleBindEvent(true, event.key(), event.modifiers(), event.action, event));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST + 1)
-    private void onBindMouse(MouseButtonEvent event) {
-        CrashGuard.run(this, "onBindMouse", () -> handleBindEvent(false, event.button, 0, event.action, event));
+    private void onBindMouse(MouseClickEvent event) {
+        CrashGuard.run(this, "onBindMouse", () -> handleBindEvent(false, event.button(), 0, event.action, event));
     }
 
     private void handleBindEvent(boolean isKey, int value, int modifiers, KeyAction action, Object eventRef) {
         if (!keybind.matches(isKey, value, modifiers)) return;
         if (eventRef instanceof KeyEvent keyEvent) keyEvent.setCancelled(true);
-        if (eventRef instanceof MouseButtonEvent mouseEvent) mouseEvent.setCancelled(true);
+        if (eventRef instanceof MouseClickEvent mouseEvent) mouseEvent.setCancelled(true);
         if (action != KeyAction.Press || !isActive() || client().currentScreen != null) return;
         markerController.createPingFromCrosshair();
     }

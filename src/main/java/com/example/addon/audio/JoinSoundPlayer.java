@@ -435,7 +435,7 @@ public final class JoinSoundPlayer {
         }
 
         SoundEvent finalSound = sound;
-        client.execute(() -> client.getSoundManager().play(PositionedSoundInstance.master(finalSound, 1.0f, 1.0f)));
+        client.execute(() -> client.getSoundManager().play(PositionedSoundInstance.ui(finalSound, 1.0f, 1.0f)));
         return exactMatch;
     }
 

@@ -112,7 +112,7 @@ public class EChestMiner {
         int missingObsidian = resources.countMissingObsidianForRefill();
         boolean refillContinuation = EChestMinerSupport.isRefillWorthContinuing(refillToCapacity, missingObsidian);
 
-        double distToBuild = mc.player.getPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos));
+        double distToBuild = mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos));
         if (!refillContinuation && distToBuild > 1.5) return;
         if (!resources.ensurePickaxeReadyForMining()) return;
 

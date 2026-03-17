@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.32`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.32/devils-addon-0.0.32.jar)
+- Current build (`v0.0.33`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.33/devils-addon-0.0.33.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -12,10 +12,10 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 | Component | Required Version |
 | --- | --- |
-| Minecraft | `1.21.8` |
-| Fabric Loader | `0.16.14+` |
+| Minecraft | `1.21.11` |
+| Fabric Loader | `0.18.4+` |
 | Java | `21` |
-| Meteor Client | build for `1.21.8` |
+| Meteor Client | build for `1.21.11` |
 
 ## Installation
 
@@ -107,7 +107,7 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.32`)
+## Release Notes (`v0.0.33`)
 
 - Rebuilt the addon into a package-oriented structure: large monolithic modules were split into feature-local controllers, planners, codec helpers, and UI support classes.
 - Normalized repository structure so Java sources stay in the `100-500` line range instead of multi-thousand-line modules or 10-line wrapper files.

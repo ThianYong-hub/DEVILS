@@ -108,7 +108,7 @@ public final class AutoCevActionExecutor {
 
         if (state.isOf(Blocks.OBSIDIAN)) {
             if (crystal != null) {
-                if (antiSuicide(crystal.getPos())) mineBase(plan.pos());
+                if (antiSuicide(crystal.getEntityPos())) mineBase(plan.pos());
                 return;
             }
 
@@ -119,7 +119,7 @@ public final class AutoCevActionExecutor {
 
         if (!state.isAir() && !state.isReplaceable()) return;
         if (crystal != null) {
-            if (antiSuicide(crystal.getPos())) attackCrystal(crystal);
+            if (antiSuicide(crystal.getEntityPos())) attackCrystal(crystal);
             return;
         }
 
@@ -333,7 +333,7 @@ public final class AutoCevActionExecutor {
 
         Runnable attack = () -> {
             if (module.client().player == null) return;
-            module.debug("attack crystal -> " + module.formatPos(BlockPos.ofFloored(crystal.getPos())));
+            module.debug("attack crystal -> " + module.formatPos(BlockPos.ofFloored(crystal.getEntityPos())));
             if (module.client().getNetworkHandler() != null) {
                 module.client().getNetworkHandler().sendPacket(PlayerInteractEntityC2SPacket.attack(crystal, module.client().player.isSneaking()));
             } else if (module.client().interactionManager != null) {
@@ -343,7 +343,7 @@ public final class AutoCevActionExecutor {
         };
 
         if (module.shouldRotate()) {
-            Rotations.rotate(Rotations.getYaw(crystal.getPos()), Rotations.getPitch(crystal.getPos()), ROTATE_PRIORITY, attack);
+            Rotations.rotate(Rotations.getYaw(crystal.getEntityPos()), Rotations.getPitch(crystal.getEntityPos()), ROTATE_PRIORITY, attack);
         } else {
             attack.run();
         }

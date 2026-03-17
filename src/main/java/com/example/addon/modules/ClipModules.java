@@ -180,7 +180,7 @@ final class AntiWaspObstacleAvoidance {
 
         double min = maxDistance;
         double[] heights = { 0.25, 0.95, 1.60 };
-        Vec3d base = mc.player.getPos();
+        Vec3d base = mc.player.getEntityPos();
 
         for (double h : heights) {
             Vec3d start = base.add(0.0, h, 0.0);

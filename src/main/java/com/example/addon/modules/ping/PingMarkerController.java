@@ -44,17 +44,17 @@ public final class PingMarkerController {
     }
 
     public void createPingFromCrosshair() {
-        if (module.client().player == null || module.client().world == null || module.client().cameraEntity == null) return;
+        if (module.client().player == null || module.client().world == null || module.client().getCameraEntity() == null) return;
         if (module.client().currentScreen != null) return;
 
-        boolean detachedCamera = module.client().cameraEntity != module.client().player;
-        Vec3d eye = detachedCamera ? module.client().cameraEntity.getCameraPosVec(1.0f) : module.client().player.getEyePos();
-        Vec3d rotation = detachedCamera ? module.client().cameraEntity.getRotationVec(1.0f) : module.client().player.getRotationVec(1.0f);
+        boolean detachedCamera = module.client().getCameraEntity() != module.client().player;
+        Vec3d eye = detachedCamera ? module.client().getCameraEntity().getCameraPosVec(1.0f) : module.client().player.getEyePos();
+        Vec3d rotation = detachedCamera ? module.client().getCameraEntity().getRotationVec(1.0f) : module.client().player.getRotationVec(1.0f);
         double maxRange = Math.max(8, module.raycastRangeValue());
         Vec3d fallback = eye.add(rotation.multiply(maxRange));
 
         HitResult hit = detachedCamera
-            ? module.client().cameraEntity.raycast(maxRange, 1.0f, false)
+            ? module.client().getCameraEntity().raycast(maxRange, 1.0f, false)
             : module.client().player.raycast(maxRange, 1.0f, false);
 
         Vec3d raw = fallback;
@@ -241,10 +241,10 @@ public final class PingMarkerController {
 
     private boolean isPlayerInView(String playerName) {
         PlayerEntity player = findLoadedPlayer(playerName);
-        if (player == null || module.client().cameraEntity == null) return false;
+        if (player == null || module.client().getCameraEntity() == null) return false;
 
-        Vec3d cameraPos = module.client().cameraEntity.getCameraPosVec(1.0f);
-        Vec3d look = module.client().cameraEntity.getRotationVec(1.0f);
+        Vec3d cameraPos = module.client().getCameraEntity().getCameraPosVec(1.0f);
+        Vec3d look = module.client().getCameraEntity().getRotationVec(1.0f);
         Vec3d toTarget = player.getBoundingBox().getCenter().subtract(cameraPos);
         double distance = toTarget.length();
         if (distance < 0.001) return true;
@@ -268,7 +268,7 @@ public final class PingMarkerController {
 
         for (PlayerEntity player : module.client().world.getPlayers()) {
             if (player == null || player.getGameProfile() == null) continue;
-            if (normalized.equals(PingFormattingUtils.normalizeKey(player.getGameProfile().getName()))) return player;
+            if (normalized.equals(PingFormattingUtils.normalizeKey(player.getGameProfile().name()))) return player;
         }
         return null;
     }

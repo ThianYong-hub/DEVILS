@@ -154,7 +154,7 @@ abstract class PlayerTrackerPingNameMixin {
     )
     private String devilsAddon$renderPingName(GameProfile profile) {
         if (profile == null) return "";
-        return XaeroSync.resolveTrackedPingDisplayName(profile.getId(), profile.getName());
+        return XaeroSync.resolveTrackedPingDisplayName(profile.id(), profile.name());
     }
 }
 

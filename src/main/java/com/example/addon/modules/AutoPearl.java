@@ -123,7 +123,7 @@ public class AutoPearl extends Module {
 
         if (waitingForTeleport) {
             waitTicks++;
-            if (posBeforeThrow != null && mc.player.getPos().distanceTo(posBeforeThrow) > TELEPORT_THRESHOLD) {
+            if (posBeforeThrow != null && mc.player.getEntityPos().distanceTo(posBeforeThrow) > TELEPORT_THRESHOLD) {
                 waitingForTeleport = false;
                 posBeforeThrow = null;
                 waitTicks = 0;
@@ -159,7 +159,7 @@ public class AutoPearl extends Module {
             targetHorizSpeed = 0;
         }
         prevTarget = target;
-        prevTargetPos = target.getPos();
+        prevTargetPos = target.getEntityPos();
 
         double distToTarget = mc.player.distanceTo(target);
         if (distToTarget > range.get()) return;
@@ -182,7 +182,7 @@ public class AutoPearl extends Module {
         float yaw = applyOrbitOffset(baseYaw, distToTarget);
         float pitch = AutoPearlTrajectory.calculatePitchToTarget(mc, target, yaw, -30f);
 
-        posBeforeThrow = mc.player.getPos();
+        posBeforeThrow = mc.player.getEntityPos();
         waitingForTeleport = true;
         waitTicks = 0;
         tickTimer = 0;
@@ -201,7 +201,7 @@ public class AutoPearl extends Module {
 
         if (showRange.get()) {
             double r = range.get();
-            Vec3d p = mc.player.getPos();
+            Vec3d p = mc.player.getEntityPos();
             Box b = new Box(p.x - r, p.y - r, p.z - r, p.x + r, p.y + r, p.z + r);
             event.renderer.box(b, rangeColor.get(), rangeColor.get(), ShapeMode.Lines, 0);
         }
@@ -231,7 +231,7 @@ public class AutoPearl extends Module {
     private boolean tryDescentPearl(int pearlSlot) {
         if (mc.player == null || mc.world == null || target == null) return false;
 
-        Vec3d playerPos = mc.player.getPos();
+        Vec3d playerPos = mc.player.getEntityPos();
         double targetY = target.getY();
         double maxDrop = descentStepMax.get();
 
@@ -275,7 +275,7 @@ public class AutoPearl extends Module {
         float yaw = (float) Math.toDegrees(-Math.atan2(ldx, ldz));
         float pitch = AutoPearlTrajectory.calculatePitchToPoint(mc, landSpot, yaw, -30f);
 
-        posBeforeThrow = mc.player.getPos();
+        posBeforeThrow = mc.player.getEntityPos();
         waitingForTeleport = true;
         waitTicks = 0;
         tickTimer = 0;

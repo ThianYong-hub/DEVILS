@@ -287,7 +287,7 @@ public class AntiWasp extends Module {
         forcedForward = false;
         prevForwardState = mc.options.forwardKey.isPressed();
 
-        origin = mc.player.getPos();
+        origin = mc.player.getEntityPos();
     }
 
     @Override
@@ -327,7 +327,7 @@ public class AntiWasp extends Module {
                 figureTicks = 0;
                 activeFigure = AntiWaspPathMath.nextFigure(activeFigure);
                 phase = 0.0;
-                origin = mc.player.getPos();
+                origin = mc.player.getEntityPos();
                 info("Figure: " + activeFigure.name().toLowerCase());
             }
         } else {

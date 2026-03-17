@@ -31,7 +31,7 @@ public final class XaeroWaypointManagedWaypoints {
             int x = toWaypointBlockCoord(marker.x());
             int y = toWaypointBlockCoord(marker.y());
             int z = toWaypointBlockCoord(marker.z());
-            String symbol = marker.player() ? XaeroWaypointContext.PLAYER_FALLBACK_SYMBOL : XaeroWaypointContext.PING_FALLBACK_SYMBOL;
+            String symbol = marker.player() ? XaeroWaypointContext.PLAYER_FALLBACK_SYMBOL : XaeroWaypointContext.INVISIBLE_WAYPOINT_SYMBOL;
             String stateKey = XaeroWaypointNaming.managedWaypointStateKey(markerName, x, y, z, symbol);
             desiredByStateKey.put(stateKey, marker);
 
@@ -232,7 +232,7 @@ public final class XaeroWaypointManagedWaypoints {
         int z = toWaypointBlockCoord(marker.z());
         int color = marker.player() ? XaeroWaypointContext.PLAYER_WAYPOINT_COLOR : XaeroWaypointContext.MARKER_WAYPOINT_COLOR;
         String name = XaeroWaypointNaming.formatManagedWaypointName(marker);
-        String label = marker.player() ? XaeroWaypointContext.PLAYER_FALLBACK_SYMBOL : XaeroWaypointContext.PING_FALLBACK_SYMBOL;
+        String label = marker.player() ? XaeroWaypointContext.PLAYER_FALLBACK_SYMBOL : XaeroWaypointContext.INVISIBLE_WAYPOINT_SYMBOL;
 
         constructor.setAccessible(true);
         return constructor.newInstance(x, y, z, name, label, color, 0, true);

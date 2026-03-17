@@ -14,7 +14,7 @@ import com.example.addon.util.CrashGuard;
 import com.example.addon.util.MapIconManager;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
-import meteordevelopment.meteorclient.events.meteor.MouseButtonEvent;
+import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
@@ -207,9 +207,9 @@ public class XaeroSync extends Module {
     }
 
     @EventHandler(priority = EventPriority.HIGHEST + 1)
-    private void onMouseButton(MouseButtonEvent event) {
+    private void onMouseButton(MouseClickEvent event) {
         CrashGuard.run(this, "onMouseButton", () -> {
-            if (overlayController.handleOverlayClick(event.action, event.button, event)) event.setCancelled(true);
+            if (overlayController.handleOverlayClick(event.action, event.button(), event)) event.setCancelled(true);
         });
     }
 

@@ -139,14 +139,14 @@ public class JoinWatcher extends Module {
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            knownPlayers.put(entry.profile().getId(), entry.profile().getName());
+            knownPlayers.put(entry.profile().id(), entry.profile().name());
         }
 
         if (shouldIgnoreInitialPacket(packet)) return;
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            processRules(entry.profile().getName(), RuleTrigger.Join);
+            processRules(entry.profile().name(), RuleTrigger.Join);
         }
     }
 
@@ -156,7 +156,7 @@ public class JoinWatcher extends Module {
 
             if (playerName == null && mc.getNetworkHandler() != null) {
                 var entry = mc.getNetworkHandler().getPlayerListEntry(playerId);
-                if (entry != null && entry.getProfile() != null) playerName = entry.getProfile().getName();
+                if (entry != null && entry.getProfile() != null) playerName = entry.getProfile().name();
             }
 
             if (playerName != null) processRules(playerName, RuleTrigger.Leave);
@@ -184,7 +184,7 @@ public class JoinWatcher extends Module {
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
-            if (selfId.equals(entry.profile().getId())) return true;
+            if (selfId.equals(entry.profile().id())) return true;
         }
 
         return false;

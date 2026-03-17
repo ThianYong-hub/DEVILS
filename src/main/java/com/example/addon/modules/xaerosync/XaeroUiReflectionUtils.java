@@ -1,6 +1,6 @@
 package com.example.addon.modules.xaerosync;
 
-import meteordevelopment.meteorclient.events.meteor.MouseButtonEvent;
+import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
@@ -104,7 +104,7 @@ public final class XaeroUiReflectionUtils {
     }
 
     public static void cancelInputEvent(Object eventRef) {
-        if (eventRef instanceof MouseButtonEvent mouseEvent) mouseEvent.setCancelled(true);
+        if (eventRef instanceof MouseClickEvent mouseEvent) mouseEvent.setCancelled(true);
     }
 
     public static Integer readWidgetX(Object owner) {

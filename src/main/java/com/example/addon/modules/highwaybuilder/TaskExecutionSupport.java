@@ -127,7 +127,7 @@ final class TaskExecutionSupport {
 
         if (module.pathfinder.shouldBridge()
             && module.pathfinder.moveState != MovementState.RESTOCK
-            && mc.player.getPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos)) < 1) {
+            && mc.player.getEntityPos().distanceTo(Vec3d.ofCenter(module.pathfinder.currentBlockPos)) < 1) {
             module.pathfinder.moveState = MovementState.BRIDGE;
         }
     }

@@ -53,28 +53,27 @@ public final class ChestTrackerBridge {
             if (handler == null) return;
 
             Object config = handler.getClass().getMethod("instance").invoke(handler);
-            Object gui = getField(config, "gui");
-            Object storage = getField(config, "storage");
+            if (config == null) return;
 
-            setBoolean(gui, "inventoryButton", "enabled", inventoryButton && moduleActive);
-            setBoolean(gui, "devilsTheme", devilsTheme);
-            setInt(gui, "devilsAccentColor", accentColorRgb);
-            setInt(gui, "devilsOverlayAlpha", overlayAlpha);
+            Object gui = tryGetField(config, "gui");
+            Object storage = tryGetField(config, "storage");
 
-            setBoolean(storage, "AsyncSaving", asyncSaving);
-            setBoolean(storage, "entityMemories", false);
-            setBoolean(storage, "readableJsonMemories", false);
+            if (gui != null) {
+                setNestedBooleanIfPresent(gui, "inventoryButton", "enabled", inventoryButton && moduleActive);
+                setBooleanIfPresent(gui, "devilsTheme", devilsTheme);
+                setIntIfPresent(gui, "devilsAccentColor", accentColorRgb);
+                setIntIfPresent(gui, "devilsOverlayAlpha", overlayAlpha);
+            }
 
-            Class<?> backendTypeClassObj = Class.forName(backendTypeClass);
-            @SuppressWarnings({"unchecked", "rawtypes"})
-            Object backendType = Enum.valueOf((Class<? extends Enum>) backendTypeClassObj, "NBT");
-            Field backendField = storage.getClass().getField("storageBackend");
-            backendField.set(storage, backendType);
+            if (storage != null) {
+                setBooleanIfPresent(storage, "AsyncSaving", asyncSaving);
+                setBooleanIfPresent(storage, "entityMemories", false);
+                setBooleanIfPresent(storage, "readableJsonMemories", false);
+                setEnumIfPresent(storage, "storageBackend", backendTypeClass, "NBT");
+            }
 
-            Method validate = config.getClass().getMethod("validate");
-            validate.invoke(config);
-
-            if (save) handler.getClass().getMethod("save").invoke(handler);
+            invokeIfPresent(config, "validate");
+            if (save) invokeIfPresent(handler, "save");
         } catch (Throwable t) {
             AddonTemplate.LOG.debug("[Devils/ChestTracker] Config bridge unavailable.", t);
         }
@@ -94,23 +93,61 @@ public final class ChestTrackerBridge {
         return configClassObj.getField("INSTANCE").get(null);
     }
 
-    private static Object getField(Object owner, String fieldName) throws Exception {
-        return owner.getClass().getField(fieldName).get(owner);
+    private static Object tryGetField(Object owner, String fieldName) {
+        if (owner == null || fieldName == null || fieldName.isBlank()) return null;
+        try {
+            return owner.getClass().getField(fieldName).get(owner);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
-    private static void setBoolean(Object owner, String fieldName, boolean value) throws Exception {
-        Field field = owner.getClass().getField(fieldName);
-        field.setBoolean(owner, value);
+    private static void setBooleanIfPresent(Object owner, String fieldName, boolean value) {
+        if (owner == null || fieldName == null || fieldName.isBlank()) return;
+        try {
+            Field field = owner.getClass().getField(fieldName);
+            field.setBoolean(owner, value);
+        } catch (Throwable ignored) {
+        }
     }
 
-    private static void setInt(Object owner, String fieldName, int value) throws Exception {
-        Field field = owner.getClass().getField(fieldName);
-        field.setInt(owner, value);
+    private static void setIntIfPresent(Object owner, String fieldName, int value) {
+        if (owner == null || fieldName == null || fieldName.isBlank()) return;
+        try {
+            Field field = owner.getClass().getField(fieldName);
+            field.setInt(owner, value);
+        } catch (Throwable ignored) {
+        }
     }
 
-    private static void setBoolean(Object owner, String nestedField, String fieldName, boolean value) throws Exception {
-        Object nested = getField(owner, nestedField);
-        setBoolean(nested, fieldName, value);
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void setEnumIfPresent(Object owner, String fieldName, String enumClassName, String enumConstant) {
+        if (owner == null || fieldName == null || fieldName.isBlank()) return;
+        if (enumClassName == null || enumClassName.isBlank()) return;
+        if (enumConstant == null || enumConstant.isBlank()) return;
+        try {
+            Field field = owner.getClass().getField(fieldName);
+            Class<?> enumClass = Class.forName(enumClassName);
+            if (!enumClass.isEnum()) return;
+            Object enumValue = Enum.valueOf((Class<? extends Enum>) enumClass, enumConstant);
+            field.set(owner, enumValue);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void setNestedBooleanIfPresent(Object owner, String nestedField, String fieldName, boolean value) {
+        Object nested = tryGetField(owner, nestedField);
+        setBooleanIfPresent(nested, fieldName, value);
+    }
+
+    private static void invokeIfPresent(Object owner, String methodName) {
+        if (owner == null || methodName == null || methodName.isBlank()) return;
+        try {
+            Method method = owner.getClass().getMethod(methodName);
+            method.setAccessible(true);
+            method.invoke(owner);
+        } catch (Throwable ignored) {
+        }
     }
 
     public static final class ScreenLauncher {
@@ -124,17 +161,47 @@ public final class ChestTrackerBridge {
 
         public void openTrackerGui() throws Exception {
             Class<?> chestTracker = Class.forName(chestTrackerClass);
-            Method openInGame = chestTracker.getMethod("openInGame", MinecraftClient.class, Screen.class);
+            Method openInGame = resolveOpenInGameMethod(chestTracker);
+            if (openInGame == null) throw new NoSuchMethodException("openInGame");
             MinecraftClient mc = MinecraftClient.getInstance();
             openInGame.invoke(null, mc, mc.currentScreen);
         }
 
         public void openTrackerConfig() throws Exception {
             Class<?> builder = Class.forName(configScreenBuilderClass);
-            Method build = builder.getMethod("build", Screen.class);
+            Method build = resolveBuildMethod(builder);
+            if (build == null) throw new NoSuchMethodException("build");
             MinecraftClient mc = MinecraftClient.getInstance();
             Object built = build.invoke(null, mc.currentScreen);
             if (built instanceof Screen screen) mc.setScreen(screen);
+        }
+
+        private static Method resolveOpenInGameMethod(Class<?> owner) {
+            if (owner == null) return null;
+            for (Method method : owner.getMethods()) {
+                if (!"openInGame".equals(method.getName())) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length != 2) continue;
+                if (!params[0].isAssignableFrom(MinecraftClient.class)) continue;
+                if (!params[1].isAssignableFrom(Screen.class)) continue;
+                method.setAccessible(true);
+                return method;
+            }
+            return null;
+        }
+
+        private static Method resolveBuildMethod(Class<?> owner) {
+            if (owner == null) return null;
+            for (Method method : owner.getMethods()) {
+                if (!"build".equals(method.getName())) continue;
+                Class<?>[] params = method.getParameterTypes();
+                if (params.length != 1) continue;
+                if (!params[0].isAssignableFrom(Screen.class)) continue;
+                if (!Screen.class.isAssignableFrom(method.getReturnType())) continue;
+                method.setAccessible(true);
+                return method;
+            }
+            return null;
         }
     }
 }

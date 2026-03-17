@@ -105,8 +105,8 @@ final class EChestMinerCollectionController {
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
-            if (!searchBox.contains(itemEntity.getPos())) continue;
-            if (!isInsideTrackedFarmArea(itemEntity.getPos())) continue;
+            if (!searchBox.contains(itemEntity.getEntityPos())) continue;
+            if (!isInsideTrackedFarmArea(itemEntity.getEntityPos())) continue;
             count += itemEntity.getStack().getCount();
         }
         return count;
@@ -121,9 +121,9 @@ final class EChestMinerCollectionController {
         for (var entity : mc.world.getEntities()) {
             if (!(entity instanceof ItemEntity itemEntity)) continue;
             if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
-            if (!searchBox.contains(itemEntity.getPos())) continue;
-            if (!isInsideTrackedFarmArea(itemEntity.getPos())) continue;
-            double distance = itemEntity.getPos().squaredDistanceTo(mc.player.getPos());
+            if (!searchBox.contains(itemEntity.getEntityPos())) continue;
+            if (!isInsideTrackedFarmArea(itemEntity.getEntityPos())) continue;
+            double distance = itemEntity.getEntityPos().squaredDistanceTo(mc.player.getEntityPos());
             if (distance < closestDist) {
                 closestDist = distance;
                 closest = itemEntity;
@@ -131,13 +131,13 @@ final class EChestMinerCollectionController {
         }
 
         if (closest == null && !miner.farmCenters.isEmpty()) {
-            Vec3d playerPos = mc.player.getPos();
+            Vec3d playerPos = mc.player.getEntityPos();
             Box fallback = new Box(playerPos, playerPos).expand(EChestMinerSupport.FALLBACK_COLLECTION_RADIUS);
             for (var entity : mc.world.getEntities()) {
                 if (!(entity instanceof ItemEntity itemEntity)) continue;
                 if (itemEntity.getStack().getItem() != Items.OBSIDIAN) continue;
-                if (!fallback.contains(itemEntity.getPos())) continue;
-                double distance = itemEntity.getPos().squaredDistanceTo(playerPos);
+                if (!fallback.contains(itemEntity.getEntityPos())) continue;
+                double distance = itemEntity.getEntityPos().squaredDistanceTo(playerPos);
                 if (distance < closestDist) {
                     closestDist = distance;
                     closest = itemEntity;
@@ -161,7 +161,7 @@ final class EChestMinerCollectionController {
             if (union != null) return union.expand(1.0);
         }
 
-        Vec3d center = miner.collectionCenter != null ? Vec3d.ofCenter(miner.collectionCenter) : mc.player.getPos();
+        Vec3d center = miner.collectionCenter != null ? Vec3d.ofCenter(miner.collectionCenter) : mc.player.getEntityPos();
         double radius = miner.collectionCenter != null
             ? EChestMinerSupport.COLLECTION_RADIUS
             : EChestMinerSupport.FALLBACK_COLLECTION_RADIUS;
@@ -172,7 +172,7 @@ final class EChestMinerCollectionController {
         if (mc.player == null || pos == null) return false;
 
         if (miner.farmCenters.isEmpty()) {
-            Vec3d center = miner.collectionCenter != null ? Vec3d.ofCenter(miner.collectionCenter) : mc.player.getPos();
+            Vec3d center = miner.collectionCenter != null ? Vec3d.ofCenter(miner.collectionCenter) : mc.player.getEntityPos();
             double radius = miner.collectionCenter != null
                 ? EChestMinerSupport.COLLECTION_RADIUS
                 : EChestMinerSupport.FALLBACK_COLLECTION_RADIUS;

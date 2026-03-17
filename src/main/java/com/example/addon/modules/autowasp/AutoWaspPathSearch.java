@@ -108,17 +108,17 @@ final class AutoWaspPathSearch {
         List<Vec3d> path = new ArrayList<>();
         AStarNode node = endNode;
         while (node != null) {
-            path.add(pathfinder.adjustToSafeCorridor(Vec3d.ofCenter(node.pos), module.client().player != null ? module.client().player.getPos() : null));
+            path.add(pathfinder.adjustToSafeCorridor(Vec3d.ofCenter(node.pos), module.client().player != null ? module.client().player.getEntityPos() : null));
             node = node.parent;
         }
 
         java.util.Collections.reverse(path);
         if (!path.isEmpty() && module.client().player != null) {
             double reachSq = 4.0;
-            if (module.client().player.getPos().squaredDistanceTo(path.get(0)) <= reachSq) path.remove(0);
+            if (module.client().player.getEntityPos().squaredDistanceTo(path.get(0)) <= reachSq) path.remove(0);
         }
 
-        Vec3d safeGoal = pathfinder.adjustToSafeCorridor(finalGoal, module.client().player != null ? module.client().player.getPos() : null);
+        Vec3d safeGoal = pathfinder.adjustToSafeCorridor(finalGoal, module.client().player != null ? module.client().player.getEntityPos() : null);
         if (path.isEmpty() || path.get(path.size() - 1).squaredDistanceTo(safeGoal) > 0.5) path.add(safeGoal);
         return simplifyPath(path);
     }

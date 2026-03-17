@@ -105,7 +105,7 @@ public class PathfinderHandler {
                 boolean canInteract = module.containerHandler != null
                     && module.containerHandler.canInteractWithContainerFromCurrentPos();
 
-                if (movement.horizontalDistanceSq(mc.player.getPos(), standTarget)
+                if (movement.horizontalDistanceSq(mc.player.getEntityPos(), standTarget)
                     <= RESTOCK_NEAR_RANGE * RESTOCK_NEAR_RANGE) {
                     goal = null;
                     if (movement.isCenteredOn(standTarget)) {
@@ -140,7 +140,7 @@ public class PathfinderHandler {
 
     private void updateRunning() {
         goal = currentBlockPos;
-        double distToCurrentSq = movement.horizontalDistanceSq(mc.player.getPos(), Vec3d.ofCenter(currentBlockPos));
+        double distToCurrentSq = movement.horizontalDistanceSq(mc.player.getEntityPos(), Vec3d.ofCenter(currentBlockPos));
 
         // Don't advance while there is still reachable work (break/place/liquid) to do.
         // This forces the bot to finish ALL tasks within mining reach before moving,

@@ -23,7 +23,7 @@ public final class AutoPearlTrajectory {
 
     public static float calculatePitchToTarget(MinecraftClient mc, PlayerEntity target, float yaw, float fallbackPitch) {
         if (mc == null || mc.player == null || mc.world == null || target == null) return fallbackPitch;
-        Vec3d targetCenter = target.getPos().add(0, target.getHeight() * 0.5, 0);
+        Vec3d targetCenter = target.getEntityPos().add(0, target.getHeight() * 0.5, 0);
         return calculatePitchToPoint(mc, targetCenter, yaw, fallbackPitch);
     }
 
@@ -155,7 +155,7 @@ public final class AutoPearlTrajectory {
         public boolean tryBreakFree() {
             if (mc.player == null || mc.world == null || mc.interactionManager == null) return false;
 
-            Vec3d pos = mc.player.getPos();
+            Vec3d pos = mc.player.getEntityPos();
             BlockPos feet = BlockPos.ofFloored(pos.x, pos.y + 0.05, pos.z);
             BlockPos body = BlockPos.ofFloored(pos.x, pos.y + 0.9, pos.z);
             BlockPos eyes = BlockPos.ofFloored(pos.x, pos.y + 1.62, pos.z);
@@ -251,7 +251,7 @@ public final class AutoPearlTrajectory {
         public static PlayerEntity findPlayerByName(MinecraftClient mc, String name) {
             if (mc == null || mc.world == null || name == null) return null;
             for (PlayerEntity player : mc.world.getPlayers()) {
-                if (player.getGameProfile().getName().equalsIgnoreCase(name)) return player;
+                if (player.getGameProfile().name().equalsIgnoreCase(name)) return player;
             }
             return null;
         }

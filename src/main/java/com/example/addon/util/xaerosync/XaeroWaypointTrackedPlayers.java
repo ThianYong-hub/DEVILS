@@ -200,8 +200,8 @@ public final class XaeroWaypointTrackedPlayers {
         for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
             if (entry == null) continue;
             GameProfile profile = entry.getProfile();
-            if (profile == null || profile.getId() == null || profile.getName() == null) continue;
-            map.put(XaeroWaypointReflection.normalize(profile.getName()), profile.getId());
+            if (profile == null || profile.id() == null || profile.name() == null) continue;
+            map.put(XaeroWaypointReflection.normalize(profile.name()), profile.id());
         }
 
         return map;

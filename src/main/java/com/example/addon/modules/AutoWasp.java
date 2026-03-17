@@ -251,7 +251,7 @@ public class AutoWasp extends Module {
         }
 
         flightController.onGlidingTick();
-        pathfinder.tickPathing(mc.player.getPos(), getTargetPos(), flightController.getStuckTicks());
+        pathfinder.tickPathing(mc.player.getEntityPos(), getTargetPos(), flightController.getStuckTicks());
     }
 
     private void onMoveSafe(PlayerMoveEvent event) {
@@ -275,12 +275,12 @@ public class AutoWasp extends Module {
     }
 
     private Vec3d getTargetPos() {
-        if (target == null || mc.player == null) return mc.player != null ? mc.player.getPos() : Vec3d.ZERO;
+        if (target == null || mc.player == null) return mc.player != null ? mc.player.getEntityPos() : Vec3d.ZERO;
 
-        Vec3d targetPos = target.getPos().add(offset.get().x, offset.get().y, offset.get().z);
+        Vec3d targetPos = target.getEntityPos().add(offset.get().x, offset.get().y, offset.get().z);
         if (predictMovement.get()) targetPos = targetPos.add(target.getVelocity());
         if (avoidLanding.get()) targetPos = liftTargetIfOnGround(targetPos);
-        return pathfinder.adjustToSafeCorridor(targetPos, mc.player.getPos());
+        return pathfinder.adjustToSafeCorridor(targetPos, mc.player.getEntityPos());
     }
 
     private Vec3d liftTargetIfOnGround(Vec3d targetPos) {
@@ -312,7 +312,7 @@ public class AutoWasp extends Module {
         if (verticalDistance > chestSwapVerticalRange.get()) return false;
 
         int scanDepth = Math.max(3, MathHelper.ceil(chestSwapGroundDistance.get()) + 2);
-        double groundDistance = pathfinder.distanceToSolidBelow(mc.player.getPos(), scanDepth);
+        double groundDistance = pathfinder.distanceToSolidBelow(mc.player.getEntityPos(), scanDepth);
         return groundDistance <= chestSwapGroundDistance.get();
     }
 

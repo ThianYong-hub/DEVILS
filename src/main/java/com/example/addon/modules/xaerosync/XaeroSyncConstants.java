@@ -46,7 +46,7 @@ public final class XaeroSyncConstants {
     public static final int DEVILS_MARKER_ICON_V = 120;
     public static final int DEVILS_MARKER_ICON_REGION_W = 560;
     public static final int DEVILS_MARKER_ICON_REGION_H = 500;
-    public static final Identifier XAERO_SYNC_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_map_icon.png");
+    public static final Identifier XAERO_SYNC_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_ping_icon_white.png");
     public static final int DEVILS_ACCENT_BORDER = 0xFF5C0000;
     public static final int DEVILS_PANEL_BACKGROUND = 0xD0110505;
     public static final int DEVILS_TOOLTIP_BACKGROUND = 0xD0140606;

@@ -28,13 +28,18 @@ import meteordevelopment.meteorclient.renderer.Texture;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.metadata.ModOrigin;
 import net.fabricmc.loader.api.ModContainer;
+import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.Identifier;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.stb.STBImage;
 import org.lwjgl.system.MemoryStack;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -42,6 +47,13 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Unique;
+import xaero.common.minimap.render.MinimapRendererHelper;
+import xaero.common.minimap.waypoints.Waypoint;
+import xaero.hud.minimap.element.render.MinimapElementGraphics;
+import xaero.hud.minimap.element.render.MinimapElementRenderInfo;
+import xaero.map.element.MapElementGraphics;
+import xaero.map.element.render.ElementRenderInfo;
+import xaero.map.graphics.renderer.multitexture.MultiTextureRenderTypeRendererProvider;
 
 @Pseudo
 @Mixin(targets = "xaero.common.HudMod", remap = false)
@@ -189,85 +201,235 @@ abstract class ModulesScreenIconsMixin {
     }
 }
 
-@Pseudo
-@Mixin(targets = "xaero.map.mods.gui.WaypointRenderer", remap = false)
-abstract class WaypointRendererManagedMixin {
-    @ModifyExpressionValue(
-        method = "renderElement",
-        at = @At(value = "INVOKE", target = "Lxaero/map/mods/gui/Waypoint;getName()Ljava/lang/String;"),
-        require = 0
-    )
-    private String devilsAddon$formatManagedWaypointLabel(String originalName, Object waypoint) {
-        return XaeroSyncWaypoints.resolveManagedWaypointRenderName(waypoint, originalName);
+final class XaeroManagedWaypointIconSupport {
+    private XaeroManagedWaypointIconSupport() {
     }
 
-    @Inject(method = "renderElement", at = @At("TAIL"), require = 0)
-    private void devilsAddon$renderManagedWaypointIcon(
-        Object waypoint,
-        boolean hovered,
-        double optionalDepth,
-        float optionalScale,
-        double partialX,
-        double partialY,
-        Object renderInfo,
-        Object guiGraphics,
-        Object vanillaBufferSource,
-        Object rendererProvider,
-        CallbackInfoReturnable<Boolean> cir
-    ) {
-        if (!XaeroSyncWaypoints.isDevilsManagedWaypoint(waypoint)) return;
+    static MapIconManager.IconSprite resolveManagedIconSprite(Object waypoint) {
+        if (!XaeroSyncWaypoints.isDevilsManagedWaypoint(waypoint)) return null;
 
         String iconPath = MapIconManager.normalizeIconPath(XaeroSyncWaypoints.resolveManagedWaypointIconPath(waypoint));
-        if (iconPath.isBlank()) return;
+        if (iconPath.isBlank()) return null;
 
-        MapIconManager.IconSprite sprite = MapIconManager.resolveIconSprite(iconPath);
-        if (sprite == null) return;
-
-        int size = Math.max(8, Math.round(10.0f * Math.max(0.75f, optionalScale)));
-        int x = (int) Math.round(partialX) - size / 2;
-        int y = (int) Math.round(partialY) - size / 2;
-        blitIcon(guiGraphics, sprite, x, y, size);
+        return MapIconManager.resolveIconSprite(iconPath);
     }
 
-    private static void blitIcon(Object guiGraphics, MapIconManager.IconSprite sprite, int x, int y, int size) {
+    static void blitIcon(MinimapElementGraphics guiGraphics, MapIconManager.IconSprite sprite, int x, int y, int size) {
         if (guiGraphics == null || sprite == null) return;
-
         int u1 = sprite.u();
         int v1 = sprite.v();
         int u2 = sprite.u() + Math.max(1, sprite.regionWidth());
         int v2 = sprite.v() + Math.max(1, sprite.regionHeight());
         int textureSize = Math.max(1, Math.max(sprite.textureWidth(), sprite.textureHeight()));
-        Object pipeline = RenderPipelines.GUI_TEXTURED;
-
-        try {
-            Method elevenArg = findBlitMethod(guiGraphics.getClass(), 11);
-            if (elevenArg != null) {
-                elevenArg.invoke(guiGraphics, sprite.id(), x, y, u1, v1, size, size, u2, v2, textureSize, pipeline);
-                return;
-            }
-        } catch (Throwable ignored) {
-        }
-
-        try {
-            Method nineArg = findBlitMethod(guiGraphics.getClass(), 9);
-            if (nineArg != null) {
-                nineArg.invoke(guiGraphics, sprite.id(), x, y, u1, v1, size, size, textureSize, pipeline);
-            }
-        } catch (Throwable ignored) {
-        }
+        guiGraphics.blit(sprite.id(), x, y, u1, v1, size, size, u2, v2, textureSize, RenderPipelines.GUI_TEXTURED);
     }
 
-    private static Method findBlitMethod(Class<?> ownerClass, int argCount) {
-        if (ownerClass == null) return null;
-        for (Method method : ownerClass.getMethods()) {
-            if (!"blit".equals(method.getName())) continue;
-            Class<?>[] params = method.getParameterTypes();
-            if (params.length != argCount) continue;
-            if (!params[0].isAssignableFrom(Identifier.class)) continue;
-            method.setAccessible(true);
-            return method;
+    static void blitIcon(MapElementGraphics guiGraphics, MapIconManager.IconSprite sprite, int x, int y, int size) {
+        if (guiGraphics == null || sprite == null) return;
+        int u1 = sprite.u();
+        int v1 = sprite.v();
+        int u2 = sprite.u() + Math.max(1, sprite.regionWidth());
+        int v2 = sprite.v() + Math.max(1, sprite.regionHeight());
+        int textureSize = Math.max(1, Math.max(sprite.textureWidth(), sprite.textureHeight()));
+        guiGraphics.blit(sprite.id(), x, y, u1, v1, size, size, u2, v2, textureSize, RenderPipelines.GUI_TEXTURED);
+    }
+}
+
+@Pseudo
+@Mixin(targets = "xaero.map.mods.gui.WaypointRenderer", remap = false)
+abstract class WaypointRendererManagedMixin {
+    @Unique
+    private static final ThreadLocal<MapElementGraphics> devilsAddon$currentGuiGraphics = new ThreadLocal<>();
+    @Unique
+    private static final ThreadLocal<xaero.map.mods.gui.Waypoint> devilsAddon$currentWaypoint = new ThreadLocal<>();
+
+    @ModifyExpressionValue(
+        method = "renderElement",
+        at = @At(value = "INVOKE", target = "Lxaero/map/mods/gui/Waypoint;getName()Ljava/lang/String;"),
+        require = 0
+    )
+    private String devilsAddon$formatManagedWaypointLabel(
+        String originalName,
+        xaero.map.mods.gui.Waypoint waypoint
+    ) {
+        return XaeroSyncWaypoints.resolveManagedWaypointRenderName(waypoint, originalName);
+    }
+
+    @Inject(method = "renderElement", at = @At("HEAD"), require = 0)
+    private void devilsAddon$captureMapGraphics(
+        xaero.map.mods.gui.Waypoint waypoint,
+        boolean hovered,
+        double optionalDepth,
+        float optionalScale,
+        double partialX,
+        double partialY,
+        ElementRenderInfo renderInfo,
+        MapElementGraphics guiGraphics,
+        VertexConsumerProvider.Immediate vanillaBufferSource,
+        MultiTextureRenderTypeRendererProvider rendererProvider,
+        CallbackInfoReturnable<Boolean> cir
+    ) {
+        devilsAddon$currentWaypoint.set(waypoint);
+        devilsAddon$currentGuiGraphics.set(guiGraphics);
+    }
+
+    @Inject(method = "renderElement", at = @At("RETURN"), require = 0)
+    private void devilsAddon$clearMapGraphics(CallbackInfoReturnable<Boolean> cir) {
+        devilsAddon$currentWaypoint.remove();
+        devilsAddon$currentGuiGraphics.remove();
+    }
+
+    @WrapOperation(
+        method = "renderElement",
+        at = @At(
+            value = "INVOKE",
+            target = "Lxaero/map/graphics/MapRenderHelper;blitIntoMultiTextureRenderer(Lorg/joml/Matrix4fc;Lxaero/map/graphics/renderer/multitexture/MultiTextureRenderTypeRenderer;FFFFIIFFFFIILcom/mojang/blaze3d/textures/GpuTexture;)V",
+            ordinal = 1
+        ),
+        require = 0
+    )
+    private void devilsAddon$replaceManagedWaypointSymbolBlit(
+        @Coerce Object matrix,
+        @Coerce Object multiTextureRenderer,
+        float x,
+        float y,
+        int u1,
+        int v1,
+        int width,
+        int height,
+        float red,
+        float green,
+        float blue,
+        float alpha,
+        int textureWidth,
+        int textureHeight,
+        @Coerce Object textureId,
+        Operation<Void> original
+    ) {
+        xaero.map.mods.gui.Waypoint waypoint = devilsAddon$currentWaypoint.get();
+        MapIconManager.IconSprite sprite = XaeroManagedWaypointIconSupport.resolveManagedIconSprite(waypoint);
+        if (sprite == null) {
+            original.call(
+                matrix,
+                multiTextureRenderer,
+                x,
+                y,
+                u1,
+                v1,
+                width,
+                height,
+                red,
+                green,
+                blue,
+                alpha,
+                textureWidth,
+                textureHeight,
+                textureId
+            );
+            return;
         }
-        return null;
+
+        MapElementGraphics guiGraphics = devilsAddon$currentGuiGraphics.get();
+        if (guiGraphics == null) {
+            original.call(
+                matrix,
+                multiTextureRenderer,
+                x,
+                y,
+                u1,
+                v1,
+                width,
+                height,
+                red,
+                green,
+                blue,
+                alpha,
+                textureWidth,
+                textureHeight,
+                textureId
+            );
+            return;
+        }
+
+        int size = Math.max(10, Math.min(width, 28));
+        int drawX = Math.round(x + (width - size) * 0.5f);
+        int drawY = Math.round(y + (height - size) * 0.5f);
+        XaeroManagedWaypointIconSupport.blitIcon(guiGraphics, sprite, drawX, drawY, size);
+    }
+}
+
+@Pseudo
+@Mixin(targets = "xaero.hud.minimap.waypoint.render.WaypointMapRenderer", remap = false)
+abstract class WaypointMapRendererManagedMixin {
+    @Inject(
+        method = "drawIcon",
+        at = @At("TAIL"),
+        require = 0
+    )
+    private void devilsAddon$renderManagedWaypointIconOnMinimap(
+        MinimapElementGraphics guiGraphics,
+        MinimapRendererHelper rendererHelper,
+        Waypoint waypoint,
+        int drawX,
+        int drawY,
+        int opacity,
+        @Coerce Object renderTypeBuffer,
+        VertexConsumer waypointBackgroundConsumer,
+        VertexConsumer texturedIconConsumer,
+        CallbackInfo ci
+    ) {
+        MapIconManager.IconSprite sprite = XaeroManagedWaypointIconSupport.resolveManagedIconSprite(waypoint);
+        if (sprite == null) return;
+
+        int size = 9;
+        XaeroManagedWaypointIconSupport.blitIcon(guiGraphics, sprite, drawX - size / 2, drawY - size / 2, size);
+    }
+}
+
+@Pseudo
+@Mixin(targets = "xaero.hud.minimap.waypoint.render.world.WaypointWorldRenderer", remap = false)
+abstract class WaypointWorldRendererManagedMixin {
+    @Unique
+    private static final ThreadLocal<MinimapElementGraphics> devilsAddon$currentGuiGraphics = new ThreadLocal<>();
+
+    @Inject(method = "renderElement", at = @At("HEAD"), require = 0)
+    private void devilsAddon$captureGuiGraphics(
+        Waypoint waypoint,
+        boolean highlighted,
+        boolean outOfBounds,
+        double optionalDepth,
+        float optionalScale,
+        double partialX,
+        double partialY,
+        MinimapElementRenderInfo renderInfo,
+        MinimapElementGraphics guiGraphics,
+        VertexConsumerProvider.Immediate vanillaBufferSource,
+        CallbackInfoReturnable<Boolean> cir
+    ) {
+        devilsAddon$currentGuiGraphics.set(guiGraphics);
+    }
+
+    @Inject(method = "renderElement", at = @At("RETURN"), require = 0)
+    private void devilsAddon$clearGuiGraphics(CallbackInfoReturnable<Boolean> cir) {
+        devilsAddon$currentGuiGraphics.remove();
+    }
+
+    @Inject(method = "renderIcon", at = @At("TAIL"), require = 0)
+    private void devilsAddon$renderManagedWaypointIconInWorld(
+        Waypoint waypoint,
+        boolean highlighted,
+        MatrixStack matrixStack,
+        TextRenderer fontRenderer,
+        @Coerce Object bufferSource,
+        CallbackInfo ci
+    ) {
+        MapIconManager.IconSprite sprite = XaeroManagedWaypointIconSupport.resolveManagedIconSprite(waypoint);
+        if (sprite == null) return;
+
+        MinimapElementGraphics guiGraphics = devilsAddon$currentGuiGraphics.get();
+        if (guiGraphics == null) return;
+
+        XaeroManagedWaypointIconSupport.blitIcon(guiGraphics, sprite, -4, -9, 9);
     }
 }
 

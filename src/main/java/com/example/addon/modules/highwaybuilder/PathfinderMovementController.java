@@ -36,7 +36,7 @@ final class PathfinderMovementController {
 
     boolean isCenteredOn(Vec3d target) {
         if (mc.player == null) return false;
-        return horizontalDistanceSq(target, mc.player.getPos())
+        return horizontalDistanceSq(target, mc.player.getEntityPos())
             <= RESTOCK_CENTER_TOLERANCE * RESTOCK_CENTER_TOLERANCE;
     }
 
@@ -54,11 +54,11 @@ final class PathfinderMovementController {
     void applyRunningStallNudge(BlockPos goal, MovementState moveState, Runnable refreshPathing, Runnable refreshMovement) {
         if (mc.player == null || goal == null || moveState != MovementState.RUNNING) {
             runningStallTicks = 0;
-            lastRunningPos = mc.player != null ? mc.player.getPos() : null;
+            lastRunningPos = mc.player != null ? mc.player.getEntityPos() : null;
             return;
         }
 
-        Vec3d currentPos = mc.player.getPos();
+        Vec3d currentPos = mc.player.getEntityPos();
         Vec3d goalCenter = Vec3d.ofCenter(goal);
         double distSq = horizontalDistanceSq(currentPos, goalCenter);
         if (distSq <= RUNNING_NUDGE_MIN_DIST_SQ) {
@@ -86,17 +86,17 @@ final class PathfinderMovementController {
     void applyRestockStallRecovery(MovementState moveState, Vec3d standTarget, boolean canInteract) {
         if (mc.player == null || module.containerHandler == null || moveState != MovementState.RESTOCK) {
             restockStallTicks = 0;
-            lastRestockPos = mc.player != null ? mc.player.getPos() : null;
+            lastRestockPos = mc.player != null ? mc.player.getEntityPos() : null;
             return;
         }
 
         if (isCenteredOn(standTarget) && canInteract) {
             restockStallTicks = 0;
-            lastRestockPos = mc.player.getPos();
+            lastRestockPos = mc.player.getEntityPos();
             return;
         }
 
-        Vec3d currentPos = mc.player.getPos();
+        Vec3d currentPos = mc.player.getEntityPos();
         if (lastRestockPos != null
             && horizontalDistanceSq(currentPos, lastRestockPos) <= RESTOCK_STALL_MOVE_EPSILON_SQ) {
             restockStallTicks++;
@@ -117,7 +117,7 @@ final class PathfinderMovementController {
 
     void resetRestockTracking() {
         restockStallTicks = 0;
-        lastRestockPos = mc.player != null ? mc.player.getPos() : null;
+        lastRestockPos = mc.player != null ? mc.player.getEntityPos() : null;
     }
 
     void clearRunningTracking() {

@@ -15,7 +15,7 @@ final class ContainerPlacementRecovery {
 
     static void nudgeAwayFromPlacementBlock(HighwayBuilder module, BlockTask blockTask, boolean containerPlacement) {
         if (mc.player == null) return;
-        Vec3d playerPos = mc.player.getPos();
+        Vec3d playerPos = mc.player.getEntityPos();
 
         if (containerPlacement && module.containerHandler != null) {
             module.containerHandler.invalidateRestockStandTarget();

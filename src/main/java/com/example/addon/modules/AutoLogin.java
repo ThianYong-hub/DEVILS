@@ -165,8 +165,8 @@ public class AutoLogin extends Module {
         if (event.packet instanceof PlayerListS2CPacket packet) {
             if (!packet.getActions().contains(PlayerListS2CPacket.Action.ADD_PLAYER)) return;
             for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
-                if (entry.profile() == null || entry.profile().getName() == null) continue;
-                knownPlayers.put(entry.profile().getId(), entry.profile().getName());
+                if (entry.profile() == null || entry.profile().name() == null) continue;
+                knownPlayers.put(entry.profile().id(), entry.profile().name());
             }
             return;
         }
@@ -180,7 +180,7 @@ public class AutoLogin extends Module {
         }
         if (mc.player != null && mc.player.networkHandler != null) {
             var entry = mc.player.networkHandler.getPlayerListEntry(packet.sender());
-            if (entry != null && entry.getProfile() != null && entry.getProfile().getName() != null) return entry.getProfile().getName();
+            if (entry != null && entry.getProfile() != null && entry.getProfile().name() != null) return entry.getProfile().name();
         }
         return "";
     }
@@ -372,8 +372,8 @@ public class AutoLogin extends Module {
         for (String name : knownPlayers.values()) if (name != null && !name.isBlank()) names.add(AutoLoginTextRules.normalizeKey(name));
         if (mc.player == null || mc.player.networkHandler == null) return names;
         for (var entry : mc.player.networkHandler.getPlayerList()) {
-            if (entry == null || entry.getProfile() == null || entry.getProfile().getName() == null) continue;
-            names.add(AutoLoginTextRules.normalizeKey(entry.getProfile().getName()));
+            if (entry == null || entry.getProfile() == null || entry.getProfile().name() == null) continue;
+            names.add(AutoLoginTextRules.normalizeKey(entry.getProfile().name()));
         }
         return names;
     }

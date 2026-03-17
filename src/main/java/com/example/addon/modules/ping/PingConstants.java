@@ -28,7 +28,7 @@ public final class PingConstants {
     public static final int WORLD_MIN_Y = -65;
     public static final int WORLD_MAX_Y = 365;
     public static final String DEFAULT_SOUND = "minecraft:block.note_block.pling";
-    public static final Identifier PING_MARKER_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_map_icon.png");
+    public static final Identifier PING_MARKER_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_ping_icon_white.png");
     public static final String MODULE_NAMESPACE = "ping";
     public static final String MARKER_SCHEMA = "devils-ping-marker-v1";
     public static final double STATIC_LABEL_SCALE = 1.35;

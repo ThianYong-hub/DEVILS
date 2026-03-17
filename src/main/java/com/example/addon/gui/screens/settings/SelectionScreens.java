@@ -171,7 +171,7 @@ public final class SelectionScreens {
             ArrayList<String> players = new ArrayList<>();
             for (PlayerListEntry entry : mc.getNetworkHandler().getPlayerList()) {
                 if (entry == null || entry.getProfile() == null) continue;
-                String name = entry.getProfile().getName();
+                String name = entry.getProfile().name();
                 if (name == null || name.isBlank()) continue;
                 players.add(name);
             }

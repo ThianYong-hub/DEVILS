@@ -48,7 +48,7 @@ public final class AutoWaspFlightController {
     public void resetNavigationState() {
         jumpTimer = 0;
         incrementJumpTimer = false;
-        lastPlayerPos = module.client().player != null ? module.client().player.getPos() : null;
+        lastPlayerPos = module.client().player != null ? module.client().player.getEntityPos() : null;
         stuckTicks = 0;
         adaptiveHorizontalCap = -1;
         antiCheatSlowTicks = 0;
@@ -61,12 +61,12 @@ public final class AutoWaspFlightController {
         stuckTicks = 0;
         adaptiveHorizontalCap = -1;
         antiCheatSlowTicks = 0;
-        lastPlayerPos = module.client().player != null ? module.client().player.getPos() : null;
+        lastPlayerPos = module.client().player != null ? module.client().player.getEntityPos() : null;
     }
 
     public void clearStuckState() {
         stuckTicks = 0;
-        lastPlayerPos = module.client().player != null ? module.client().player.getPos() : null;
+        lastPlayerPos = module.client().player != null ? module.client().player.getEntityPos() : null;
     }
 
     public void handleNotGliding() {
@@ -92,7 +92,7 @@ public final class AutoWaspFlightController {
         }
 
         stuckTicks = 0;
-        lastPlayerPos = module.client().player.getPos();
+        lastPlayerPos = module.client().player.getEntityPos();
         adaptiveHorizontalCap = -1;
         antiCheatSlowTicks = 0;
     }
@@ -110,8 +110,8 @@ public final class AutoWaspFlightController {
     public void onMove(PlayerMoveEvent event, Vec3d steerTarget) {
         if (module.client().player == null || module.client().world == null || steerTarget == null) return;
 
-        Vec3d safeTarget = pathfinder.adjustToSafeCorridor(steerTarget, module.client().player.getPos());
-        Vec3d toTarget = safeTarget.subtract(module.client().player.getPos());
+        Vec3d safeTarget = pathfinder.adjustToSafeCorridor(steerTarget, module.client().player.getEntityPos());
+        Vec3d toTarget = safeTarget.subtract(module.client().player.getEntityPos());
         double horizontal = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
 
         double maxHorizontal = resolveHorizontalCap();
@@ -125,11 +125,11 @@ public final class AutoWaspFlightController {
         }
 
         double yVel = MathHelper.clamp(toTarget.y, -maxVertical, maxVertical);
-        yVel = applyVerticalSafety(yVel, module.client().player.getPos());
+        yVel = applyVerticalSafety(yVel, module.client().player.getEntityPos());
 
         Vec3d base = new Vec3d(xVel, yVel, zVel);
         Vec3d avoid = computeLocalAvoidance(safeTarget, base, maxHorizontal);
-        Vec3d velocity = applyDimensionFlightLimit(applyEmergencyBraking(base.add(avoid)), module.client().player.getPos());
+        Vec3d velocity = applyDimensionFlightLimit(applyEmergencyBraking(base.add(avoid)), module.client().player.getEntityPos());
 
         double horizontalVelocity = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
         if (horizontalVelocity > maxHorizontal && horizontalVelocity > 1.0E-6) {
@@ -153,7 +153,7 @@ public final class AutoWaspFlightController {
     private void updateStuckState() {
         if (module.client().player == null) return;
 
-        Vec3d now = module.client().player.getPos();
+        Vec3d now = module.client().player.getEntityPos();
         if (lastPlayerPos == null) {
             lastPlayerPos = now;
             stuckTicks = 0;
@@ -257,7 +257,7 @@ public final class AutoWaspFlightController {
         double horizontal = Math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
         if (horizontal < 1.0E-4) return velocity;
 
-        Vec3d pos = module.client().player.getPos();
+        Vec3d pos = module.client().player.getEntityPos();
         Vec3d dir = new Vec3d(velocity.x / horizontal, 0, velocity.z / horizontal);
         Vec3d left = new Vec3d(-dir.z, 0, dir.x);
         Vec3d right = left.multiply(-1);
@@ -325,7 +325,7 @@ public final class AutoWaspFlightController {
     private Vec3d computeLocalAvoidance(Vec3d steerTarget, Vec3d baseVelocity, double horizontalCap) {
         if (module.client().player == null) return Vec3d.ZERO;
 
-        Vec3d pos = module.client().player.getPos();
+        Vec3d pos = module.client().player.getEntityPos();
         Vec3d avoid = Vec3d.ZERO;
         double floorDist = pathfinder.distanceToSolidBelow(pos, SAFETY_SCAN);
         double ceilingDist = pathfinder.distanceToSolidAbove(pos, SAFETY_SCAN);

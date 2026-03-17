@@ -1,0 +1,205 @@
+package red.jackf.chesttracker.impl.memory;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.Nullable;
+import red.jackf.chesttracker.api.memory.MemoryBank;
+import red.jackf.chesttracker.api.memory.MemoryBankAccess;
+import red.jackf.chesttracker.impl.memory.metadata.Metadata;
+import red.jackf.chesttracker.impl.storage.ConnectionSettings;
+import red.jackf.chesttracker.impl.storage.Storage;
+import red.jackf.chesttracker.impl.util.Constants;
+import red.jackf.chesttracker.impl.util.Strings;
+import red.jackf.jackfredlib.client.api.gps.Coordinate;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Optional;
+
+public class MemoryBankAccessImpl implements MemoryBankAccess {
+    private static final Logger LOGGER = LogManager.getLogger("DevilsAddon/ChestTracker/MemoryBankAccess");
+    public static final MemoryBankAccessImpl INSTANCE = new MemoryBankAccessImpl();
+    @Nullable
+    private static MemoryBankImpl loaded = null;
+
+    private MemoryBankAccessImpl() {
+    }
+
+    @Override
+    public boolean loadOrCreate(String memoryBankId, String creationName) {
+        INSTANCE.unload();
+        Optional<MemoryBankImpl> existing = Storage.load(memoryBankId);
+        if (existing.isPresent()) {
+            loaded = existing.get();
+            return true;
+        }
+
+        // If a bank file exists but failed to load, do not recreate and lose user data.
+        if (Storage.exists(memoryBankId)) {
+            LOGGER.error("Refusing to recreate existing memory bank '{}' after load failure.", memoryBankId);
+            loaded = null;
+            return false;
+        }
+
+        var bank = new MemoryBankImpl(Metadata.blankWithName(creationName), new HashMap<>());
+        bank.setId(memoryBankId);
+        loaded = bank;
+        INSTANCE.save();
+
+        return true;
+    }
+
+    public boolean unload() {
+        if (loaded == null) return false;
+        save();
+        loaded = null;
+        return true;
+    }
+
+    @Override
+    public Optional<MemoryBank> getLoaded() {
+        return Optional.ofNullable(loaded);
+    }
+
+    public Optional<MemoryBankImpl> getLoadedInternal() {
+        return Optional.ofNullable(loaded);
+    }
+
+    public void save() {
+        if (loaded == null) return;
+        Storage.save(loaded);
+    }
+
+    // Load from a coordinate's ID, checking overrides and legacy migration paths.
+    public boolean loadWithDefaults(Coordinate coordinate) {
+        String settingsKey = getConnectionSettingsKey(coordinate);
+        String legacySettingsKey = coordinate == null || coordinate.id() == null ? "" : coordinate.id().trim();
+
+        ConnectionSettings settings = ConnectionSettings.get(settingsKey);
+        if (settings == null && !legacySettingsKey.isBlank()) {
+            ConnectionSettings legacySettings = ConnectionSettings.get(legacySettingsKey);
+            if (legacySettings != null) {
+                ConnectionSettings.put(settingsKey, legacySettings);
+                settings = legacySettings;
+            }
+        }
+        if (settings == null) settings = ConnectionSettings.getOrCreate(settingsKey);
+
+        String defaultId = getDefaultMemoryBankId(coordinate);
+        String id = settings.memoryBankIdOverride().orElse(defaultId);
+
+        // Backward compatibility for old ids with default port suffix.
+        if (settings.memoryBankIdOverride().isEmpty()) {
+            String portVariantId = getPortVariantDefaultMemoryBankId(coordinate);
+            if (!portVariantId.isBlank() && !Storage.exists(defaultId) && Storage.exists(portVariantId)) {
+                migrateLegacyBankFiles(portVariantId, defaultId);
+                id = Storage.exists(defaultId) ? defaultId : portVariantId;
+            }
+        }
+
+        // Backward compatibility for old "server-*" ids.
+        if (settings.memoryBankIdOverride().isEmpty()) {
+            String legacyId = getLegacyDefaultMemoryBankId(coordinate);
+            if (!Storage.exists(defaultId) && Storage.exists(legacyId)) {
+                migrateLegacyBankFiles(legacyId, defaultId);
+                id = Storage.exists(defaultId) ? defaultId : legacyId;
+            }
+        }
+
+        return loadOrCreate(id, coordinate.userFriendlyName());
+    }
+
+    public static String getConnectionSettingsKey(Coordinate coordinate) {
+        if (coordinate instanceof Coordinate.Multiplayer multi) {
+            return "multiplayer:" + normalizeMultiplayerAddress(multi.address(), true);
+        }
+
+        String id = coordinate == null || coordinate.id() == null ? "" : coordinate.id().trim();
+        if (id.isBlank()) return "singleplayer:unknown";
+        return "singleplayer:" + id;
+    }
+
+    public static String getDefaultMemoryBankId(Coordinate coordinate) {
+        if (coordinate instanceof Coordinate.Multiplayer multi) {
+            String address = normalizeMultiplayerAddress(multi.address(), true);
+            return "multiplayer/" + Strings.sanitizeForPath(address);
+        }
+
+        String world = coordinate == null ? "" : coordinate.id();
+        world = world == null ? "" : world.trim().toLowerCase(Locale.ROOT);
+        while (world.endsWith(".")) world = world.substring(0, world.length() - 1);
+        if (world.isBlank()) world = "unknown";
+        return "singleplayer/" + Strings.sanitizeForPath(world);
+    }
+
+    private static String getPortVariantDefaultMemoryBankId(Coordinate coordinate) {
+        if (!(coordinate instanceof Coordinate.Multiplayer multi)) return "";
+        String canonicalAddress = normalizeMultiplayerAddress(multi.address(), true);
+        String oldAddress = normalizeMultiplayerAddress(multi.address(), false);
+        if (canonicalAddress.equals(oldAddress)) return "";
+        return "multiplayer/" + Strings.sanitizeForPath(oldAddress);
+    }
+
+    private static String getLegacyDefaultMemoryBankId(Coordinate coordinate) {
+        String base = coordinate == null ? "" : coordinate.id();
+        if (coordinate instanceof Coordinate.Multiplayer multi && multi.address() != null) {
+            String address = multi.address().trim();
+            if (!address.isEmpty()) base = address;
+        }
+
+        base = base == null ? "" : base.trim().toLowerCase(Locale.ROOT);
+        while (base.endsWith(".")) base = base.substring(0, base.length() - 1);
+        if (base.isEmpty()) base = "unknown";
+        return "server-" + Strings.sanitizeForPath(base);
+    }
+
+    private static String normalizeMultiplayerAddress(String address, boolean stripDefaultPort) {
+        String out = address == null ? "" : address.trim().toLowerCase(Locale.ROOT);
+        while (out.endsWith(".")) out = out.substring(0, out.length() - 1);
+        if (out.isBlank()) return "unknown";
+
+        if (!stripDefaultPort) return out;
+
+        // [ipv6]:25565 -> [ipv6]
+        if (out.startsWith("[")) {
+            int end = out.indexOf(']');
+            if (end > 0 && out.length() > end + 2 && out.charAt(end + 1) == ':') {
+                String port = out.substring(end + 2).trim();
+                if ("25565".equals(port)) out = out.substring(0, end + 1);
+            }
+            return out.isBlank() ? "unknown" : out;
+        }
+
+        // host:25565 -> host (single colon only; avoid raw ipv6 forms).
+        int firstColon = out.indexOf(':');
+        int lastColon = out.lastIndexOf(':');
+        if (firstColon > 0 && firstColon == lastColon && lastColon + 1 < out.length()) {
+            String port = out.substring(lastColon + 1).trim();
+            boolean numericPort = !port.isEmpty() && port.chars().allMatch(Character::isDigit);
+            if (numericPort && "25565".equals(port)) out = out.substring(0, lastColon);
+        }
+
+        return out.isBlank() ? "unknown" : out;
+    }
+
+    private static void migrateLegacyBankFiles(String fromId, String toId) {
+        if (fromId == null || toId == null || fromId.isBlank() || toId.isBlank()) return;
+        if (fromId.equals(toId)) return;
+
+        String[] suffixes = {".nbt", ".nbt.meta", ".nbt.old", ".json", ".json.meta"};
+        for (String suffix : suffixes) {
+            Path from = Constants.STORAGE_DIR.resolve(fromId + suffix);
+            Path to = Constants.STORAGE_DIR.resolve(toId + suffix);
+
+            try {
+                if (!Files.isRegularFile(from) || Files.isRegularFile(to)) continue;
+                if (to.getParent() != null) Files.createDirectories(to.getParent());
+                Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+}

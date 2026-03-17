@@ -38,13 +38,13 @@ import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 public class ChestTrackerModule extends Module {
-    private static final String RUNTIME_STATE_CLASS = "com.example.addon.chesttracker.impl.gui.util.ChestTrackerRuntimeState";
-    private static final String CONFIG_CLASS = "com.example.addon.chesttracker.impl.config.ChestTrackerConfig";
-    private static final String CONFIG_SCREEN_BUILDER_CLASS = "com.example.addon.chesttracker.impl.config.ChestTrackerConfigScreenBuilder";
-    private static final String CHEST_TRACKER_CLASS = "com.example.addon.chesttracker.impl.ChestTracker";
-    private static final String BACKEND_TYPE_CLASS = "com.example.addon.chesttracker.impl.storage.backend.Backend$Type";
-    private static final String MEMORY_ACCESS_CLASS = "com.example.addon.chesttracker.impl.memory.MemoryBankAccessImpl";
-    private static final String STRINGS_CLASS = "com.example.addon.chesttracker.impl.util.Strings";
+    private static final String RUNTIME_STATE_CLASS = "red.jackf.chesttracker.impl.gui.util.ChestTrackerRuntimeState";
+    private static final String CONFIG_CLASS = "red.jackf.chesttracker.impl.config.ChestTrackerConfig";
+    private static final String CONFIG_SCREEN_BUILDER_CLASS = "red.jackf.chesttracker.impl.config.ChestTrackerConfigScreenBuilder";
+    private static final String CHEST_TRACKER_CLASS = "red.jackf.chesttracker.impl.ChestTracker";
+    private static final String BACKEND_TYPE_CLASS = "red.jackf.chesttracker.impl.storage.backend.Backend$Type";
+    private static final String MEMORY_ACCESS_CLASS = "red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl";
+    private static final String STRINGS_CLASS = "red.jackf.chesttracker.impl.util.Strings";
     private static final String SYNC_PULL_PATH = "/pull";
     private static final String SYNC_PUSH_PATH = "/push";
     private static final String SYNC_STREAM_PATH = "/v1/sync/stream";
