@@ -109,11 +109,11 @@ Run tests:
 
 ## Release Notes (`v0.0.33`)
 
-- Rebuilt the addon into a package-oriented structure: large monolithic modules were split into feature-local controllers, planners, codec helpers, and UI support classes.
-- Normalized repository structure so Java sources stay in the `100-500` line range instead of multi-thousand-line modules or 10-line wrapper files.
-- Consolidated bootstrap pieces such as commands, HUD registration, tracker settings, mixin support, and sync helper models into cleaner facades.
-- Fixed Fabric `preLaunch` startup failures by making the `CrashGuard` entrypoint directly instantiable by the loader.
-- Revalidated the addon with green `compileJava`, `test`, and full `build` runs before the release cut.
+- Full addon port to Minecraft `1.21.11` (`Fabric Loader 0.18.4`, `Fabric API 0.141.3+1.21.11`).
+- Patched Xaero Minimap + Xaero World Map internals so Devils managed ping icons render correctly as image overlays (instead of plain `M` fallback).
+- Added embedded Xaero patch source pipeline (`xaero-patch-src`) with automatic remap/injection into bundled Xaero jars during build.
+- Completed ChestTracker port for `1.21.11`: package migration to `red.jackf.chesttracker`, Devils theme rendering parity, and persistence/stability fixes.
+- Updated release packaging and embedded dependencies for the new toolchain and runtime compatibility.
 
 ## License
 
