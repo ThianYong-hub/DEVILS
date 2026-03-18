@@ -1,8 +1,6 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
-import com.example.addon.modules.autopearl.AutoPearlTrajectory.EscapeHelper;
-import com.example.addon.modules.autopearl.AutoPearlTrajectory.RemoteControl;
 import com.example.addon.modules.autopearl.AutoPearlTrajectory;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.ReceiveMessageEvent;

@@ -17,11 +17,9 @@ final class ContainerRestockTransfer {
     private static final int ENDER_CHEST_RESERVE = 16;
 
     private final ContainerHandler handler;
-    private final HighwayBuilder module;
 
     ContainerRestockTransfer(ContainerHandler handler) {
         this.handler = handler;
-        this.module = handler.module;
     }
 
     void doRestock() {

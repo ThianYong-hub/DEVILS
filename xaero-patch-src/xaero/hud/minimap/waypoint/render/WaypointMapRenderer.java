@@ -47,10 +47,6 @@ import xaero.hud.minimap.element.render.MinimapElementRenderer;
 import xaero.hud.minimap.module.MinimapSession;
 import xaero.hud.minimap.waypoint.WaypointPurpose;
 import xaero.hud.minimap.waypoint.WaypointSession;
-import xaero.hud.minimap.waypoint.render.WaypointDeleter;
-import xaero.hud.minimap.waypoint.render.WaypointMapRenderContext;
-import xaero.hud.minimap.waypoint.render.WaypointMapRenderProvider;
-import xaero.hud.minimap.waypoint.render.WaypointMapRenderReader;
 import xaero.hud.minimap.world.MinimapWorld;
 import xaero.hud.render.TextureLocations;
 import xaero.hud.render.util.RenderBufferUtil;
@@ -60,6 +56,7 @@ import xaero.lib.client.graphics.XaeroBufferProvider;
 import xaero.lib.common.config.option.ConfigOption;
 import xaero.lib.common.config.option.IndexedConfigOption;
 
+@SuppressWarnings({"rawtypes", "unchecked", "unused"})
 public final class WaypointMapRenderer
 extends MinimapElementRenderer<Waypoint, WaypointMapRenderContext> {
     private static final Identifier DEVILS_EMBEDDED_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_ping_icon_white.png");

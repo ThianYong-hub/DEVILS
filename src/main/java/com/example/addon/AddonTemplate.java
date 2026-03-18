@@ -17,6 +17,7 @@ import com.example.addon.modules.Ping;
 import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
+import com.example.addon.modules.modupdater.ModAutoUpdater;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -70,6 +71,7 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new AutoPearl());
         modules.add(new AutoAnvilRename());
         modules.add(new SyncHub());
+        modules.add(new ModAutoUpdater());
         modules.add(new AutoLogin());
         modules.add(new Ping());
         modules.add(new AntiWasp());

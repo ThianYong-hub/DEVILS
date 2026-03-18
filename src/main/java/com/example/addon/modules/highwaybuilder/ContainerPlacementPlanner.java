@@ -1,7 +1,6 @@
 package com.example.addon.modules.highwaybuilder;
 
 import net.minecraft.block.BlockState;
-import net.minecraft.block.ShulkerBoxBlock;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.util.math.BlockPos;

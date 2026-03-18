@@ -45,12 +45,8 @@ import xaero.map.gui.GuiMap;
 import xaero.map.icon.XaeroIcon;
 import xaero.map.misc.Misc;
 import xaero.map.mods.SupportXaeroMinimap;
-import xaero.map.mods.gui.Waypoint;
-import xaero.map.mods.gui.WaypointReader;
-import xaero.map.mods.gui.WaypointRenderContext;
-import xaero.map.mods.gui.WaypointRenderProvider;
-import xaero.map.mods.gui.WaypointSymbolCreator;
 
+@SuppressWarnings({"rawtypes", "unchecked", "unused"})
 public final class WaypointRenderer
 extends ElementRenderer<Waypoint, WaypointRenderContext, WaypointRenderer> {
     private static final String DEVILS_MANAGED_SUFFIX = "\u2063\u2063";

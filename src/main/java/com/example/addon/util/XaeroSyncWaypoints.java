@@ -1,7 +1,5 @@
 package com.example.addon.util;
 
-import com.example.addon.util.xaerosync.XaeroWaypointContext.TrackedPlayersResult;
-import com.example.addon.util.xaerosync.XaeroWaypointContext.ApplyStats;
 import com.example.addon.util.xaerosync.XaeroWaypointContext;
 import com.example.addon.util.xaerosync.XaeroWaypointManagedWaypoints;
 import com.example.addon.util.xaerosync.XaeroWaypointNaming;

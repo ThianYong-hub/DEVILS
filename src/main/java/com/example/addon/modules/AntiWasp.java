@@ -23,8 +23,6 @@ import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.world.RaycastContext;
 
 public class AntiWasp extends Module {
     private final AntiWaspObstacleAvoidance obstacleAvoidance = new AntiWaspObstacleAvoidance(this);

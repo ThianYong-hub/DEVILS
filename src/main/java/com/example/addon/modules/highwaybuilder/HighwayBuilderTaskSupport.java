@@ -110,7 +110,6 @@ final class InventoryJunkDropper {
 }
 
 final class InventoryJunkRules {
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final Set<Item> JUNK_ITEMS = Set.of(
         Items.ANCIENT_DEBRIS, Items.NETHER_GOLD_ORE, Items.NETHER_QUARTZ_ORE, Items.QUARTZ,
         Items.GLOWSTONE, Items.BLACKSTONE, Items.BASALT, Items.SMOOTH_BASALT, Items.MAGMA_BLOCK,

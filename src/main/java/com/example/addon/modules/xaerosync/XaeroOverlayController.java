@@ -6,7 +6,6 @@ import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.registry.RegistryKey;
-import net.minecraft.util.Util;
 import net.minecraft.world.World;
 
 import java.lang.reflect.Field;

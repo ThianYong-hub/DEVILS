@@ -1,26 +1,19 @@
 package com.example.addon.settings;
 
-import com.example.addon.audio.JoinSoundPlayer;
 import com.example.addon.gui.screens.settings.SelectionScreens.GameSoundSelectScreen;
 import com.example.addon.modules.JoinWatcher;
 import com.example.addon.settings.TrackerPlayerRule.SoundSourceMode;
 import com.example.addon.settings.TrackerPlayerRule.TrackEventMode;
 import com.example.addon.settings.TrackerPlayerRule.TrackerEventSoundSlot;
 import meteordevelopment.meteorclient.gui.GuiTheme;
-import meteordevelopment.meteorclient.gui.renderer.GuiRenderer;
 import meteordevelopment.meteorclient.gui.widgets.containers.WHorizontalList;
 import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
 import meteordevelopment.meteorclient.gui.widgets.input.WDropdown;
 import meteordevelopment.meteorclient.gui.widgets.input.WTextBox;
 import meteordevelopment.meteorclient.gui.widgets.pressable.WButton;
-import meteordevelopment.meteorclient.gui.widgets.pressable.WCheckbox;
-import meteordevelopment.meteorclient.gui.widgets.pressable.WMinus;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.player.ChatUtils;
-import net.minecraft.util.Util;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 

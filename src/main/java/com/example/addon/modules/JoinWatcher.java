@@ -3,7 +3,6 @@ package com.example.addon.modules;
 import com.example.addon.AddonTemplate;
 import com.example.addon.audio.JoinSoundPlayer;
 import com.example.addon.settings.TrackerPlayerRule;
-import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.settings.TrackerPlayerRule.TrackEventMode;
 import com.example.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
