@@ -4,7 +4,7 @@ Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-cl
 
 ## Download
 
-- Current build (`v0.0.34`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.34/devils-addon-0.0.34.jar)
+- Current build (`v0.0.35`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.35/devils-addon-0.0.35.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -139,7 +139,7 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.34`)
+## Release Notes (`v0.0.35`)
 
 - Completed full migration workflow for moving packs from `1.21.8` to `1.21.11` with one-click UI flow (`Select Source Folder` -> `Select Mods` -> `Run Update Now`).
 - Reworked updater provider resolution:
