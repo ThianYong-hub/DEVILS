@@ -210,7 +210,7 @@ Run tests:
 ```
 
 <<<<<<< HEAD
-## Release Notes (`v0.0.35`)
+## Release Notes (`v0.0.36`)
 =======
 ## Repository Structure
 >>>>>>> 9f6726a (docs: rewrite README in showcase format)
