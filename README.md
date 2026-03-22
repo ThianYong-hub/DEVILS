@@ -1,123 +1,193 @@
 # Devils Addon
 
-Devils Addon is a [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) addon for combat automation, movement tools, world automation, and shared cross-client sync features.
+An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) focused on combat automation, movement control, SyncHub networking, and deep Xaero map integration.
+
+[![Release](https://img.shields.io/github/v/release/ThianYong-hub/DEVILS?label=Release)](https://github.com/ThianYong-hub/DEVILS/releases/latest)
+[![Minecraft](https://img.shields.io/badge/Minecraft-1.21.11-31a24c)](https://github.com/ThianYong-hub/DEVILS)
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://adoptium.net/)
+[![Downloads](https://img.shields.io/github/downloads/ThianYong-hub/DEVILS/total)](https://github.com/ThianYong-hub/DEVILS/releases)
+[![Stars](https://img.shields.io/github/stars/ThianYong-hub/DEVILS?style=social)](https://github.com/ThianYong-hub/DEVILS)
+[![Last Commit](https://img.shields.io/github/last-commit/ThianYong-hub/DEVILS)](https://github.com/ThianYong-hub/DEVILS/commits)
+[![Build](https://github.com/ThianYong-hub/DEVILS/actions/workflows/dev_build.yml/badge.svg)](https://github.com/ThianYong-hub/DEVILS/actions/workflows/dev_build.yml)
 
 ## Download
 
-- Current build (`v0.0.35`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.35/devils-addon-0.0.35.jar)
-- Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
-- All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
+- Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
+- Current build (`v0.0.34`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.34/devils-addon-0.0.34.jar>
 
-## Requirements
+## Verified Runtime Matrix
 
-| Component | Required Version |
+| Item | Value |
 | --- | --- |
+| Addon Version | `0.0.34` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
 | Meteor Client | build for `1.21.11` |
+| Embedded Integrations | `Xaero MiniMap`, `Xaero World Map`, `XaeroPlus`, `ChestTracker Port` |
 
-## Installation
+## Why This Addon
 
-1. Install Meteor Client.
-2. Download the latest `devils-addon-*.jar`.
-3. Put the jar into `.minecraft/mods`.
-4. Start the game and open category `Devils` in Meteor.
+- Combat and movement modules are bundled with sync-aware team tooling.
+- SyncHub supports signed requests and encrypted payload flow.
+- Xaero integration is not cosmetic: live player markers and managed waypoint pipeline are integrated into addon runtime.
+- Includes migration tooling (`mod-auto-updater`) and dedicated backend stress tests (`SyncHub/tests/sync_stress_tester.py`).
 
-## Project Layout
+## Modules
 
-- `src/main/java/com/example/addon/modules`: public module entrypoints and compact facades.
-- `src/main/java/com/example/addon/modules/<feature>`: feature-local planners, sync controllers, render helpers, and storage logic.
-- `src/main/java/com/example/addon/util/xaerosync`: Xaero waypoint and tracked-player support code.
-- `src/main/java/com/example/addon/settings`: tracker rule models and UI helpers.
-- `src/test/java`: larger regression suites for project structure, config, and module-specific behavior.
-- Current codebase rule: Java source files are kept in the `100-500` line range to avoid both monoliths and meaningless tiny wrappers.
+### Combat Modules
 
-## Module Table
+| Module | Description |
+| --- | --- |
+| `auto-cev` | Places obsidian and crystals for an aggressive Cev cycle. |
+| `auto-pearl` | Tracks target and chases with pearls. Supports chat trigger `!pearl <nick>`. |
+| `tnt-bomber` | Traps target with obsidian and executes TNT bombing sequence. |
+| `lava-bucket` | Automatically places and collects lava around nearby players. |
+| `mace-spoof` | Spoofs fall-distance conditions to amplify mace damage. |
+| `spear-spoof` | Full spear FSM: targeting, movement controller, attack contour, debug pipeline. |
 
-| Module | Category | What It Does |
-| --- | --- | --- |
-| `chest-tracker` | Utility / Storage | Fully integrated ChestTracker module inside Devils Addon. Includes custom Devils UI theme, persistent NBT memory banks, and SyncHub synchronization. |
-| `sync-hub` | Core Sync | Shared sync configuration for Devils modules (`AutoLogin`, `Ping`, `ChestTracker`), including stream/pull/push behavior. |
-| `mod-auto-updater` | Utility / Migration | One-click modpack migration helper from `1.21.8` to `1.21.11`. Scans local jars, resolves updates via Modrinth/GitHub, and replaces jars with optional backups. |
-| `xaero-sync` | Utility / Team Map | Standalone sync pipeline for Xaero World Map tracked players and managed waypoints with Devils overlay integration. |
-| `auto-login` | Utility / Auth | Sends saved `/login` or `/reg` commands automatically per username/server profile. Supports SyncHub profile sync. |
-| `ping` | Utility / Team | Team ping markers with optional sound/text/icon and SyncHub data sync across clients. |
-| `tracker-player` (`join-watcher`) | Utility / Alerts | Per-player join/leave tracking with custom rules, sounds, and optional chat actions. |
-| `auto-anvil-rename` | Utility / Inventory | Automatically renames matching items in anvils with configurable filters and delay. |
-| `discord-rpc` | Utility | Shows Devils Addon status/presence in Discord Rich Presence. |
-| `auto-pearl` | Combat / Mobility | Automated pearl throws with target logic, safety filters, and multi-bot coordination options. |
-| `auto-cev` | Combat | Automates aggressive Cev-style obsidian/crystal cycles with combat safeguards. |
-| `tnt-bomber` | Combat | Builds target trap flow and executes TNT bombing sequence around enemy players. |
-| `lava-bucket` | Combat / Utility | Automates lava bucket placement/collection logic against nearby targets. |
-| `mace-spoof` | Combat | Spoofs fall distance packets to improve mace damage conditions. |
-| `auto-wasp` | Movement / Combat | Elytra chase module with routing/targeting logic and optional armor swap behavior. |
-| `anti-wasp` | Movement / Evasion | Elytra evasion patterns (circle/square/triangle) and obstacle-aware avoidance. |
-| `h-clip` | Movement | Horizontal clip helper to reposition into safer corners quickly. |
-| `v-clip` | Movement | Vertical clip by configurable distance (up/down). |
-| `highway-builder-plus` | World / Builder | Nether highway/tunnel/path automation with mining, placing, restock, and render controls. |
+### Movement and World Modules
 
-## ChestTracker Storage and Sync
+| Module | Description |
+| --- | --- |
+| `auto-wasp` | Elytra follow/chase with obstacle-aware routing. |
+| `anti-wasp` | Elytra evasion patterns (circle/square/triangle) with obstacle checks. |
+| `h-clip` | Fast horizontal corner clip helper. |
+| `v-clip` | Instant vertical clip by configured distance. |
+| `highway-builder-plus` | Automated Nether highway/tunnel/flat path builder with mining, placing, and task pipeline. |
 
-- Base addon directory: `.minecraft/devils-addon`
-- ChestTracker multiplayer banks: `.minecraft/devils-addon/chesttracker/multiplayer/<server>.nbt`
-- ChestTracker singleplayer banks: `.minecraft/devils-addon/chesttracker/singleplayer/<world>.nbt`
-- Metadata files are stored next to each bank as `.nbt.meta`.
-- When SyncHub is enabled for ChestTracker, bank data is synchronized per server namespace.
+### Utility and Team Modules
 
-## Secure SyncHub Setup
+| Module | Description |
+| --- | --- |
+| `ping` | Synchronized ping markers with 2D/3D render, sound, custom icon and SyncHub bridge. |
+| `tracker-player` (`join-watcher`) | Per-player join/leave/death rules with sounds and optional delayed chat actions. |
+| `auto-login` | Auto `/login` and `/reg` by username + server profile. |
+| `auto-anvil-rename` | Auto-renames matching items in open anvil with filters and XP assist. |
+| `discord-rpc` | Shows Devils Addon presence in Discord Rich Presence. |
 
-- `sync-hub` now expects two independent secrets:
-  - `token` (`SYNC_TOKEN`) for bearer auth.
-  - `request-signing-key` (`SYNC_SIGNING_KEY`) for HMAC request signatures.
-- `encryption-key` is used for end-to-end encrypted profile payloads and is no longer auto-derived from token.
-- Backend can run in HTTPS mode by setting:
-  - `SYNC_TLS_CERT_FILE`
-  - `SYNC_TLS_KEY_FILE`
-  - optional `SYNC_TLS_MIN_VERSION` (`TLSv1_3` by default)
-- Signed request checks are controlled by:
-  - `SYNC_REQUIRE_SIGNED=true`
-  - `SYNC_SIGN_WINDOW_SEC` (default `30`)
-  - `SYNC_NONCE_TTL_SEC` (default `120`)
+### Core and Integrations
 
-## Mod Auto Updater
-
-- Module: `mod-auto-updater` in category `Devils`.
-- Button `Run Update Now` performs one-shot scan/update for `mods` folder.
-- Built-in source folder picker:
-  - `Select Source Folder` opens a directory chooser and lets you pick old pack `mods` folder (for example from `%APPDATA%` instances).
-  - Updater scans that selected source and migrates into the currently running instance `mods`.
-- Built-in mod selection:
-  - `Select Mods` opens a list of mods detected in source folder with checkboxes.
-  - Enable `use-selection-filter` to process only selected mods.
-- Runtime defaults are automatic:
-  - Minecraft target version is taken from the currently running client.
-  - Loader is fixed to `fabric`.
-  - Target mods directory is current game instance (`<gameDir>/mods`).
-- Source support:
-  - Auto-detect from each mod's `fabric.mod.json` URLs (`Modrinth` and `GitHub`).
-  - Manual override file: `.minecraft/devils-addon/mod-updater/sources.json`.
-  - Resolver priority: `Modrinth` first, then `GitHub` fallback.
-  - Built-in resolver overrides for known problematic ids (including `modernfix`, `forgeconfigapiport`, `placeholder-api`, `sspb`, `yacl`, `worldtools`, `jefffmod`).
-- Compatibility validation:
-  - Update candidates are checked against target runtime (`Minecraft 1.21.11`, `Fabric`) before replacement.
-  - Jars with incompatible `fabric.mod.json` constraints are rejected to prevent boot-time crashes.
-- Startup rerun:
-  - Enable setting `update-rerun` to run one automatic check each client launch.
-- Exclusions:
-  - By default skips already embedded/ported mods (`devils-addon`, `xaerominimap`, `xaeroworldmap`, `chesttracker`).
-- Safety:
-  - Optional backup of replaced jars to `.minecraft/devils-addon/mod-updater/backups/<timestamp>/`.
-  - Optional `copy-fallback-mods` can copy unresolved mods from source folder directly to target mods folder.
-  - `dry-run` mode reports available updates without modifying files.
+| Module | Description |
+| --- | --- |
+| `sync-hub` | Shared sync settings for `auto-login`, `ping`, `chest-tracker`, `xaero-world-map`. |
+| `chest-tracker` | Integrated ChestTracker module with Devils theme, local storage and SyncHub sync. |
+| `mod-auto-updater` | One-click migration helper from `1.21.8` to `1.21.11` (Modrinth + GitHub lookups). |
+| `xaero-sync` | Internal runtime integration for Xaero World Map overlay and tracked players. Auto-started by `sync-hub`. |
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `.autoraname setname <text>` | Sets target rename text for `auto-anvil-rename`. |
-| `.autoraname clearitems` | Clears item filter list for `auto-anvil-rename`. |
-| `.example` | Test/example command. |
+| `.autoraname setname <text>` | Set target rename text for `auto-anvil-rename`. |
+| `.autoraname clearitems` | Clear item filter list for `auto-anvil-rename`. |
+| `.example` | Internal example command. |
+
+## SyncHub Setup (Exact Values)
+
+### 1) Generate Secrets
+
+Generate three independent values (`token`, `request-signing-key`, `encryption-key`):
+
+```bash
+python -c "import secrets; print('SYNC_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_ENCRYPTION_KEY=' + secrets.token_urlsafe(48))"
+```
+
+### 2) Backend `.env` (SyncHub)
+
+```env
+SYNC_TOKEN=replace_me
+SYNC_SIGNING_KEY=replace_me
+SYNC_REQUIRE_SIGNED=true
+SYNC_REQUIRE_ENCRYPTED=true
+SYNC_HOST=0.0.0.0
+SYNC_PORT=7878
+SYNC_STATE_FILE=/data/sync-hub-state.json
+SYNC_NAMESPACES_DIR=/data/modules
+# Optional HTTPS
+SYNC_TLS_CERT_FILE=
+SYNC_TLS_KEY_FILE=
+SYNC_TLS_MIN_VERSION=TLSv1_3
+```
+
+### 3) Client `sync-hub` Settings (Meteor)
+
+| Setting | Value |
+| --- | --- |
+| `base-url` | `https://your-domain` or `http://IP:PORT` |
+| `token` | `SYNC_TOKEN` |
+| `request-signing-key` | `SYNC_SIGNING_KEY` |
+| `encryption-key` | `SYNC_ENCRYPTION_KEY` |
+| `allow-http` | `false` for HTTPS, `true` only for plain HTTP |
+| `use-stream` | `true` (recommended) |
+
+Important:
+- Do not use bare `144.31.167.88:25570` as `base-url`.
+- Correct form is `http://144.31.167.88:25570` (or `https://...` when TLS is configured).
+
+### 4) Run Backend via Docker
+
+```bash
+cd SyncHub
+docker compose up -d --build
+```
+
+Health endpoint:
+
+```text
+GET /health
+```
+
+## SyncHub Stress Tester (2 Modes)
+
+Script: `SyncHub/tests/sync_stress_tester.py`
+
+### Mode 1: Random Traffic (2 minutes)
+
+```bash
+python SyncHub/tests/sync_stress_tester.py \
+  --base-url http://127.0.0.1:7878 \
+  --module xaero-world-map \
+  --duration-sec 120 \
+  --mode random \
+  --clients 2 \
+  --push-interval-ms 50 \
+  --pull-interval-ms 50 \
+  --token "$SYNC_TOKEN" \
+  --signing-key "$SYNC_SIGNING_KEY" \
+  --encryption-key "$SYNC_ENCRYPTION_KEY"
+```
+
+### Mode 2: Elytra48 (48 blocks/sec)
+
+```bash
+python SyncHub/tests/sync_stress_tester.py \
+  --base-url http://127.0.0.1:7878 \
+  --module xaero-world-map \
+  --duration-sec 120 \
+  --mode elytra48 \
+  --elytra-speed-bps 48 \
+  --clients 2 \
+  --push-interval-ms 50 \
+  --pull-interval-ms 50 \
+  --token "$SYNC_TOKEN" \
+  --signing-key "$SYNC_SIGNING_KEY" \
+  --encryption-key "$SYNC_ENCRYPTION_KEY"
+```
+
+Optional report output:
+
+```bash
+--output-json SyncHub/tests/last-summary.json
+```
+
+## Installation
+
+1. Install Minecraft + Fabric + Fabric API for `1.21.11`.
+2. Install Meteor Client for `1.21.11`.
+3. Download latest `devils-addon-*.jar` from releases.
+4. Put jar into `.minecraft/mods`.
+5. Launch game and open `Devils` category in Meteor.
 
 ## Build From Source
 
@@ -139,21 +209,26 @@ Run tests:
 ./gradlew test
 ```
 
+<<<<<<< HEAD
 ## Release Notes (`v0.0.35`)
+=======
+## Repository Structure
+>>>>>>> 9f6726a (docs: rewrite README in showcase format)
 
-- Completed full migration workflow for moving packs from `1.21.8` to `1.21.11` with one-click UI flow (`Select Source Folder` -> `Select Mods` -> `Run Update Now`).
-- Reworked updater provider resolution:
-  - `Modrinth` is now primary.
-  - `GitHub` is fallback.
-  - Added robust built-in overrides for known outliers, including `WorldTools` via `SKevo18/VibedWorldTools`.
-- Hardened version compatibility validation so updater chooses only jars compatible with the running target (`1.21.11 Fabric`) and blocks incompatible replacements.
-- Added detailed progress telemetry and clearer UI labels (`Processed` + `Updated/Up-to-date/Excluded/Unresolved`) for transparent migration status.
-- Added persistent update logs (`loge-update.txt` + history logs) with per-mod reasoning for unresolved/skipped entries.
-- Stabilized edge cases:
-  - Better handling of locked files while client is running.
-  - Stronger no-downgrade checks.
-  - Correct handling of mods that are already compatible/up-to-date.
+- `src/main/java/com/example/addon/modules` - public module entrypoints.
+- `src/main/java/com/example/addon/modules/*` - feature-local logic (sync, render, planners, controllers).
+- `src/main/java/com/example/addon/util/xaerosync` - waypoint and tracked-player integration helpers.
+- `SyncHub/` - standalone sync backend (`sync_backend.py`, Docker files, tests).
+- `SyncHub/tests/sync_stress_tester.py` - load and propagation test harness.
+
+## Credits
+
+- [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
+- [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap)
+- [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map)
+- [XaeroPlus](https://github.com/rfresh2/XaeroPlus)
+- [ChestTracker](https://modrinth.com/mod/chest-tracker)
 
 ## License
 
-Project license: [CC0](/LICENSE).
+Project license: [CC0](LICENSE).
