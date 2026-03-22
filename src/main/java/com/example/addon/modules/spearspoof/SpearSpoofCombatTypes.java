@@ -53,6 +53,11 @@ public final class SpearSpoofCombatTypes {
         public final boolean smallTarget;
         public final double targetWidth;
         public final double targetHeight;
+        public final double predictionLeadTicks;
+        public final double predictionExtraTicks;
+        public final double predictionTotalTicks;
+        public final boolean predictionAuto;
+        public final boolean predictionCollisionAware;
         public final RunStage stage;
 
         public AttackContext(
@@ -77,6 +82,11 @@ public final class SpearSpoofCombatTypes {
             boolean smallTarget,
             double targetWidth,
             double targetHeight,
+            double predictionLeadTicks,
+            double predictionExtraTicks,
+            double predictionTotalTicks,
+            boolean predictionAuto,
+            boolean predictionCollisionAware,
             RunStage stage
         ) {
             this.playerPos = playerPos;
@@ -100,6 +110,11 @@ public final class SpearSpoofCombatTypes {
             this.smallTarget = smallTarget;
             this.targetWidth = targetWidth;
             this.targetHeight = targetHeight;
+            this.predictionLeadTicks = predictionLeadTicks;
+            this.predictionExtraTicks = predictionExtraTicks;
+            this.predictionTotalTicks = predictionTotalTicks;
+            this.predictionAuto = predictionAuto;
+            this.predictionCollisionAware = predictionCollisionAware;
             this.stage = stage;
         }
     }

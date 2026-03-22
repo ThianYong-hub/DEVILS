@@ -267,7 +267,7 @@ public class SpearSpoof extends Module {
 
     private final Setting<Boolean> mode4x = sgFlight.add(new BoolSetting.Builder()
         .name("mode-4x")
-        .description("Run-up spear loop: retreat 10 blocks, approach 4 blocks, after hit retreat 2 blocks.")
+        .description("Run-up spear loop: retreat 5 blocks, approach 4 blocks, after hit retreat 2 blocks.")
         .defaultValue(false)
         .build()
     );
@@ -326,16 +326,6 @@ public class SpearSpoof extends Module {
         .defaultValue(0.92)
         .range(0.0, 1.0)
         .sliderRange(0.75, 1.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> leadTimeMs = sgStrike.add(new IntSetting.Builder()
-        .name("lead-time-ms")
-        .description("Target prediction lead time.")
-        .defaultValue(90)
-        .range(0, 400)
-        .sliderRange(0, 250)
         .visible(this::showAdvanced)
         .build()
     );
@@ -503,6 +493,7 @@ public class SpearSpoof extends Module {
         attributeSwap,
         rotate,
         yawCamera,
+        mode4x,
         minRange,
         maxRange,
         smallTargetRange,
@@ -517,7 +508,6 @@ public class SpearSpoof extends Module {
         minWindupMs,
         readyWindowMs,
         fatigueWindowMs,
-        leadTimeMs,
         recoveryDelayMs,
         requireLineOfSight,
         adaptiveReposition,

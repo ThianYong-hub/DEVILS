@@ -2,6 +2,8 @@ package com.example.addon.util.xaerosync;
 
 import com.example.addon.AddonTemplate;
 import com.example.addon.util.XaeroSyncWaypoints;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.world.World;
 
 import java.lang.reflect.Constructor;
 import java.util.Collection;
@@ -26,8 +28,14 @@ public final class XaeroWaypointContext {
     public static final String INVISIBLE_WAYPOINT_SYMBOL = "\u2063";
     public static final String INVISIBLE_WAYPOINT_NAME = "\u2063";
     public static final long WAYPOINT_APPLY_RETRY_MS = 100L;
+    public static final long TRACKED_PLAYER_MISSING_GRACE_MS = 1_400L;
+    public static final long TRACKED_PLAYER_INTERPOLATION_MIN_MS = 30L;
+    public static final long TRACKED_PLAYER_INTERPOLATION_MAX_MS = 180L;
+    public static final double TRACKED_PLAYER_TELEPORT_SNAP_DISTANCE_SQ = 192.0 * 192.0;
 
     public final Set<UUID> activeTrackedPlayers = new HashSet<>();
+    public final Map<UUID, TrackedPlayerMotionState> trackedPlayerMotionStates = new HashMap<>();
+    public final Map<UUID, Long> trackedPlayerLastSeenAtMs = new HashMap<>();
     public final Map<String, String> managedWaypointIconPaths = new HashMap<>();
     public boolean unavailableLogged;
     public boolean legacyCleanupDone;
@@ -96,6 +104,63 @@ public final class XaeroWaypointContext {
         boolean forcePlayersFallback,
         List<XaeroSyncWaypoints.MapWaypointMarker> effectiveMapMarkers
     ) {
+    }
+
+    public record TrackedPlayerRenderSnapshot(
+        double x,
+        double y,
+        double z,
+        RegistryKey<World> dimension
+    ) {
+    }
+
+    public static final class TrackedPlayerMotionState {
+        public RegistryKey<World> dimension;
+        public double startX;
+        public double startY;
+        public double startZ;
+        public double targetX;
+        public double targetY;
+        public double targetZ;
+        public long transitionStartMs;
+        public long transitionDurationMs;
+        public long lastSourceReceivedAtMs;
+        public double renderX;
+        public double renderY;
+        public double renderZ;
+        public long lastRenderUpdateMs;
+
+        public TrackedPlayerMotionState(
+            RegistryKey<World> dimension,
+            double startX,
+            double startY,
+            double startZ,
+            double targetX,
+            double targetY,
+            double targetZ,
+            long transitionStartMs,
+            long transitionDurationMs,
+            long lastSourceReceivedAtMs,
+            double renderX,
+            double renderY,
+            double renderZ,
+            long lastRenderUpdateMs
+        ) {
+            this.dimension = dimension;
+            this.startX = startX;
+            this.startY = startY;
+            this.startZ = startZ;
+            this.targetX = targetX;
+            this.targetY = targetY;
+            this.targetZ = targetZ;
+            this.transitionStartMs = transitionStartMs;
+            this.transitionDurationMs = transitionDurationMs;
+            this.lastSourceReceivedAtMs = lastSourceReceivedAtMs;
+            this.renderX = renderX;
+            this.renderY = renderY;
+            this.renderZ = renderZ;
+            this.lastRenderUpdateMs = lastRenderUpdateMs;
+        }
     }
 }
 

@@ -250,10 +250,10 @@ public final class XaeroSyncRuntimeController {
                 try {
                     pushResult = codec.sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushBaseRevision, effectiveSnapshot);
                     if (pushResult.ok() && pushResult.conflict() && pushResult.profiles() != null && pushResult.revision() >= 0) {
-                        List<SyncXaeroData> conflictMerged = presenceStore.mergeSnapshots(pushResult.profiles(), localSnapshot);
-                        effectiveSnapshot = conflictMerged;
-                        effectiveFingerprint = codec.computeFingerprint(conflictMerged);
-                        pushResult = codec.sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
+                        // Fast conflict retry for presence sync: re-send only our local row at fresh revision.
+                        pushResult = codec.sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushResult.revision(), localSnapshot);
+                        effectiveSnapshot = localSnapshot;
+                        effectiveFingerprint = localFingerprint;
                     }
                 } catch (Throwable throwable) {
                     error = com.example.addon.modules.sync.SyncJsonUtils.formatSyncException("push-error", throwable, XaeroSyncConstants.SYNC_ERROR_DETAIL_MAX);

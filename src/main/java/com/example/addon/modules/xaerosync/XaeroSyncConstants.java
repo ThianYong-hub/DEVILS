@@ -12,7 +12,7 @@ public final class XaeroSyncConstants {
     public static final String SYNC_PUSH_PATH = "/push";
     public static final String SYNC_STREAM_PATH = "/v1/sync/stream";
     public static final String SYNC_STREAM_PATH_LEGACY = "/stream";
-    public static final long PULL_FALLBACK_INTERVAL_MS = 250;
+    public static final long PULL_FALLBACK_INTERVAL_MS = 100;
     public static final long SYNC_STREAM_RECONNECT_MS = 250;
     public static final long SYNC_AUTH_BACKOFF_MS = 1_000;
     public static final long SYNC_CRYPTO_BACKOFF_MS = 1_000;
@@ -32,6 +32,7 @@ public final class XaeroSyncConstants {
     public static final double PRESENCE_MOVE_THRESHOLD_SQ = 0.0;
     public static final int MAX_SYNC_PRESENCE = 64;
     public static final double PRESENCE_MAX_SPEED_BLOCKS_PER_SEC = 230.0;
+    public static final long PRESENCE_FUTURE_SKEW_TOLERANCE_MS = 30_000;
     public static final int MAX_PARALLEL_SYNC_CYCLES = 2;
     public static final int BUTTON_W = 20;
     public static final int BUTTON_H = 20;

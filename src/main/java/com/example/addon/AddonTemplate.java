@@ -14,12 +14,14 @@ import com.example.addon.modules.JoinWatcher;
 import com.example.addon.modules.LavaBucket;
 import com.example.addon.modules.MaceSpoof;
 import com.example.addon.modules.Ping;
+import com.example.addon.modules.SpearSpoof;
 import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
 import com.example.addon.modules.modupdater.ModAutoUpdater;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
+import com.example.addon.util.PrismLauncherControl;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
@@ -39,6 +41,7 @@ import meteordevelopment.meteorclient.systems.modules.Category;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import net.minecraft.command.CommandSource;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.Items;
 import org.slf4j.Logger;
 
@@ -53,6 +56,7 @@ public class AddonTemplate extends MeteorAddon {
         CrashGuard.installLogFilters();
         AddonModulesConfig.init();
         CrashGuard.logXaeroState();
+        applyPrismMultiSessionDefaults();
         registerTrackerPlayersSettingFactory();
         registerModules();
         registerCommands();
@@ -85,12 +89,34 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new ClipModules.VClip());
         modules.add(new HighwayBuilder());
         modules.add(new MaceSpoof());
+        modules.add(new SpearSpoof());
         modules.add(new ChestTrackerModule());
     }
 
     private void registerCommands() {
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
+    }
+
+    private void applyPrismMultiSessionDefaults() {
+        try {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            var result = PrismLauncherControl.ensureMultiSessionFlags(mc != null ? mc.runDirectory.toPath() : null);
+            if (result.ok()) {
+                LOG.info("[PrismControl] {} root={} cfg={}", result.message(), result.prismRoot(), result.configPath());
+            } else {
+                LOG.warn("[PrismControl] {}", result.message());
+            }
+
+            var restart = PrismLauncherControl.restartLauncherForParallelSameInstance(mc != null ? mc.runDirectory.toPath() : null);
+            if (restart.ok()) {
+                LOG.info("[PrismControl] {}", restart.message());
+            } else {
+                LOG.warn("[PrismControl] {}", restart.message());
+            }
+        } catch (Exception e) {
+            LOG.warn("[PrismControl] Failed to auto-apply Prism multi-session flags: {}", e.toString());
+        }
     }
 
     private void registerHudElements() {

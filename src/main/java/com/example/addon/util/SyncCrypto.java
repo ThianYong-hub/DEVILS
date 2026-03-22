@@ -75,8 +75,26 @@ public final class SyncCrypto {
 
         String key = safe(keyMaterial).trim();
         if (key.isBlank()) throw new IllegalArgumentException("missing-key");
+        String normalizedModule = normalizeModule(module);
 
-        JsonObject row = wireProfiles.get(0).getAsJsonObject();
+        JsonArray merged = new JsonArray();
+        int failures = 0;
+        for (JsonElement element : wireProfiles) {
+            if (!element.isJsonObject()) throw new IllegalArgumentException("bad-envelope-row");
+            try {
+                JsonArray plain = decryptEnvelopeRow(element.getAsJsonObject(), key, normalizedModule);
+                for (JsonElement plainElement : plain) {
+                    merged.add(plainElement);
+                }
+            } catch (Exception ignored) {
+                failures++;
+            }
+        }
+        if (!merged.isEmpty() || failures == 0) return merged;
+        throw new IllegalArgumentException("all-envelopes-failed");
+    }
+
+    private static JsonArray decryptEnvelopeRow(JsonObject row, String key, String normalizedModule) throws Exception {
         String password = safe(readString(row, "password")).trim();
         boolean v2 = password.startsWith(ENVELOPE_PREFIX_V2);
         boolean v1 = password.startsWith(ENVELOPE_PREFIX_V1);
@@ -90,7 +108,6 @@ public final class SyncCrypto {
         int version = readInt(envelope, "v", 0);
         if (version != 1 && version != 2) throw new IllegalArgumentException("unsupported-version");
 
-        String normalizedModule = normalizeModule(module);
         String envelopeModule = normalizeModule(readString(envelope, "m"));
         if (!envelopeModule.isBlank() && !envelopeModule.equals(normalizedModule)) {
             throw new IllegalArgumentException("module-mismatch");
@@ -113,8 +130,16 @@ public final class SyncCrypto {
     }
 
     public static boolean isEncryptedEnvelope(JsonArray profiles) {
-        if (profiles == null || profiles.size() != 1 || !profiles.get(0).isJsonObject()) return false;
-        JsonObject row = profiles.get(0).getAsJsonObject();
+        if (profiles == null || profiles.isEmpty()) return false;
+        for (JsonElement element : profiles) {
+            if (!element.isJsonObject()) return false;
+            if (!isEncryptedEnvelopeRow(element.getAsJsonObject())) return false;
+        }
+        return true;
+    }
+
+    private static boolean isEncryptedEnvelopeRow(JsonObject row) {
+        if (row == null) return false;
         String username = safe(readString(row, "username")).trim();
         String password = safe(readString(row, "password")).trim();
         return ENVELOPE_USERNAME.equals(username)

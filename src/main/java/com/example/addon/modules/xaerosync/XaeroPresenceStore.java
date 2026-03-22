@@ -69,6 +69,7 @@ public final class XaeroPresenceStore {
     }
 
     public List<SyncXaeroData> snapshotSyncData(String runtimeSyncDeviceId) {
+        long now = System.currentTimeMillis();
         PresenceMarker localPresence = buildOrReuseLocalPresence(runtimeSyncDeviceId);
         if (localPresence == null) {
             localPresenceCache = null;
@@ -76,6 +77,7 @@ public final class XaeroPresenceStore {
         }
 
         syncedPresence.put(localPresence.id(), localPresence);
+        pruneSyncedPresence(now);
         return List.of(encodePresence(localPresence));
     }
 
@@ -230,7 +232,11 @@ public final class XaeroPresenceStore {
         vz = velocity[2].value;
 
         long nowMs = System.currentTimeMillis();
-        if (updatedAt <= 0 || Math.abs(updatedAt - nowMs) > 5_000L) updatedAt = nowMs;
+        if (updatedAt <= 0L) {
+            updatedAt = nowMs;
+        } else if (updatedAt > (nowMs + XaeroSyncConstants.PRESENCE_FUTURE_SKEW_TOLERANCE_MS)) {
+            updatedAt = nowMs;
+        }
 
         String identity = XaeroSyncValueUtils.normalizeKey(playerUuid);
         if (identity.isBlank()) identity = XaeroSyncValueUtils.normalizeKey(sender);
@@ -314,7 +320,10 @@ public final class XaeroPresenceStore {
             }
         }
 
-        long now = System.currentTimeMillis();
+        pruneSyncedPresence(System.currentTimeMillis());
+    }
+
+    private void pruneSyncedPresence(long now) {
         syncedPresence.entrySet().removeIf(entry -> {
             PresenceMarker marker = entry.getValue();
             return marker == null || (now - marker.updatedAtMs()) > XaeroSyncConstants.PRESENCE_STALE_MS;
@@ -328,6 +337,24 @@ public final class XaeroPresenceStore {
             PresenceMarker marker = sorted.get(i);
             syncedPresence.put(marker.id(), marker);
         }
+    }
+
+    private List<SyncXaeroData> encodePresenceSnapshot(Iterable<PresenceMarker> markers) {
+        ArrayList<PresenceMarker> ordered = new ArrayList<>();
+        if (markers != null) {
+            for (PresenceMarker marker : markers) {
+                if (marker == null) continue;
+                ordered.add(marker);
+            }
+        }
+        ordered.sort(Comparator.comparingLong(PresenceMarker::updatedAtMs).reversed());
+        if (ordered.size() > XaeroSyncConstants.MAX_SYNC_PRESENCE) {
+            ordered = new ArrayList<>(ordered.subList(0, XaeroSyncConstants.MAX_SYNC_PRESENCE));
+        }
+
+        ArrayList<SyncXaeroData> snapshot = new ArrayList<>(ordered.size());
+        for (PresenceMarker marker : ordered) snapshot.add(encodePresence(marker));
+        return snapshot;
     }
 
     private PingMarkerRouting collectPingTrackedMarkers(String serverKey) {
@@ -374,28 +401,28 @@ public final class XaeroPresenceStore {
     }
 
     private PresenceRenderPosition resolvePresenceRenderPosition(PresenceMarker presence, long nowMs) {
-        double x = presence.x();
-        double y = XaeroSyncValueUtils.clampY(presence.y());
-        double z = presence.z();
-
+        String sourceDimension = XaeroSyncValueUtils.normalizeKey(presence.dimension());
+        double renderX = presence.x();
+        double renderY = XaeroSyncValueUtils.clampY(presence.y());
+        double renderZ = presence.z();
         presenceMotion.put(presence.id(), new PresenceMotionState(
             presence.id(),
-            XaeroSyncValueUtils.normalizeKey(presence.dimension()),
+            sourceDimension,
             presence.sequence(),
             presence.updatedAtMs(),
             nowMs,
-            x,
-            y,
-            z,
+            presence.x(),
+            XaeroSyncValueUtils.clampY(presence.y()),
+            presence.z(),
             presence.vx(),
             presence.vy(),
             presence.vz(),
             nowMs,
-            x,
-            y,
-            z
+            renderX,
+            renderY,
+            renderZ
         ));
-        return new PresenceRenderPosition(x, y, z);
+        return new PresenceRenderPosition(renderX, renderY, renderZ);
     }
 
     private void cleanupPresenceMotion(Set<String> activeIds, long nowMs) {

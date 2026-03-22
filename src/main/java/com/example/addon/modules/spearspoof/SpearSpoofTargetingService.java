@@ -54,9 +54,9 @@ public final class SpearSpoofTargetingService {
         LivingEntity current = runtime.target;
 
         if (current != null) {
-            // Keep current lock as long as target is trackable.
-            // Do not drop lock on transient lane/roof checks.
-            if (isTrackableLock(current)) {
+            // Hard lock:
+            // once target is selected, keep it until death/logout/out-of-render/out-of-range.
+            if (isHardLockedTargetAlive(current)) {
                 if (runtime.targetLockedAtMs == 0) runtime.targetLockedAtMs = now;
                 return current;
             }
@@ -79,19 +79,9 @@ public final class SpearSpoofTargetingService {
 
         return null;
     }
-
-    private boolean isTrackableLock(Entity entity) {
-        if (!(entity instanceof LivingEntity living)) return false;
-        if (module.client().player == null) return false;
-
-        if (!passesBaseEntityFilters(entity, living)) return false;
-        // Lock validation intentionally uses only "hard impossible" checks.
-        // This prevents target flicker when entity is covered only сверху but open from sides.
-        return passesLockWorldBlockFilters(living);
-    }
-
     public boolean isValid(Entity entity) {
-        return isTrackableLock(entity);
+        if (!(entity instanceof LivingEntity living)) return false;
+        return isHardLockedTargetAlive(living);
     }
 
     private boolean isCandidateValid(Entity entity) {
@@ -100,6 +90,16 @@ public final class SpearSpoofTargetingService {
 
         if (!passesBaseEntityFilters(entity, living)) return false;
         return passesWorldBlockFilters(living);
+    }
+
+    private boolean isHardLockedTargetAlive(LivingEntity living) {
+        if (living == null || module.client().player == null || module.client().world == null) return false;
+        if (living == module.client().player) return false;
+        if (living.isRemoved() || !living.isAlive() || living.isDead()) return false;
+        // Out of client render/chunk tracking.
+        if (module.client().world.getEntityById(living.getId()) == null) return false;
+        // Keep lock only inside permanent combat range.
+        return module.client().player.distanceTo(living) <= module.permanentTargetRange();
     }
 
     private LivingEntity findCandidate() {
@@ -131,14 +131,6 @@ public final class SpearSpoofTargetingService {
             case Any -> true;
         };
     }
-
-    private boolean passesLockWorldBlockFilters(LivingEntity living) {
-        if (living == null || module.client().world == null || module.client().player == null) return false;
-        if (isTargetFullyInsideHardBlock(living)) return false;
-        if (isTargetFullyHardEnclosed(living)) return false;
-        return true;
-    }
-
     private boolean passesWorldBlockFilters(LivingEntity living) {
         if (living == null || module.client().world == null || module.client().player == null) return false;
         if (isTargetFullyInsideHardBlock(living)) return false;
@@ -491,3 +483,4 @@ public final class SpearSpoofTargetingService {
             || state.isOf(Blocks.CAVE_VINES_PLANT);
     }
 }
+

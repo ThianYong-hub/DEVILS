@@ -31,6 +31,8 @@ public final class SpearSpoofCombatService {
     private static final double ENFORCED_MIN_RANGE = 0.40;
     private static final double ENFORCED_SMALL_MIN_RANGE = 0.28;
     private static final double ENFORCED_MAX_RANGE = 4.5;
+    private static final double MODE_4X_MIN_RANGE = 4.0;
+    private static final double MODE_4X_MAX_RANGE = 4.5;
     private static final double NON_PLAYER_SPEED_BONUS_BPS = 0.2;
     private static final int HOTBAR_SWITCH_DELAY_TICKS = 1;
     private static final float LAG_PAUSE_THRESHOLD = 1.0f;
@@ -59,6 +61,7 @@ public final class SpearSpoofCombatService {
     private final Setting<Boolean> attributeSwap;
     private final Setting<Boolean> rotate;
     private final Setting<Boolean> yawCamera;
+    private final Setting<Boolean> mode4x;
 
     private final Setting<Double> minRange;
     private final Setting<Double> maxRange;
@@ -75,7 +78,6 @@ public final class SpearSpoofCombatService {
     private final Setting<Integer> minWindupMs;
     private final Setting<Integer> readyWindowMs;
     private final Setting<Integer> fatigueWindowMs;
-    private final Setting<Integer> leadTimeMs;
     private final Setting<Integer> recoveryDelayMs;
 
     private final Setting<Boolean> requireLineOfSight;
@@ -101,6 +103,7 @@ public final class SpearSpoofCombatService {
         Setting<Boolean> attributeSwap,
         Setting<Boolean> rotate,
         Setting<Boolean> yawCamera,
+        Setting<Boolean> mode4x,
         Setting<Double> minRange,
         Setting<Double> maxRange,
         Setting<Double> smallTargetRange,
@@ -115,7 +118,6 @@ public final class SpearSpoofCombatService {
         Setting<Integer> minWindupMs,
         Setting<Integer> readyWindowMs,
         Setting<Integer> fatigueWindowMs,
-        Setting<Integer> leadTimeMs,
         Setting<Integer> recoveryDelayMs,
         Setting<Boolean> requireLineOfSight,
         Setting<Boolean> adaptiveReposition,
@@ -134,6 +136,7 @@ public final class SpearSpoofCombatService {
         this.attributeSwap = attributeSwap;
         this.rotate = rotate;
         this.yawCamera = yawCamera;
+        this.mode4x = mode4x;
 
         this.minRange = minRange;
         this.maxRange = maxRange;
@@ -150,7 +153,6 @@ public final class SpearSpoofCombatService {
         this.minWindupMs = minWindupMs;
         this.readyWindowMs = readyWindowMs;
         this.fatigueWindowMs = fatigueWindowMs;
-        this.leadTimeMs = leadTimeMs;
         this.recoveryDelayMs = recoveryDelayMs;
 
         this.requireLineOfSight = requireLineOfSight;
@@ -330,9 +332,7 @@ public final class SpearSpoofCombatService {
     public Vec3d predictedAnchorPos(LivingEntity entity) {
         if (module.client().player == null || entity == null) return Vec3d.ZERO;
 
-        double leadTicks = computeAnchorLeadTicks();
-        Vec3d targetVel = entity.getVelocity();
-        Vec3d predictedCenter = entity.getEntityPos().add(targetVel.multiply(leadTicks));
+        Vec3d predictedCenter = entity.getEntityPos();
         boolean smallTarget = isSmallTarget(entity);
         double y = smallTarget
             ? entity.getY() + Math.max(0.28, entity.getHeight() * 0.52)
@@ -604,21 +604,28 @@ public final class SpearSpoofCombatService {
         Vec3d playerPos = module.client().player.getEntityPos();
         Vec3d playerVel = module.client().player.getVelocity();
         Vec3d targetPos = entity.getEntityPos();
-        double leadTicks = computeCombatLeadTicks(entity, playerPos);
+        double leadTicks = 0.0;
         Vec3d targetVel = entity.getVelocity();
-        Vec3d predictedTargetPos = targetPos.add(targetVel.multiply(leadTicks));
-        Box predictedBox = entity.getBoundingBox().offset(targetVel.multiply(leadTicks));
+        double extraPredictTicks = 0.0;
+        double totalPredictTicks = 0.0;
+        boolean predictionCollisionAware = false;
+        boolean predictionAuto = false;
+        Vec3d predictedTargetPos = targetPos;
+        Box predictedBox = entity.getBoundingBox();
         double width = Math.max(predictedBox.getLengthX(), predictedBox.getLengthZ());
         double height = predictedBox.getLengthY();
         boolean smallTarget = entity instanceof PhantomEntity || (width <= 0.90 && height <= 1.10);
 
         Vec3d eyePos = module.client().player.getEyePos();
+        long nowMs = System.currentTimeMillis();
+        boolean mode4xStableAim = mode4x.get();
         Vec3d aimPos;
-        if (smallTarget) {
+        if (smallTarget || mode4xStableAim) {
             Vec3d center = predictedBox.getCenter();
             double minAimY = predictedBox.minY + 0.05;
             double maxAimY = predictedBox.maxY - 0.05;
-            double bodyAimY = predictedBox.minY + height * 0.58;
+            double bodyFactor = smallTarget ? 0.58 : 0.62;
+            double bodyAimY = predictedBox.minY + height * bodyFactor;
             double aimY = MathHelper.clamp(bodyAimY, minAimY, maxAimY);
             aimPos = new Vec3d(center.x, aimY, center.z);
         } else {
@@ -675,48 +682,22 @@ public final class SpearSpoofCombatService {
             targetVel,
             predictedTargetPos,
             aimPos, yaw, pitch, yawError, pitchError, distance, verticalDiff,
-            speedBps, forwardDot, lookDot, closingSpeedBps, cooldown, holdMs, smallTarget, width, height, stage
+            speedBps,
+            forwardDot,
+            lookDot,
+            closingSpeedBps,
+            cooldown,
+            holdMs,
+            smallTarget,
+            width,
+            height,
+            leadTicks,
+            extraPredictTicks,
+            totalPredictTicks,
+            predictionAuto,
+            predictionCollisionAware,
+            stage
         );
-    }
-
-    private double computeCombatLeadTicks(LivingEntity entity, Vec3d playerPos) {
-        int ping = 0;
-        if (module.client().getNetworkHandler() != null
-            && module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()) != null) {
-            ping = Math.max(0, module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()).getLatency());
-        }
-
-        double baseLeadMs = Math.max(0.0, leadTimeMs.get());
-        double distance = ENFORCED_MAX_RANGE;
-        if (entity != null && playerPos != null) {
-            Vec3d closest = closestPoint(entity.getBoundingBox(), playerPos);
-            distance = playerPos.distanceTo(closest);
-        }
-
-        // Melee should not over-lead: large lead makes the local client "look correct",
-        // but on remote clients it appears as stabbing air.
-        double distanceFactor = MathHelper.clamp((distance - 1.0) / 4.5, 0.0, 1.0);
-        double distanceCapMs = MathHelper.lerp(distanceFactor, 14.0, 52.0);
-        double pingCompMs = MathHelper.clamp(ping, 0, 220) * 0.08;
-        double leadMs = Math.min(baseLeadMs, distanceCapMs) + pingCompMs;
-
-        double targetSpeedBps = entity != null ? entity.getVelocity().horizontalLength() * 20.0 : 0.0;
-        if (targetSpeedBps < 2.0) leadMs = Math.min(leadMs, 24.0);
-        else if (targetSpeedBps < 5.0) leadMs = Math.min(leadMs, 40.0);
-        else leadMs = Math.min(leadMs, 60.0);
-
-        return MathHelper.clamp(leadMs / 50.0, 0.0, 1.2);
-    }
-
-    private double computeAnchorLeadTicks() {
-        int ping = 0;
-        if (module.client().getNetworkHandler() != null
-            && module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()) != null) {
-            ping = Math.max(0, module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()).getLatency());
-        }
-
-        double totalMs = Math.max(0.0, leadTimeMs.get()) + MathHelper.clamp(ping, 0, 250) * 0.20;
-        return MathHelper.clamp(totalMs / 50.0, 0.0, 1.6);
     }
 
     private void tryStrike(LivingEntity strikeTarget) {
@@ -1009,12 +990,24 @@ public final class SpearSpoofCombatService {
     }
 
     private double effectiveMinRange(SpearSpoofCombatTypes.AttackContext ctx, LivingEntity target) {
-        if ((ctx != null && ctx.smallTarget) || isSmallTarget(target)) return ENFORCED_SMALL_MIN_RANGE;
-        return ENFORCED_MIN_RANGE;
+        double base = ((ctx != null && ctx.smallTarget) || isSmallTarget(target))
+            ? ENFORCED_SMALL_MIN_RANGE
+            : ENFORCED_MIN_RANGE;
+        if (uses4xRangeWindow(target)) base = Math.max(base, MODE_4X_MIN_RANGE);
+        return base;
     }
 
     private double effectiveMaxRange(SpearSpoofCombatTypes.AttackContext ctx, LivingEntity target) {
+        if (uses4xRangeWindow(target)) return Math.min(ENFORCED_MAX_RANGE, MODE_4X_MAX_RANGE);
         return ENFORCED_MAX_RANGE;
+    }
+
+    private boolean uses4xRangeWindow(LivingEntity target) {
+        if (mode4x.get()) return true;
+        if (target == null) return false;
+        long now = System.currentTimeMillis();
+        return runtime.pitVerticalLockTargetId == target.getId()
+            && runtime.pitVerticalLockUntilMs > now;
     }
 
     private double effectiveMinSpeedBps(LivingEntity target) {

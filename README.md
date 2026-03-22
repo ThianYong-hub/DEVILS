@@ -13,13 +13,13 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current build (`v0.0.34`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.34/devils-addon-0.0.34.jar>
+- Current build (`v0.0.36`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.36/devils-addon-0.0.36.jar>
 
 ## Verified Runtime Matrix
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.34` |
+| Addon Version | `0.0.36` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |

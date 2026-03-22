@@ -245,7 +245,7 @@ public final class PingSyncController {
             if (result.remoteApplied()) {
                 lastSyncStatus = "pull-applied";
                 markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
-                lastSyncedFingerprint = result.snapshotFingerprint();
+                refreshLocalOwnedFingerprint();
                 problemTracker.clear();
                 return;
             }
@@ -262,7 +262,7 @@ public final class PingSyncController {
                         lastPushOkLogMs = now;
                     }
                     markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
-                    lastSyncedFingerprint = result.snapshotFingerprint();
+                    refreshLocalOwnedFingerprint();
                     problemTracker.clear();
                     return;
                 }
@@ -275,7 +275,7 @@ public final class PingSyncController {
                         lastConflictLogMs = now;
                     }
                     markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
-                    lastSyncedFingerprint = result.snapshotFingerprint();
+                    refreshLocalOwnedFingerprint();
                     problemTracker.clear();
                     return;
                 }
@@ -288,7 +288,7 @@ public final class PingSyncController {
             }
 
             if (!result.localChanged()) {
-                lastSyncedFingerprint = result.snapshotFingerprint();
+                refreshLocalOwnedFingerprint();
                 lastSyncStatus = "noop";
                 problemTracker.clear();
                 return;
@@ -301,6 +301,11 @@ public final class PingSyncController {
                 handleSyncTick();
             }
         }
+    }
+
+    private void refreshLocalOwnedFingerprint() {
+        List<SyncPingData> localSnapshot = markerController.snapshotSyncData(runtimePingSyncEnabled, runtimeSyncDeviceId);
+        lastSyncedFingerprint = codec.computeFingerprint(localSnapshot);
     }
 
     private SyncRuntimeConfig resolveSyncRuntimeConfig() {

@@ -169,6 +169,11 @@ public final class SpearSpoofDebugLogger {
         double pitchErr = ctx != null ? ctx.pitchError : -1.0;
         double hitboxW = ctx != null ? ctx.targetWidth : -1.0;
         double hitboxH = ctx != null ? ctx.targetHeight : -1.0;
+        double predictLeadTicks = ctx != null ? ctx.predictionLeadTicks : -1.0;
+        double predictExtraTicks = ctx != null ? ctx.predictionExtraTicks : -1.0;
+        double predictTotalTicks = ctx != null ? ctx.predictionTotalTicks : -1.0;
+        boolean predictAuto = ctx != null && ctx.predictionAuto;
+        boolean predictCollisionAware = ctx != null && ctx.predictionCollisionAware;
         long phaseAgeMs = Math.max(0L, now - runtime.passPhaseStartMs);
         long resetInMs = Math.max(0L, runtime.movementResetUntilMs - now);
         long targetLockAgeMs = runtime.targetLockedAtMs > 0L ? Math.max(0L, now - runtime.targetLockedAtMs) : -1L;
@@ -182,7 +187,7 @@ public final class SpearSpoofDebugLogger {
 
         String line = String.format(
             Locale.US,
-            "{\"id\":%d,\"ts\":%d,\"outcome\":\"%s\",\"reason\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"stage\":\"%s\",\"phase\":\"%s\",\"phaseAgeMs\":%d,\"resetInMs\":%d,\"targetLockAgeMs\":%d,\"targetLostAgeMs\":%d,\"dist\":%.2f,\"speed\":%.2f,\"closing\":%.2f,\"cooldown\":%.2f,\"holdMs\":%d,\"forward\":%.2f,\"look\":%.2f,\"vertical\":%.2f,\"yawErr\":%.2f,\"pitchErr\":%.2f,\"hitboxW\":%.2f,\"hitboxH\":%.2f,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\",\"nextAttemptInMs\":%d,\"repositionInMs\":%d,\"unstuckInMs\":%d,\"switchDelayTicks\":%d,\"rmbRechargeTicks\":%d,\"windupRestartTicks\":%d,\"useKeyInjected\":%b,\"playerPos\":\"%s\",\"playerVel\":\"%s\",\"targetPos\":\"%s\",\"targetVel\":\"%s\",\"predTargetPos\":\"%s\",\"aimPos\":\"%s\",\"vel\":\"%s\"}",
+            "{\"id\":%d,\"ts\":%d,\"outcome\":\"%s\",\"reason\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"stage\":\"%s\",\"phase\":\"%s\",\"phaseAgeMs\":%d,\"resetInMs\":%d,\"targetLockAgeMs\":%d,\"targetLostAgeMs\":%d,\"dist\":%.2f,\"speed\":%.2f,\"closing\":%.2f,\"cooldown\":%.2f,\"holdMs\":%d,\"forward\":%.2f,\"look\":%.2f,\"vertical\":%.2f,\"yawErr\":%.2f,\"pitchErr\":%.2f,\"hitboxW\":%.2f,\"hitboxH\":%.2f,\"predictLeadTicks\":%.2f,\"predictExtraTicks\":%.2f,\"predictTotalTicks\":%.2f,\"predictAuto\":%b,\"predictCollisionAware\":%b,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\",\"nextAttemptInMs\":%d,\"repositionInMs\":%d,\"unstuckInMs\":%d,\"switchDelayTicks\":%d,\"rmbRechargeTicks\":%d,\"windupRestartTicks\":%d,\"useKeyInjected\":%b,\"playerPos\":\"%s\",\"playerVel\":\"%s\",\"targetPos\":\"%s\",\"targetVel\":\"%s\",\"predTargetPos\":\"%s\",\"aimPos\":\"%s\",\"vel\":\"%s\"}",
             runtime.nextAttemptId(),
             now,
             escapeJson(outcome),
@@ -207,6 +212,11 @@ public final class SpearSpoofDebugLogger {
             pitchErr,
             hitboxW,
             hitboxH,
+            predictLeadTicks,
+            predictExtraTicks,
+            predictTotalTicks,
+            predictAuto,
+            predictCollisionAware,
             runtime.hitChain,
             runtime.rejectStreak,
             escapeJson(runtime.lastRejectReason),

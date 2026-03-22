@@ -69,8 +69,6 @@ public final class SpearSpoofFlightService {
     private static final double PIT_AXIS_LOCK_RADIUS = 0.70;
     private static final double PIT_AXIS_LOCK_MIN_SPEED = 0.55;
     private static final double PIT_AXIS_LOCK_MAX_SPEED = 1.25;
-    private static final double PIT_AXIS_CLIMB_LOCK_MAX_SPEED = 0.95;
-    private static final double PIT_AXIS_DIVE_LOCK_MAX_SPEED = 0.80;
     private static final double PIT_BLOCKED_ASCEND_STEP = 1.20;
     private static final double PIT_BLOCKED_ASCEND_ABOVE_ROUTE = 2.00;
     private static final double PIT_BLOCKED_ASCEND_MAX_ABOVE_TARGET = 8.0;
@@ -102,11 +100,14 @@ public final class SpearSpoofFlightService {
     private static final long PASS_THROUGH_RESET_HOLD_MS_OTHER = 150L;
     private static final double PLAYER_HARD_KEEP_OUT_MIN = 0.95;
     private static final double PLAYER_SOFT_KEEP_OUT_MIN = 1.25;
-    private static final double MODE_4X_RUNUP_DISTANCE = 10.0;
-    private static final double MODE_4X_APPROACH_DISTANCE = 4.0;
+    private static final double MODE_4X_RUNUP_DISTANCE = 5.0;
+    private static final double MODE_4X_MIN_RANGE = 4.0;
+    private static final double MODE_4X_MAX_RANGE = 4.5;
+    private static final double MODE_4X_APPROACH_DISTANCE = 4.25;
+    private static final double MODE_4X_APPROACH_STEP_EPS = 0.01;
     private static final double MODE_4X_POST_HIT_RETREAT = 2.0;
-    private static final double MODE_4X_HARD_KEEP_OUT = 3.45;
-    private static final double MODE_4X_SOFT_KEEP_OUT = 3.90;
+    private static final double MODE_4X_HARD_KEEP_OUT = 4.0;
+    private static final double MODE_4X_SOFT_KEEP_OUT = 4.35;
     private static final long LOST_TARGET_FOLLOW_MS = 2600L;
     private static final long LOST_TARGET_PATHING_MS = 1400L;
     private static final double LOST_TARGET_MAX_PREDICT_TICKS = 12.0;
@@ -119,6 +120,8 @@ public final class SpearSpoofFlightService {
     private static final double OBSTACLE_LOOK_AHEAD = 7.5;
     private static final double AVOIDANCE_STRENGTH = 0.85;
     private static final double COLLISION_STEP = 0.55;
+    private static final double PLAYER_GROUND_LANE_MIN_Y = 0.88;
+    private static final double PLAYER_GROUND_LANE_MAX_Y = 1.18;
 
     private final SpearSpoof module;
     private final SpearSpoofRuntime runtime;
@@ -264,8 +267,10 @@ public final class SpearSpoofFlightService {
             )
         );
         targetPos = anchorAtBodyHead(targetPos, target);
+        targetPos = clampPlayerGroundLane(targetPos, target);
         boolean horizontalBlocked = isHorizontalRouteBlocked(playerPos, targetPos, target);
         boolean routeToTargetBlocked = !pathfinder.isDirectPathClear(playerPos, targetPos);
+        boolean clearHorizontalLane = !horizontalBlocked && !routeToTargetBlocked;
         boolean targetPitDetected = isTargetPitMode(targetPos, target);
         if (runtime.pitVerticalLockUntilMs > 0L && now >= runtime.pitVerticalLockUntilMs) {
             runtime.pitVerticalLockUntilMs = 0L;
@@ -285,8 +290,11 @@ public final class SpearSpoofFlightService {
         }
         boolean targetPitLocked = runtime.pitVerticalLockTargetId == target.getId() && now < runtime.pitVerticalLockUntilMs;
         boolean targetPitMode = targetPitDetected || targetPitLocked;
+        double targetDeltaY = targetPos.y - playerPos.y;
+        boolean preferVerticalRoute = targetPitMode
+            && (horizontalBlocked || routeToTargetBlocked || targetDeltaY <= VERTICAL_ROUTE_TARGET_BELOW_Y);
         boolean verticalRouteMode = runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH
-            && targetPitMode;
+            && preferVerticalRoute;
         if (verticalRouteMode && targetPitDetected) {
             runtime.pitVerticalLockTargetId = target.getId();
             runtime.pitVerticalLockUntilMs = now + PIT_VERTICAL_LOCK_MS;
@@ -294,10 +302,10 @@ public final class SpearSpoofFlightService {
             targetPitMode = true;
         }
         String verticalRouteStage = "none";
-        double targetDeltaY = targetPos.y - playerPos.y;
         boolean diveToLowerTarget = targetDeltaY <= VERTICAL_DIVE_TRIGGER;
         if (obstacleAvoidance.get() && !diveToLowerTarget && !verticalRouteMode) {
             targetPos = applyAutoWaspAvoidLanding(targetPos, target);
+            targetPos = clampPlayerGroundLane(targetPos, target);
         }
         targetDeltaY = targetPos.y - playerPos.y;
         diveToLowerTarget = targetDeltaY <= VERTICAL_DIVE_TRIGGER;
@@ -313,9 +321,18 @@ public final class SpearSpoofFlightService {
         boolean playerTarget = target instanceof PlayerEntity;
         boolean largeGroundTarget = isGroundedLargeTarget(target);
         boolean awaitingHitConfirm = runtime.isAwaitingHitConfirm(target, now);
-        boolean mode4xEnabled = mode4x.get()
-            && !targetPitMode
-            && !verticalRouteMode;
+        boolean mode4xEnabled = mode4x.get();
+        boolean mode4xVertical = mode4xEnabled && preferVerticalRoute;
+        boolean mode4xHorizontal = mode4xEnabled && !mode4xVertical;
+        boolean mode4xActive = mode4xHorizontal || mode4xVertical;
+        boolean pitRoutingMode = preferVerticalRoute
+            || (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET && targetPitMode);
+        if (mode4xActive) {
+            engageMin = Math.max(engageMin, MODE_4X_MIN_RANGE);
+            engageMax = Math.min(engageMax, MODE_4X_MAX_RANGE);
+            hardKeepOut = Math.max(hardKeepOut, MODE_4X_HARD_KEEP_OUT);
+            softKeepOut = Math.max(softKeepOut, MODE_4X_SOFT_KEEP_OUT);
+        }
         boolean forceUntilDamageMode = testFlyUntilDamage.get()
             && awaitingHitConfirm
             && runtime.hitConfirmTargetId == target.getId();
@@ -328,8 +345,28 @@ public final class SpearSpoofFlightService {
         Vec3d steerPos = targetPos;
         boolean forceVerticalClimb = false;
         boolean forceVerticalAlign = false;
-        if (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
-            if (targetPitMode && !Double.isFinite(runtime.resetRequiredY)) {
+        if (mode4xVertical) {
+            double approachY = targetPos.y + MODE_4X_APPROACH_DISTANCE;
+            double retreatY = targetPos.y + MODE_4X_APPROACH_DISTANCE + MODE_4X_POST_HIT_RETREAT;
+            if (horizontalToTarget > PIT_AXIS_LOCK_RADIUS + 0.08) {
+                // Stage 1: horizontal axis lock above pit target, no diagonal dive.
+                steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
+                verticalRouteStage = "4x-vert-axis";
+            } else if (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
+                // Stage 2: retreat straight up by +2 blocks from strike lane.
+                steerPos = new Vec3d(playerPos.x, retreatY, playerPos.z);
+                forceVerticalClimb = true;
+                verticalRouteStage = "4x-vert-reset";
+            } else {
+                // Stage 3: return strictly on vertical lane to strike distance.
+                steerPos = new Vec3d(playerPos.x, approachY, playerPos.z);
+                forceVerticalAlign = true;
+                verticalRouteStage = "4x-vert-approach";
+            }
+            diveToLowerTarget = false;
+            verticalRouteMode = false;
+        } else if (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
+            if (pitRoutingMode && !Double.isFinite(runtime.resetRequiredY)) {
                 runtime.resetStartY = playerPos.y;
                 double verticalRetreat = currentResetVerticalRetreatBlocks(now);
                 runtime.resetRequiredY = Math.max(
@@ -337,12 +374,12 @@ public final class SpearSpoofFlightService {
                     targetPos.y + verticalRetreat
                 );
             }
-            if (!targetPitMode) {
+            if (!pitRoutingMode) {
                 runtime.resetStartY = Double.NaN;
                 runtime.resetRequiredY = Double.NaN;
             }
 
-            if (targetPitMode) {
+            if (pitRoutingMode) {
                 // In pits/caves, reset should climb out first instead of lateral ping-pong in cramped space.
                 double climbY = Math.max(
                     runtime.resetRequiredY,
@@ -360,9 +397,16 @@ public final class SpearSpoofFlightService {
                 verticalRouteStage = "reset-climb";
             } else {
                 Vec3d awayNow = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), horizontal(runtime.lockedApproachDirection));
-                Vec3d resetDir = runtime.resetDirection.lengthSquared() > 1.0E-6 ? runtime.resetDirection : awayNow;
-                // Keep reset direction strictly away from target to avoid ping-pong around the hitbox edge.
-                if (resetDir.dotProduct(awayNow) < 0.15) resetDir = awayNow;
+                Vec3d resetDir;
+                if (mode4xHorizontal) {
+                    // In 4X keep one stable reset axis for the whole cycle to avoid lateral ping-pong.
+                    resetDir = runtime.resetDirection.lengthSquared() > 1.0E-6 ? runtime.resetDirection : awayNow;
+                    if (resetDir.dotProduct(awayNow) < -0.25) resetDir = awayNow;
+                } else {
+                    resetDir = runtime.resetDirection.lengthSquared() > 1.0E-6 ? runtime.resetDirection : awayNow;
+                    // Keep reset direction strictly away from target to avoid ping-pong around the hitbox edge.
+                    if (resetDir.dotProduct(awayNow) < 0.15) resetDir = awayNow;
+                }
                 runtime.resetDirection = normalizeOrFallback(resetDir, awayNow);
 
                 double desiredRetreat = desiredRetreatDistance(target, engageMin, engageMax, now);
@@ -465,11 +509,11 @@ public final class SpearSpoofFlightService {
             steerPos = targetPos.add(lead);
         }
 
-        if (mode4xEnabled && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH) {
-            Vec3d laneDirection4x = normalizeOrFallback(runtime.lockedApproachDirection, horizontal(playerPos.subtract(targetPos)));
+        if (mode4xHorizontal && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH) {
+            Vec3d laneDirection4x = mode4xAxis(normalizeOrFallback(runtime.lockedApproachDirection, horizontal(playerPos.subtract(targetPos))));
             steerPos = new Vec3d(
                 targetPos.x + laneDirection4x.x * MODE_4X_APPROACH_DISTANCE,
-                targetPos.y,
+                playerPos.y,
                 targetPos.z + laneDirection4x.z * MODE_4X_APPROACH_DISTANCE
             );
         }
@@ -479,8 +523,7 @@ public final class SpearSpoofFlightService {
             diveToLowerTarget = false;
         }
 
-        boolean clearHorizontalLane = !horizontalBlocked && !routeToTargetBlocked;
-        if (!targetPitMode && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH && !verticalRouteMode) {
+        if (!pitRoutingMode && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH && !verticalRouteMode) {
             double yGap = targetPos.y - playerPos.y;
             if (!clearHorizontalLane) {
                 if (horizontalToTarget >= PLAIN_BLOCKED_ROUTE_DISTANCE) {
@@ -531,15 +574,22 @@ public final class SpearSpoofFlightService {
         }
 
         if (obstacleAvoidance.get()) {
-            if (forceVerticalAlign) {
+            if (!pitRoutingMode
+                && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH
+                && clearHorizontalLane
+                && !forceVerticalAlign
+                && !forceVerticalClimb) {
+                pathfinder.clearTargetState();
+                steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
+            } else if (forceVerticalAlign) {
                 // For plain Y-align do not clamp to safe corridor, otherwise descent can be canceled near terrain.
                 pathfinder.clearTargetState();
             } else {
                 Vec3d safeSteer = pathfinder.adjustToSafeCorridor(steerPos, playerPos);
-                if (forceVerticalClimb || targetPitMode) {
+                if (forceVerticalClimb || pitRoutingMode || mode4xHorizontal) {
                     // Keep pure vertical climb path deterministic.
                     pathfinder.clearTargetState();
-                    steerPos = safeSteer;
+                    steerPos = mode4xHorizontal ? new Vec3d(safeSteer.x, playerPos.y, safeSteer.z) : safeSteer;
                 } else {
                     pathfinder.tickPathing(playerPos, safeSteer, runtime.stuckTicks);
                     steerPos = pathfinder.steerTarget(safeSteer);
@@ -547,17 +597,16 @@ public final class SpearSpoofFlightService {
             }
         }
 
-        boolean pitVerticalMode = targetPitMode;
+        boolean pitVerticalMode = pitRoutingMode;
         boolean pureVerticalAscent = forceVerticalClimb;
         boolean pureVerticalAlign = forceVerticalAlign;
-        boolean pureVerticalDive = targetPitMode && "dive".equals(verticalRouteStage);
-        boolean pitResetClimb = targetPitMode && "pit-reset-climb".equals(verticalRouteStage);
-        boolean pitAxisLock = targetPitMode && "axis-lock".equals(verticalRouteStage);
+        boolean pureVerticalDive = pitVerticalMode && "dive".equals(verticalRouteStage);
+        boolean pitAxisLock = pitVerticalMode && "axis-lock".equals(verticalRouteStage);
         double activeHardKeepOut = pitVerticalMode ? Math.max(1.65, hardKeepOut - PIT_KEEP_OUT_SLACK) : hardKeepOut;
         double activeSoftKeepOut = pitVerticalMode
             ? Math.min(engageMax - 0.04, Math.max(activeHardKeepOut + 0.08, softKeepOut - PIT_KEEP_OUT_SLACK))
             : softKeepOut;
-        if (mode4xEnabled && !forceUntilDamageMode) {
+        if (mode4xActive && !forceUntilDamageMode) {
             activeHardKeepOut = Math.max(activeHardKeepOut, MODE_4X_HARD_KEEP_OUT);
             activeSoftKeepOut = Math.max(activeSoftKeepOut, Math.min(engageMax - 0.04, MODE_4X_SOFT_KEEP_OUT));
             if (activeSoftKeepOut <= activeHardKeepOut + 0.06) {
@@ -576,7 +625,7 @@ public final class SpearSpoofFlightService {
         double maxVertical = resolveVerticalCap();
         Vec3d baseVelocity;
         Vec3d avoidanceVelocity;
-        if (targetPitMode && "runup".equals(verticalRouteStage)) {
+        if (pitVerticalMode && "runup".equals(verticalRouteStage)) {
             Vec3d runupDir = normalizeOrFallback(horizontal(steerPos.subtract(playerPos)), horizontal(runtime.lockedApproachDirection));
             double runupFloor = Math.min(maxHorizontal, Math.max(2.2, getCruiseHorizontalSpeed()));
             velocity = enforceHorizontalSpeedFloor(velocity, runupDir, runupFloor);
@@ -592,24 +641,8 @@ public final class SpearSpoofFlightService {
                 velocity = new Vec3d(axisDir.x * lockSpeed, MathHelper.clamp(velocity.y, -0.14, 0.14), axisDir.z * lockSpeed);
             }
         } else if (pureVerticalAscent) {
-            double ascent = Math.min(maxVertical, Math.max(0.38, steerPos.y - playerPos.y));
-            if (targetPitMode) {
-                if (pitResetClimb) {
-                    velocity = new Vec3d(0.0, ascent, 0.0);
-                } else {
-                    Vec3d axisVec = horizontal(targetPos.subtract(playerPos));
-                    double axisDist = axisVec.length();
-                    if (axisDist < 0.10) {
-                        velocity = new Vec3d(0.0, ascent, 0.0);
-                    } else {
-                        Vec3d axisDir = axisVec.multiply(1.0 / axisDist);
-                        double lockSpeed = Math.min(PIT_AXIS_CLIMB_LOCK_MAX_SPEED, axisDist * 0.85);
-                        velocity = new Vec3d(axisDir.x * lockSpeed, ascent, axisDir.z * lockSpeed);
-                    }
-                }
-            } else {
-                velocity = new Vec3d(0.0, ascent, 0.0);
-            }
+            double ascent = Math.min(maxVertical, Math.max(PIT_VERTICAL_ASCENT_MIN, steerPos.y - playerPos.y));
+            velocity = new Vec3d(0.0, ascent, 0.0);
         } else if (pureVerticalAlign) {
             double yDist = steerPos.y - playerPos.y;
             if (Math.abs(yDist) < 0.03) velocity = Vec3d.ZERO;
@@ -620,15 +653,7 @@ public final class SpearSpoofFlightService {
             }
         } else if (pureVerticalDive) {
             double descent = Math.min(maxVertical, Math.max(PIT_VERTICAL_DESCENT_MIN, Math.abs(targetDeltaY) * 0.40));
-            Vec3d axisVec = horizontal(targetPos.subtract(playerPos));
-            double axisDist = axisVec.length();
-            if (axisDist < 0.10) {
-                velocity = new Vec3d(0.0, -descent, 0.0);
-            } else {
-                Vec3d axisDir = axisVec.multiply(1.0 / axisDist);
-                double lockSpeed = Math.min(PIT_AXIS_DIVE_LOCK_MAX_SPEED, axisDist * 0.80);
-                velocity = new Vec3d(axisDir.x * lockSpeed, -descent, axisDir.z * lockSpeed);
-            }
+            velocity = new Vec3d(0.0, -descent, 0.0);
         } else {
             baseVelocity = new Vec3d(velocity.x, applyVerticalSafety(velocity.y, playerPos, maxVertical), velocity.z);
             avoidanceVelocity = obstacleAvoidance.get()
@@ -637,7 +662,24 @@ public final class SpearSpoofFlightService {
             velocity = applyDimensionFlightLimit(applyEmergencyBraking(baseVelocity.add(avoidanceVelocity)), playerPos);
         }
         double hSpeed = horizontal(velocity).length();
-        Vec3d laneDirection = normalizeOrFallback(runtime.lockedApproachDirection, horizontal(module.client().player.getRotationVector()).multiply(-1.0));
+        Vec3d laneDirection = mode4xHorizontal
+            ? mode4xAxis(normalizeOrFallback(runtime.lockedApproachDirection, horizontal(module.client().player.getRotationVector()).multiply(-1.0)))
+            : normalizeOrFallback(runtime.lockedApproachDirection, horizontal(module.client().player.getRotationVector()).multiply(-1.0));
+
+        if (mode4xHorizontal && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH && !forceUntilDamageMode) {
+            Vec3d toTargetNow = horizontal(targetPos.subtract(playerPos));
+            double toTargetLen = toTargetNow.length();
+            if (toTargetLen > 1.0E-6) {
+                Vec3d toTargetDir = toTargetNow.multiply(1.0 / toTargetLen);
+                double maxStep = Math.max(0.0, toTargetLen - MODE_4X_APPROACH_DISTANCE + MODE_4X_APPROACH_STEP_EPS);
+                double currentStep = horizontal(velocity).length();
+                if (currentStep > maxStep) {
+                    if (maxStep <= 1.0E-4) velocity = new Vec3d(0.0, velocity.y, 0.0);
+                    else velocity = new Vec3d(toTargetDir.x * maxStep, velocity.y, toTargetDir.z * maxStep);
+                    hSpeed = horizontal(velocity).length();
+                }
+            }
+        }
 
         if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && !forceUntilDamageMode) {
             Vec3d toTargetNow = horizontal(targetPos.subtract(playerPos));
@@ -650,7 +692,7 @@ public final class SpearSpoofFlightService {
                     && targetDistance <= PASS_THROUGH_REVERSE_DISTANCE
                     && movingTowardDot <= PASS_THROUGH_REVERSE_DOT;
                 if (passThroughDetected) {
-                    Vec3d retreat = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), laneDirection);
+                    Vec3d retreat = resolveRetreatDirection(playerPos, targetPos, laneDirection, mode4xHorizontal);
                     runtime.resetDirection = retreat;
                     long holdMs = playerTarget ? PASS_THROUGH_RESET_HOLD_MS_PLAYER : PASS_THROUGH_RESET_HOLD_MS_OTHER;
                     beginResetWithTrace(now, holdMs, "pass-through-reverse dot=" + format2(movingTowardDot), target);
@@ -678,7 +720,7 @@ public final class SpearSpoofFlightService {
                 beginResetWithTrace(now, smallTarget ? SMALL_RESET_HOLD_MS : DEFAULT_RESET_HOLD_MS, "pit-vertical too-close", target);
             }
         } else if (!hitPierceWindow && !pureVerticalAscent && !pureVerticalAlign && targetDistance <= engageMin + 0.02) {
-            Vec3d retreat = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), laneDirection);
+            Vec3d retreat = resolveRetreatDirection(playerPos, targetPos, laneDirection, mode4xHorizontal);
             double retreatSpeed = Math.max(hSpeed, getCruiseHorizontalSpeed());
             velocity = new Vec3d(retreat.x * retreatSpeed, Math.max(velocity.y, 0.05), retreat.z * retreatSpeed);
             boolean emergency = targetDistance < hardKeepOut - 0.28;
@@ -689,6 +731,28 @@ public final class SpearSpoofFlightService {
         }
 
         double predictedDistance = distanceFromPointToHitbox(playerPos.add(velocity), target);
+        if (mode4xHorizontal
+            && !hitPierceWindow
+            && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH
+            && !forceUntilDamageMode) {
+            boolean floorBreachedNow = targetDistance < MODE_4X_MIN_RANGE - 0.02;
+            boolean floorBreachedPred = predictedDistance < MODE_4X_MIN_RANGE - 0.08
+                && targetDistance <= MODE_4X_APPROACH_DISTANCE + 0.10;
+            if (floorBreachedNow || floorBreachedPred) {
+                Vec3d retreat = resolveRetreatDirection(playerPos, targetPos, laneDirection, true);
+                runtime.resetDirection = retreat;
+                double retreatSpeed = Math.max(hSpeed, getCruiseHorizontalSpeed());
+                velocity = new Vec3d(retreat.x * retreatSpeed, 0.0, retreat.z * retreatSpeed);
+                hSpeed = horizontal(velocity).length();
+                beginResetWithTrace(
+                    now,
+                    smallTarget ? SMALL_RESET_HOLD_MS : DEFAULT_RESET_HOLD_MS,
+                    floorBreachedNow ? "mode4x-floor-now" : "mode4x-floor-pred",
+                    target
+                );
+                predictedDistance = distanceFromPointToHitbox(playerPos.add(velocity), target);
+            }
+        }
         double distGuard = Math.min(targetDistance, predictedDistance);
         if (!hitPierceWindow && pitVerticalMode && distGuard < activeSoftKeepOut) {
             velocity = new Vec3d(0.0, Math.max(velocity.y, PIT_VERTICAL_ASCENT_MIN), 0.0);
@@ -698,15 +762,20 @@ public final class SpearSpoofFlightService {
                 beginResetWithTrace(now, smallTarget ? 150L : 180L, "pit-vertical soft-keep-out", target);
             }
         } else if (!hitPierceWindow && !pureVerticalAscent && !pureVerticalAlign && distGuard < softKeepOut) {
-            Vec3d away = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), laneDirection);
+            Vec3d away = resolveRetreatDirection(playerPos, targetPos, laneDirection, mode4xHorizontal);
             double urgency = MathHelper.clamp((softKeepOut - distGuard) / Math.max(0.01, softKeepOut - hardKeepOut), 0.0, 1.0);
-            double mix = 0.30 + urgency * 0.40;
             Vec3d awayVel = away.multiply(Math.max(hSpeed, getCruiseHorizontalSpeed() * (0.72 + urgency * 0.28)));
-            velocity = new Vec3d(
-                MathHelper.lerp(mix, velocity.x, awayVel.x),
-                Math.max(velocity.y, 0.03 + urgency * 0.08),
-                MathHelper.lerp(mix, velocity.z, awayVel.z)
-            );
+            if (mode4xHorizontal) {
+                // 4X: no blended side drift near keep-out. Retreat strictly on cycle axis.
+                velocity = new Vec3d(awayVel.x, Math.max(velocity.y, 0.03 + urgency * 0.08), awayVel.z);
+            } else {
+                double mix = 0.30 + urgency * 0.40;
+                velocity = new Vec3d(
+                    MathHelper.lerp(mix, velocity.x, awayVel.x),
+                    Math.max(velocity.y, 0.03 + urgency * 0.08),
+                    MathHelper.lerp(mix, velocity.z, awayVel.z)
+                );
+            }
             boolean hardRisk = targetDistance <= hardKeepOut - 0.02
                 || (!awaitingHitConfirm && predictedDistance < hardKeepOut - 0.02);
             boolean emergency = targetDistance < hardKeepOut - 0.34
@@ -725,7 +794,7 @@ public final class SpearSpoofFlightService {
                 beginResetWithTrace(now, smallTarget ? 150L : 180L, "pit-vertical hard-keep-out", target);
             }
         } else if (!hitPierceWindow && !pureVerticalAscent && !pureVerticalAlign && (targetDistance < hardKeepOut || predictedDistance < hardKeepOut)) {
-            Vec3d away = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), laneDirection);
+            Vec3d away = resolveRetreatDirection(playerPos, targetPos, laneDirection, mode4xHorizontal);
             double retreatSpeed = Math.max(hSpeed, getCruiseHorizontalSpeed());
             velocity = new Vec3d(away.x * retreatSpeed, Math.max(velocity.y, 0.05), away.z * retreatSpeed);
             boolean emergency = targetDistance < hardKeepOut - 0.34
@@ -737,7 +806,7 @@ public final class SpearSpoofFlightService {
         }
 
         tickStuckState(now, playerPos, velocity, targetPos, engageMin);
-        if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && runtime.unstuckUntilMs > now) {
+        if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && runtime.unstuckUntilMs > now && !mode4xHorizontal) {
             Vec3d away = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), laneDirection);
             Vec3d toward = normalizeOrFallback(horizontal(targetPos.subtract(playerPos)), horizontal(module.client().player.getRotationVector()));
             Vec3d lateral = new Vec3d(-toward.z, 0.0, toward.x);
@@ -779,17 +848,18 @@ public final class SpearSpoofFlightService {
         if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign) {
             baseVelocity = new Vec3d(velocity.x, applyVerticalSafety(velocity.y, playerPos, maxVertical), velocity.z);
             avoidanceVelocity = obstacleAvoidance.get()
+                && !mode4xHorizontal
                 ? computeLocalAvoidance(steerPos, baseVelocity, maxHorizontal, maxVertical)
                 : Vec3d.ZERO;
             velocity = applyDimensionFlightLimit(applyEmergencyBraking(baseVelocity.add(avoidanceVelocity)), playerPos);
         }
 
-        if (targetPitMode && runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
+        if (pitVerticalMode && runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
             // In pit reset never mix horizontal + vertical (prevents diagonal "return up" arcs).
             velocity = new Vec3d(0.0, Math.max(velocity.y, PIT_VERTICAL_ASCENT_MIN), 0.0);
         }
 
-        if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && clearHorizontalLane) {
+        if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && (clearHorizontalLane || mode4xHorizontal)) {
             velocity = new Vec3d(velocity.x, 0.0, velocity.z);
         }
 
@@ -832,10 +902,10 @@ public final class SpearSpoofFlightService {
                 + " caveEsc=" + caveEscapeNeeded
                 + " vertRoute=" + verticalRouteMode
                 + " vertStage=" + verticalRouteStage
-                + " pitMode=" + targetPitMode
+                + " pitMode=" + pitVerticalMode
                 + " pitDet=" + targetPitDetected
                 + " pitLock=" + targetPitLocked
-                + " mode4x=" + mode4xEnabled
+                + " mode4x=" + mode4xActive
                 + " forceUntilDamage=" + forceUntilDamageMode
                 + " pureAsc=" + pureVerticalAscent
                 + " pureAlign=" + pureVerticalAlign
@@ -1028,21 +1098,23 @@ public final class SpearSpoofFlightService {
     }
 
     private double getEngageMinRange(LivingEntity target) {
-        if (isSmallTarget(target)) return SMALL_TARGET_MIN_RANGE;
-        return ENFORCED_MIN_RANGE;
+        double base = isSmallTarget(target) ? SMALL_TARGET_MIN_RANGE : ENFORCED_MIN_RANGE;
+        if (mode4x.get() && target != null) base = Math.max(base, MODE_4X_MIN_RANGE);
+        return base;
     }
 
     private double getEngageMaxRange(LivingEntity target) {
+        if (mode4x.get() && target != null) return Math.min(ENFORCED_MAX_RANGE, MODE_4X_MAX_RANGE);
         return ENFORCED_MAX_RANGE;
     }
 
     private double desiredRetreatDistance(LivingEntity target, double engageMin, double engageMax, long now) {
         if (mode4x.get() && target != null) {
-            boolean pitMode = runtime.pitVerticalLockTargetId == target.getId() && now < runtime.pitVerticalLockUntilMs;
-            if (!pitMode) {
-                double cycleRetreat = runtime.hitChain > 0 ? MODE_4X_POST_HIT_RETREAT : MODE_4X_RUNUP_DISTANCE;
-                return MathHelper.clamp(cycleRetreat, engageMin + 0.40, 16.0);
-            }
+            double cycleRetreat = runtime.hitChain > 0
+                ? MODE_4X_APPROACH_DISTANCE + MODE_4X_POST_HIT_RETREAT
+                : MODE_4X_RUNUP_DISTANCE;
+            double minCycleRetreat = Math.max(engageMin + 0.35, MODE_4X_APPROACH_DISTANCE + 0.35);
+            return MathHelper.clamp(cycleRetreat, minCycleRetreat, 16.0);
         }
 
         if (isSmallTarget(target)) {
@@ -1057,6 +1129,21 @@ public final class SpearSpoofFlightService {
             base = Math.max(base, RECHARGE_RETREAT_DISTANCE);
         }
         return MathHelper.clamp(base, engageMin + 0.75, MAX_RESET_RETREAT_DISTANCE);
+    }
+
+    private Vec3d mode4xAxis(Vec3d fallback) {
+        if (runtime.resetDirection.lengthSquared() > 1.0E-6) return runtime.resetDirection.normalize();
+        return normalizeOrFallback(runtime.lockedApproachDirection, fallback);
+    }
+
+    private Vec3d resolveRetreatDirection(Vec3d playerPos, Vec3d targetPos, Vec3d fallback, boolean lock4xAxis) {
+        Vec3d away = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), fallback);
+        if (!lock4xAxis) return away;
+
+        Vec3d axis = mode4xAxis(away);
+        // If the cached axis points into target due stale state, re-align once.
+        if (axis.dotProduct(away) < -0.25) axis = away;
+        return normalizeOrFallback(axis, away);
     }
 
     private double currentResetVerticalRetreatBlocks(long now) {
@@ -1130,6 +1217,7 @@ public final class SpearSpoofFlightService {
     // AutoWasp avoid-landing check copied 1:1 semantics.
     private Vec3d applyAutoWaspAvoidLanding(Vec3d targetPos, LivingEntity target) {
         if (target == null || module.client().world == null) return targetPos;
+        if (target instanceof PlayerEntity) return targetPos;
 
         double d = target.getBoundingBox().getLengthX() / 2.0;
         for (Direction dir : DirectionAccessor.meteor$getHorizontal()) {
@@ -1353,16 +1441,35 @@ public final class SpearSpoofFlightService {
         return Math.abs(living.getVelocity().y) < 0.12;
     }
 
-    // Keep flight anchor near target body/head so movement doesn't collapse to ground level.
+    // Keep flight lane near torso level, but do not force +1 block over grounded players.
     private Vec3d anchorAtBodyHead(Vec3d predictedTargetPos, LivingEntity target) {
         if (predictedTargetPos == null || target == null) return predictedTargetPos;
 
-        double factor;
-        if (isSmallTarget(target)) factor = 0.58;
-        else factor = target instanceof PlayerEntity ? 0.66 : 0.70;
+        double height = Math.max(0.2, target.getHeight());
+        double offset;
 
-        double anchorY = predictedTargetPos.y + target.getHeight() * factor;
+        if (isSmallTarget(target)) {
+            offset = MathHelper.clamp(height * 0.52, 0.30, 0.80);
+        } else if (target instanceof PlayerEntity) {
+            if (target.isOnGround()) offset = MathHelper.clamp(height * 0.56, 0.88, 1.12);
+            else offset = MathHelper.clamp(height * 0.60, 0.96, 1.26);
+        } else {
+            if (target.isOnGround()) offset = MathHelper.clamp(height * 0.44, 0.56, 0.96);
+            else offset = MathHelper.clamp(height * 0.52, 0.58, 1.20);
+        }
+
+        double anchorY = predictedTargetPos.y + offset;
         return new Vec3d(predictedTargetPos.x, anchorY, predictedTargetPos.z);
+    }
+
+    private Vec3d clampPlayerGroundLane(Vec3d targetPos, LivingEntity target) {
+        if (targetPos == null || !(target instanceof PlayerEntity) || !target.isOnGround()) return targetPos;
+
+        // For grounded PvP lock flight lane into chest/head band.
+        double minY = target.getY() + PLAYER_GROUND_LANE_MIN_Y;
+        double maxY = target.getY() + PLAYER_GROUND_LANE_MAX_Y;
+        double y = MathHelper.clamp(targetPos.y, minY, maxY);
+        return new Vec3d(targetPos.x, y, targetPos.z);
     }
 
     private double resolveHorizontalCap(double baseCap) {

@@ -51,6 +51,7 @@ public final class XaeroWaypointTrackedPlayers {
                 } else {
                     Map<String, UUID> uuidByName = resolveOnlinePlayerUuids();
                     Set<UUID> desired = new HashSet<>();
+                    long nowMs = System.currentTimeMillis();
 
                     if (markers != null) {
                         for (XaeroSyncWaypoints.PlayerMarker marker : markers) {
@@ -76,8 +77,23 @@ public final class XaeroWaypointTrackedPlayers {
                             RegistryKey<World> markerDimension = sourceDimension != null ? sourceDimension : targetDimension;
                             if (markerDimension == null) markerDimension = World.OVERWORLD;
 
-                            invokeManagerUpdate(manager, uuid, marker.x(), marker.y(), marker.z(), markerDimension);
+                            XaeroWaypointContext.TrackedPlayerRenderSnapshot renderSnapshot = updateTrackedPlayerMotion(
+                                context,
+                                uuid,
+                                marker,
+                                markerDimension,
+                                nowMs
+                            );
+                            invokeManagerUpdate(
+                                manager,
+                                uuid,
+                                renderSnapshot.x(),
+                                renderSnapshot.y(),
+                                renderSnapshot.z(),
+                                renderSnapshot.dimension()
+                            );
                             desired.add(uuid);
+                            context.trackedPlayerLastSeenAtMs.put(uuid, nowMs);
                         }
                     }
 
@@ -91,7 +107,27 @@ public final class XaeroWaypointTrackedPlayers {
 
                     for (UUID uuid : new HashSet<>(context.activeTrackedPlayers)) {
                         if (desired.contains(uuid)) continue;
+                        if (shouldRetainTrackedPlayer(context, uuid, nowMs)) {
+                            XaeroWaypointContext.TrackedPlayerRenderSnapshot retained = advanceTrackedPlayerMotion(
+                                context.trackedPlayerMotionStates.get(uuid),
+                                nowMs
+                            );
+                            if (retained != null) {
+                                invokeManagerUpdate(
+                                    manager,
+                                    uuid,
+                                    retained.x(),
+                                    retained.y(),
+                                    retained.z(),
+                                    retained.dimension()
+                                );
+                                desired.add(uuid);
+                                continue;
+                            }
+                        }
                         invokeManagerRemove(manager, uuid);
+                        context.trackedPlayerMotionStates.remove(uuid);
+                        context.trackedPlayerLastSeenAtMs.remove(uuid);
                     }
 
                     context.activeTrackedPlayers.clear();
@@ -136,12 +172,18 @@ public final class XaeroWaypointTrackedPlayers {
     }
 
     public static void clearTrackedPlayers(XaeroWaypointContext context) {
-        if (context.activeTrackedPlayers.isEmpty()) return;
+        if (context.activeTrackedPlayers.isEmpty()) {
+            context.trackedPlayerMotionStates.clear();
+            context.trackedPlayerLastSeenAtMs.clear();
+            return;
+        }
 
         try {
             Object manager = getTrackedPlayerManager();
             if (manager == null) {
                 context.activeTrackedPlayers.clear();
+                context.trackedPlayerMotionStates.clear();
+                context.trackedPlayerLastSeenAtMs.clear();
                 return;
             }
 
@@ -151,7 +193,124 @@ public final class XaeroWaypointTrackedPlayers {
         } catch (Throwable ignored) {
         } finally {
             context.activeTrackedPlayers.clear();
+            context.trackedPlayerMotionStates.clear();
+            context.trackedPlayerLastSeenAtMs.clear();
         }
+    }
+
+    private static boolean shouldRetainTrackedPlayer(XaeroWaypointContext context, UUID uuid, long nowMs) {
+        if (context == null || uuid == null) return false;
+        Long lastSeenAtMs = context.trackedPlayerLastSeenAtMs.get(uuid);
+        if (lastSeenAtMs == null) return false;
+        return (nowMs - lastSeenAtMs) <= XaeroWaypointContext.TRACKED_PLAYER_MISSING_GRACE_MS;
+    }
+
+    private static XaeroWaypointContext.TrackedPlayerRenderSnapshot updateTrackedPlayerMotion(
+        XaeroWaypointContext context,
+        UUID uuid,
+        XaeroSyncWaypoints.PlayerMarker marker,
+        RegistryKey<World> markerDimension,
+        long nowMs
+    ) {
+        double sourceX = marker.x();
+        double sourceY = marker.y();
+        double sourceZ = marker.z();
+
+        XaeroWaypointContext.TrackedPlayerMotionState state = context.trackedPlayerMotionStates.get(uuid);
+        if (state == null || state.dimension == null) {
+            XaeroWaypointContext.TrackedPlayerMotionState created = new XaeroWaypointContext.TrackedPlayerMotionState(
+                markerDimension,
+                sourceX,
+                sourceY,
+                sourceZ,
+                sourceX,
+                sourceY,
+                sourceZ,
+                nowMs,
+                XaeroWaypointContext.TRACKED_PLAYER_INTERPOLATION_MIN_MS,
+                nowMs,
+                sourceX,
+                sourceY,
+                sourceZ,
+                nowMs
+            );
+            context.trackedPlayerMotionStates.put(uuid, created);
+            return new XaeroWaypointContext.TrackedPlayerRenderSnapshot(sourceX, sourceY, sourceZ, markerDimension);
+        }
+
+        boolean sameDimension = state.dimension.equals(markerDimension);
+        double sourceMoveSq = distanceSq(
+            state.targetX,
+            state.targetY,
+            state.targetZ,
+            sourceX,
+            sourceY,
+            sourceZ
+        );
+
+        if (!sameDimension || sourceMoveSq >= XaeroWaypointContext.TRACKED_PLAYER_TELEPORT_SNAP_DISTANCE_SQ) {
+            state.dimension = markerDimension;
+            state.startX = sourceX;
+            state.startY = sourceY;
+            state.startZ = sourceZ;
+            state.targetX = sourceX;
+            state.targetY = sourceY;
+            state.targetZ = sourceZ;
+            state.transitionStartMs = nowMs;
+            state.transitionDurationMs = XaeroWaypointContext.TRACKED_PLAYER_INTERPOLATION_MIN_MS;
+            state.lastSourceReceivedAtMs = nowMs;
+            state.renderX = sourceX;
+            state.renderY = sourceY;
+            state.renderZ = sourceZ;
+            state.lastRenderUpdateMs = nowMs;
+            return new XaeroWaypointContext.TrackedPlayerRenderSnapshot(sourceX, sourceY, sourceZ, markerDimension);
+        }
+
+        if (sourceMoveSq > 1.0e-6) {
+            // Factual-only updates: no extrapolation and no delayed catch-up smoothing.
+            state.startX = sourceX;
+            state.startY = sourceY;
+            state.startZ = sourceZ;
+            state.targetX = sourceX;
+            state.targetY = sourceY;
+            state.targetZ = sourceZ;
+            state.transitionStartMs = nowMs;
+            state.transitionDurationMs = XaeroWaypointContext.TRACKED_PLAYER_INTERPOLATION_MIN_MS;
+            state.lastSourceReceivedAtMs = nowMs;
+            state.renderX = sourceX;
+            state.renderY = sourceY;
+            state.renderZ = sourceZ;
+            state.lastRenderUpdateMs = nowMs;
+        }
+
+        return new XaeroWaypointContext.TrackedPlayerRenderSnapshot(
+            state.renderX,
+            state.renderY,
+            state.renderZ,
+            state.dimension
+        );
+    }
+
+    private static XaeroWaypointContext.TrackedPlayerRenderSnapshot advanceTrackedPlayerMotion(
+        XaeroWaypointContext.TrackedPlayerMotionState state,
+        long nowMs
+    ) {
+        if (state == null || state.dimension == null) return null;
+        state.lastRenderUpdateMs = nowMs;
+
+        return new XaeroWaypointContext.TrackedPlayerRenderSnapshot(
+            state.renderX,
+            state.renderY,
+            state.renderZ,
+            state.dimension
+        );
+    }
+
+    private static double distanceSq(double ax, double ay, double az, double bx, double by, double bz) {
+        double dx = bx - ax;
+        double dy = by - ay;
+        double dz = bz - az;
+        return (dx * dx) + (dy * dy) + (dz * dz);
     }
 
     private static Object getTrackedPlayerManager() throws Exception {
