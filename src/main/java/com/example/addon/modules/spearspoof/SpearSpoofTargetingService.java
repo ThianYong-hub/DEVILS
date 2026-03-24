@@ -54,11 +54,18 @@ public final class SpearSpoofTargetingService {
         LivingEntity current = runtime.target;
 
         if (current != null) {
-            // Hard lock:
-            // once target is selected, keep it until death/logout/out-of-render/out-of-range.
+            // Sticky lock:
+            // keep current target for a minimum duration, then allow switching to a better candidate.
             if (isHardLockedTargetAlive(current)) {
                 if (runtime.targetLockedAtMs == 0) runtime.targetLockedAtMs = now;
-                return current;
+                long lockAgeMs = Math.max(0L, now - runtime.targetLockedAtMs);
+                if (lockAgeMs < Math.max(0, targetStickMs.get())) return current;
+
+                LivingEntity candidate = findCandidate();
+                if (candidate == null || candidate == current) return current;
+                runtime.target = candidate;
+                runtime.targetLockedAtMs = now;
+                return candidate;
             }
         }
 

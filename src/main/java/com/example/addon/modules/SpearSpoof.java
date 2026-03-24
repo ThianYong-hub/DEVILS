@@ -310,16 +310,6 @@ public class SpearSpoof extends Module {
         .build()
     );
 
-    private final Setting<Double> fatigueRangePenalty = sgStrike.add(new DoubleSetting.Builder()
-        .name("fatigue-range-penalty")
-        .description("Range penalty while in fatigue stage.")
-        .defaultValue(0.2)
-        .range(0.0, 2.0)
-        .sliderRange(0.0, 1.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
     private final Setting<Double> minCooldown = sgStrike.add(new DoubleSetting.Builder()
         .name("min-cooldown")
         .description("Required vanilla attack cooldown progress.")
@@ -494,10 +484,6 @@ public class SpearSpoof extends Module {
         rotate,
         yawCamera,
         mode4x,
-        minRange,
-        maxRange,
-        smallTargetRange,
-        fatigueRangePenalty,
         maxVerticalDelta,
         minSpeedBps,
         minForwardDot,

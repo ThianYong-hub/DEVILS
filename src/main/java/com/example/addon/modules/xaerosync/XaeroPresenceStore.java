@@ -339,24 +339,6 @@ public final class XaeroPresenceStore {
         }
     }
 
-    private List<SyncXaeroData> encodePresenceSnapshot(Iterable<PresenceMarker> markers) {
-        ArrayList<PresenceMarker> ordered = new ArrayList<>();
-        if (markers != null) {
-            for (PresenceMarker marker : markers) {
-                if (marker == null) continue;
-                ordered.add(marker);
-            }
-        }
-        ordered.sort(Comparator.comparingLong(PresenceMarker::updatedAtMs).reversed());
-        if (ordered.size() > XaeroSyncConstants.MAX_SYNC_PRESENCE) {
-            ordered = new ArrayList<>(ordered.subList(0, XaeroSyncConstants.MAX_SYNC_PRESENCE));
-        }
-
-        ArrayList<SyncXaeroData> snapshot = new ArrayList<>(ordered.size());
-        for (PresenceMarker marker : ordered) snapshot.add(encodePresence(marker));
-        return snapshot;
-    }
-
     private PingMarkerRouting collectPingTrackedMarkers(String serverKey) {
         ArrayList<XaeroSyncWaypoints.PlayerMarker> trackedMarkers = new ArrayList<>();
         ArrayList<XaeroSyncWaypoints.MapWaypointMarker> mapMarkers = new ArrayList<>();

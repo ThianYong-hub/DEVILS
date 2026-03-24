@@ -529,16 +529,28 @@ public class ModAutoUpdater extends Module {
         }
 
         WLabel progress = progressLabel;
-        if (progress != null) progress.set("Processed: " + runProgressLine);
+        if (progress != null) {
+            progress.set("Processed: " + progressDone + "/" + progressTotal + " | " + runProgressLine);
+        }
 
         WLabel summary = summaryLabel;
         if (summary != null) {
-            summary.set("Updated/Up-to-date/Excluded/Unresolved: "
-                + progressUpdated + "/" + progressUpToDate + "/" + progressExcluded + "/" + progressUnresolved);
+            summary.set("Updated/Copied/Available/Up-to-date/Excluded/Unresolved/Errors: "
+                + progressUpdated
+                + "/" + progressCopied
+                + "/" + progressAvailable
+                + "/" + progressUpToDate
+                + "/" + progressExcluded
+                + "/" + progressUnresolved
+                + "/" + progressErrors);
         }
 
         WLabel finished = finishedLabel;
-        if (finished != null) finished.set("Last finished: " + lastFinishedAt + " | mode=" + lastRunMode.name().toLowerCase(Locale.ROOT));
+        if (finished != null) {
+            finished.set("Last finished: " + lastFinishedAt
+                + " | mode=" + lastRunMode.name().toLowerCase(Locale.ROOT)
+                + " | status=" + lastStatus);
+        }
     }
 
     private Path writeUpdateLog(UpdateReport report) {
