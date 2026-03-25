@@ -122,9 +122,13 @@ abstract class HudModSafeModFileMixin {
 abstract class ModulesScreenIconsMixin {
     @Unique
     private static Texture devilsIcon;
+    @Unique
+    private static Texture devilsGameIcon;
 
     @Unique
-    private static boolean loadFailed = false;
+    private static boolean devilsLoadFailed = false;
+    @Unique
+    private static boolean devilsGameLoadFailed = false;
 
     /**
      * Wraps the c.add(w) call inside createCategory.
@@ -143,6 +147,11 @@ abstract class ModulesScreenIconsMixin {
             if (icon != null) {
                 ww.beforeHeaderInit = header -> header.add(GuiThemes.get().texture(32, 32, 0, icon)).pad(2);
             }
+        } else if (widget instanceof WWindow ww && "Devils-Game".equals(ww.id)) {
+            Texture icon = devils$getGameIcon();
+            if (icon != null) {
+                ww.beforeHeaderInit = header -> header.add(GuiThemes.get().texture(32, 32, 0, icon)).pad(2);
+            }
         }
 
         return original.call(instance, widget);
@@ -151,15 +160,27 @@ abstract class ModulesScreenIconsMixin {
     @Unique
     private static Texture devils$getIcon() {
         if (devilsIcon != null) return devilsIcon;
-        if (loadFailed) return null;
+        if (devilsLoadFailed) return null;
+        devilsIcon = devils$loadIcon("category_icon.png", "Devils", () -> devilsLoadFailed = true);
+        return devilsIcon;
+    }
 
+    @Unique
+    private static Texture devils$getGameIcon() {
+        if (devilsGameIcon != null) return devilsGameIcon;
+        if (devilsGameLoadFailed) return null;
+        devilsGameIcon = devils$loadIcon("Devils-Game.png", "Devils-Game", () -> devilsGameLoadFailed = true);
+        return devilsGameIcon;
+    }
+
+    @Unique
+    private static Texture devils$loadIcon(String fileName, String label, Runnable onFail) {
         try {
-            Identifier id = Identifier.of("devils-addon", "category_icon.png");
+            Identifier id = Identifier.of("devils-addon", fileName);
             var resource = MinecraftClient.getInstance().getResourceManager().getResource(id);
-
             if (resource.isEmpty()) {
-                AddonTemplate.LOG.error("[Devils] category_icon.png not found in resources");
-                loadFailed = true;
+                AddonTemplate.LOG.error("[Devils] {} icon '{}' not found in resources", label, fileName);
+                onFail.run();
                 return null;
             }
 
@@ -176,27 +197,24 @@ abstract class ModulesScreenIconsMixin {
                 IntBuffer w = stack.mallocInt(1);
                 IntBuffer h = stack.mallocInt(1);
                 IntBuffer ch = stack.mallocInt(1);
-
                 ByteBuffer pixels = STBImage.stbi_load_from_memory(rawBuffer, w, h, ch, 4);
                 if (pixels == null) {
-                    AddonTemplate.LOG.error("[Devils] STBImage failed: {}", STBImage.stbi_failure_reason());
-                    loadFailed = true;
+                    AddonTemplate.LOG.error("[Devils] {} icon decode failed: {}", label, STBImage.stbi_failure_reason());
+                    onFail.run();
                     return null;
                 }
 
-                devilsIcon = new Texture(w.get(0), h.get(0), TextureFormat.RGBA8, FilterMode.LINEAR, FilterMode.LINEAR);
-                devilsIcon.upload(pixels);
-
+                Texture texture = new Texture(w.get(0), h.get(0), TextureFormat.RGBA8, FilterMode.LINEAR, FilterMode.LINEAR);
+                texture.upload(pixels);
                 STBImage.stbi_image_free(pixels);
+                AddonTemplate.LOG.info("[Devils] {} icon loaded ({}x{})", label, texture.getWidth(), texture.getHeight());
+                return texture;
             }
-
-            AddonTemplate.LOG.info("[Devils] Category icon loaded ({}x{})", devilsIcon.getWidth(), devilsIcon.getHeight());
         } catch (Exception e) {
-            AddonTemplate.LOG.error("[Devils] Failed to load category icon", e);
-            loadFailed = true;
+            AddonTemplate.LOG.error("[Devils] Failed to load {} icon '{}'", label, fileName, e);
+            onFail.run();
+            return null;
         }
-
-        return devilsIcon;
     }
 }
 

@@ -93,6 +93,13 @@ public class SyncHub extends Module {
         .build()
     );
 
+    private final Setting<Boolean> gamesSync = sgFeatures.add(new BoolSetting.Builder()
+        .name("mini-games")
+        .description("Allow Chess / Checkers mini-games to sync through this hub.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<Boolean> xaeroDebugPipeline = sgFeatures.add(new BoolSetting.Builder()
         .name("xaero-debug-pipeline")
         .description("Enable Xaero map pipeline debug logs in chat.")
@@ -116,6 +123,7 @@ public class SyncHub extends Module {
             case PING -> pingSync.get();
             case CHEST_TRACKER -> chestTrackerSync.get();
             case XAERO_WORLD_MAP -> xaeroWorldMapSync.get();
+            case GAMES -> gamesSync.get();
         };
     }
 
@@ -169,7 +177,8 @@ public class SyncHub extends Module {
         AUTO_LOGIN,
         PING,
         CHEST_TRACKER,
-        XAERO_WORLD_MAP
+        XAERO_WORLD_MAP,
+        GAMES
     }
 }
 

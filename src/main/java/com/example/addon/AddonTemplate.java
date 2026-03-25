@@ -17,6 +17,11 @@ import com.example.addon.modules.Ping;
 import com.example.addon.modules.SpearSpoof;
 import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
+import com.example.addon.modules.games.ChessOverlay;
+import com.example.addon.modules.games.DevilsGameOverlay;
+import com.example.addon.modules.games.GamesModule;
+import com.example.addon.modules.games.RussianRouletteOverlay;
+import com.example.addon.modules.games.SlotMachineOverlay;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
 import com.example.addon.modules.modupdater.ModAutoUpdater;
 import com.example.addon.settings.TrackerPlayersSetting;
@@ -26,12 +31,14 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
 import java.util.ArrayList;
+import java.util.List;
 import meteordevelopment.meteorclient.addons.GithubRepo;
 import meteordevelopment.meteorclient.addons.MeteorAddon;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.commands.Commands;
 import meteordevelopment.meteorclient.gui.utils.SettingsWidgetFactory;
 import meteordevelopment.meteorclient.gui.widgets.containers.WTable;
+import meteordevelopment.meteorclient.systems.config.Config;
 import meteordevelopment.meteorclient.systems.hud.Hud;
 import meteordevelopment.meteorclient.systems.hud.HudElement;
 import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
@@ -48,6 +55,7 @@ import org.slf4j.Logger;
 public class AddonTemplate extends MeteorAddon {
     public static final Logger LOG = LogUtils.getLogger();
     public static final Category CATEGORY = new Category("Devils", Items.NETHER_STAR.getDefaultStack());
+    public static final Category GAMES_CATEGORY = new Category("Devils-Game", Items.DIAMOND.getDefaultStack());
     public static final HudGroup HUD_GROUP = new HudGroup("Devils");
 
     @Override
@@ -91,6 +99,27 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new MaceSpoof());
         modules.add(new SpearSpoof());
         modules.add(new ChestTrackerModule());
+        modules.add(new GamesModule());
+        ChessOverlay chessOverlay = new ChessOverlay();
+        DevilsGameOverlay checkersOverlay = new DevilsGameOverlay();
+        SlotMachineOverlay slotMachineOverlay = new SlotMachineOverlay();
+        RussianRouletteOverlay russianRouletteOverlay = new RussianRouletteOverlay();
+        modules.add(chessOverlay);
+        modules.add(checkersOverlay);
+        modules.add(slotMachineOverlay);
+        modules.add(russianRouletteOverlay);
+        hideInternalGameModules(chessOverlay, checkersOverlay, slotMachineOverlay, russianRouletteOverlay);
+    }
+
+    private static void hideInternalGameModules(meteordevelopment.meteorclient.systems.modules.Module... modules) {
+        List<meteordevelopment.meteorclient.systems.modules.Module> hidden = Config.get().hiddenModules.get();
+        boolean changed = false;
+        for (meteordevelopment.meteorclient.systems.modules.Module module : modules) {
+            if (module == null || hidden.contains(module)) continue;
+            hidden.add(module);
+            changed = true;
+        }
+        if (changed) Config.get().save();
     }
 
     private void registerCommands() {
@@ -126,6 +155,7 @@ public class AddonTemplate extends MeteorAddon {
     @Override
     public void onRegisterCategories() {
         Modules.registerCategory(CATEGORY);
+        Modules.registerCategory(GAMES_CATEGORY);
     }
 
     @Override
@@ -205,3 +235,4 @@ public class AddonTemplate extends MeteorAddon {
         }
     }
 }
+
