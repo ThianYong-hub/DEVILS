@@ -99,11 +99,13 @@ public final class DevilsGameOverlay extends Module {
         GamesModule.markActive(GamesModule.QuickGame.CHECKERS);
         session.setScriptLevel(scriptLevel.get());
         session.onActivate(mode.get());
+        GamesCursorController.acquire(client());
     }
 
     @Override
     public void onDeactivate() {
         window.stopInteraction();
+        GamesCursorController.release(client());
     }
 
     @EventHandler
@@ -112,6 +114,7 @@ public final class DevilsGameOverlay extends Module {
             if (!isActive()) return;
             session.setScriptLevel(scriptLevel.get());
             session.onTick(mode.get());
+            GamesCursorController.update(client());
         });
     }
 

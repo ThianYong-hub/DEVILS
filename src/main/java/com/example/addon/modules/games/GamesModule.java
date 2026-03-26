@@ -16,8 +16,10 @@ public final class GamesModule extends Module {
     public enum QuickGame {
         CHESS("Chess"),
         CHECKERS("Checkers"),
+        BLACKJACK("Blackjack"),
         SLOT_MACHINE("One-Armed Bandit"),
-        RUSSIAN_ROULETTE("Russian Roulette");
+        RUSSIAN_ROULETTE("Russian Roulette"),
+        DOOM("DevilsDoom");
 
         private final String title;
 
@@ -103,8 +105,10 @@ public final class GamesModule extends Module {
         if (modules == null) return;
         disable(modules, ChessOverlay.class);
         disable(modules, DevilsGameOverlay.class);
+        disable(modules, BlackjackOverlay.class);
         disable(modules, SlotMachineOverlay.class);
         disable(modules, RussianRouletteOverlay.class);
+        disable(modules, DoomOverlay.class);
     }
 
     private void launchSelectedGame() {
@@ -112,8 +116,10 @@ public final class GamesModule extends Module {
         switch (selected.get()) {
             case CHESS -> launch(ChessOverlay.class);
             case CHECKERS -> launch(DevilsGameOverlay.class);
+            case BLACKJACK -> launch(BlackjackOverlay.class);
             case SLOT_MACHINE -> launch(SlotMachineOverlay.class);
             case RUSSIAN_ROULETTE -> launch(RussianRouletteOverlay.class);
+            case DOOM -> launch(DoomOverlay.class);
         }
     }
 
@@ -126,8 +132,10 @@ public final class GamesModule extends Module {
 
         if (module instanceof ChessOverlay chess) chess.launchFromGames();
         else if (module instanceof DevilsGameOverlay checkers) checkers.launchFromGames();
+        else if (module instanceof BlackjackOverlay blackjack) blackjack.launchFromGames();
         else if (module instanceof SlotMachineOverlay slot) slot.launchFromGames();
         else if (module instanceof RussianRouletteOverlay roulette) roulette.launchFromGames();
+        else if (module instanceof DoomOverlay doom) doom.launchFromGames();
     }
 
     private void deactivateAllGames() {
@@ -135,8 +143,10 @@ public final class GamesModule extends Module {
         if (modules == null) return;
         disable(modules, ChessOverlay.class);
         disable(modules, DevilsGameOverlay.class);
+        disable(modules, BlackjackOverlay.class);
         disable(modules, SlotMachineOverlay.class);
         disable(modules, RussianRouletteOverlay.class);
+        disable(modules, DoomOverlay.class);
     }
 
     private static void disable(Modules modules, Class<? extends Module> klass) {

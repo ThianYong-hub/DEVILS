@@ -80,11 +80,13 @@ public final class SlotMachineOverlay extends Module {
     public void onActivate() {
         ensureWindowInitialized();
         GamesModule.markActive(GamesModule.QuickGame.SLOT_MACHINE);
+        GamesCursorController.acquire(client());
     }
 
     @Override
     public void onDeactivate() {
         window.stopInteraction();
+        GamesCursorController.release(client());
     }
 
     @EventHandler
@@ -92,6 +94,7 @@ public final class SlotMachineOverlay extends Module {
         CrashGuard.run(this, "slotMachineTick", () -> {
             if (!isActive()) return;
             window.onTick();
+            GamesCursorController.update(client());
         });
     }
 

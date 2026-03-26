@@ -113,6 +113,7 @@ public final class RussianRouletteOverlay extends Module {
         gameVisible = true;
         deathSequenceActive = false;
         GamesModule.markActive(GamesModule.QuickGame.RUSSIAN_ROULETTE);
+        GamesCursorController.acquire(client());
     }
 
     @Override
@@ -120,6 +121,7 @@ public final class RussianRouletteOverlay extends Module {
         window.stopInteraction();
         gameVisible = true;
         deathSequenceActive = false;
+        GamesCursorController.release(client());
     }
 
     @EventHandler
@@ -131,6 +133,7 @@ public final class RussianRouletteOverlay extends Module {
                 if (window.consumeCloseAllRequested()) beginDeathSequence();
             }
             if (deathSequenceActive && System.currentTimeMillis() >= deathEndsAtMs) applyDeathOutcome();
+            GamesCursorController.update(client());
         });
     }
 

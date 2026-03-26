@@ -19,7 +19,9 @@ import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.games.ChessOverlay;
 import com.example.addon.modules.games.DevilsGameOverlay;
+import com.example.addon.modules.games.DoomOverlay;
 import com.example.addon.modules.games.GamesModule;
+import com.example.addon.modules.games.BlackjackOverlay;
 import com.example.addon.modules.games.RussianRouletteOverlay;
 import com.example.addon.modules.games.SlotMachineOverlay;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
@@ -102,13 +104,17 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new GamesModule());
         ChessOverlay chessOverlay = new ChessOverlay();
         DevilsGameOverlay checkersOverlay = new DevilsGameOverlay();
+        BlackjackOverlay blackjackOverlay = new BlackjackOverlay();
         SlotMachineOverlay slotMachineOverlay = new SlotMachineOverlay();
         RussianRouletteOverlay russianRouletteOverlay = new RussianRouletteOverlay();
+        DoomOverlay doomOverlay = new DoomOverlay();
         modules.add(chessOverlay);
         modules.add(checkersOverlay);
+        modules.add(blackjackOverlay);
         modules.add(slotMachineOverlay);
         modules.add(russianRouletteOverlay);
-        hideInternalGameModules(chessOverlay, checkersOverlay, slotMachineOverlay, russianRouletteOverlay);
+        modules.add(doomOverlay);
+        hideInternalGameModules(chessOverlay, checkersOverlay, blackjackOverlay, slotMachineOverlay, russianRouletteOverlay, doomOverlay);
     }
 
     private static void hideInternalGameModules(meteordevelopment.meteorclient.systems.modules.Module... modules) {
