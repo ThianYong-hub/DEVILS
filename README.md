@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current build (`v0.0.38`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.38/devils-addon-0.0.38.jar>
+- Current build (`v0.0.39`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.39/devils-addon-0.0.39.jar>
 
 ## Verified Runtime Matrix
 
@@ -210,7 +210,7 @@ Run tests:
 ```
 
 <<<<<<< HEAD
-## Release Notes (`v0.0.38`)
+## Release Notes (`v0.0.39`)
 =======
 ## Repository Structure
 >>>>>>> 9f6726a (docs: rewrite README in showcase format)

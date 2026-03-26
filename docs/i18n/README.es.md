@@ -4,7 +4,7 @@ Addon para [Meteor Client](https://github.com/MeteorDevelopment/meteor-client): 
 
 ## Descarga
 
-- Build actual (`v0.0.38`): [Descargar jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.38/devils-addon-0.0.38.jar)
+- Build actual (`v0.0.39`): [Descargar jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.39/devils-addon-0.0.39.jar)
 - Último release: [Abrir](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Todos los releases: [Abrir](https://github.com/ThianYong-hub/DEVILS/releases)
 
