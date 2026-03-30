@@ -20,6 +20,7 @@ PROFILE_DEFAULT_DELAY = 40
 STATE_VERSION = 3
 EVENTS_MAX_DEFAULT = 5000
 PULL_WAIT_MAX_MS_DEFAULT = 25_000
+MAX_BODY_BYTES_DEFAULT = 1_048_576
 SIGN_WINDOW_SEC_DEFAULT = 30
 NONCE_TTL_SEC_DEFAULT = 120
 NONCE_CACHE_MAX_DEFAULT = 200_000
@@ -41,6 +42,9 @@ XAERO_ENCRYPTED_SLOTS_TTL_MS = 180_000
 IGNORE_TRACEBACK_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 IGNORE_TRACEBACK_ERRNOS = {32, 54, 104}
 NONCE_PATTERN = re.compile(r"^[a-fA-F0-9]{16,128}$")
+ENVELOPE_NONCE_BYTES = 12
+ENVELOPE_SALT_BYTES_MIN = 8
+ENVELOPE_MIN_CIPHERTEXT_BYTES = 16
 
 
 def now_ts() -> int:
@@ -82,9 +86,14 @@ def normalize_mode(value: Any) -> str:
     return "REGISTER" if raw == "REGISTER" else "LOGIN"
 
 
-def normalize_module(value: str) -> str:
+def normalize_module_optional(value: Any) -> str:
     module = string_value(value).strip().lower()
     module = MODULE_ALIASES.get(module, module)
+    return module
+
+
+def normalize_module(value: str) -> str:
+    module = normalize_module_optional(value)
     if not module:
         module = "default"
     return module
@@ -117,6 +126,20 @@ def namespace_from_payload(payload: dict[str, Any]) -> str:
         candidate = "default"
     canonical, _, _ = split_namespace(candidate)
     return canonical
+
+
+def clamp_stream_wait_ms(wait_ms_raw: int, wait_cap: int) -> int:
+    cap = max(0, int_value(wait_cap, PULL_WAIT_MAX_MS_DEFAULT))
+    if cap <= 0:
+        return 0
+
+    requested = int_value(wait_ms_raw, 0)
+    if requested <= 0:
+        requested = cap
+
+    # Keep stream loops from becoming a busy-spin, but never exceed configured cap.
+    floor = 2_500 if cap >= 2_500 else 1
+    return min(cap, max(floor, requested))
 
 
 def slugify(value: str) -> str:
@@ -198,26 +221,83 @@ def b64url_decode(raw: str) -> bytes:
     return base64.urlsafe_b64decode(value + padding)
 
 
-def extract_envelope_kid(profile: dict[str, Any]) -> str:
+def parse_encrypted_envelope(profile: Any) -> dict[str, Any] | None:
     if not is_encrypted_profile_row(profile):
-        return ""
+        return None
     password = string_value(profile.get("password")).strip()
     prefix = next((value for value in ENCRYPTED_PROFILE_PASSWORD_PREFIXES if password.startswith(value)), "")
     if not prefix:
-        return ""
+        return None
     encoded = password[len(prefix) :]
     try:
         packed = b64url_decode(encoded)
         parsed = json.loads(packed.decode("utf-8"))
     except Exception:
-        return ""
+        return None
     if not isinstance(parsed, dict):
+        return None
+
+    version = int_value(parsed.get("v"), 0)
+    if version not in (1, 2):
+        return None
+
+    nonce_raw = string_value(parsed.get("n")).strip()
+    ciphertext_raw = string_value(parsed.get("ct")).strip()
+    if not nonce_raw or not ciphertext_raw:
+        return None
+
+    try:
+        nonce = b64url_decode(nonce_raw)
+        ciphertext = b64url_decode(ciphertext_raw)
+    except Exception:
+        return None
+    if len(nonce) != ENVELOPE_NONCE_BYTES:
+        return None
+    if len(ciphertext) < ENVELOPE_MIN_CIPHERTEXT_BYTES:
+        return None
+
+    if version == 2:
+        salt_raw = string_value(parsed.get("s")).strip()
+        if not salt_raw:
+            return None
+        try:
+            salt = b64url_decode(salt_raw)
+        except Exception:
+            return None
+        if len(salt) < ENVELOPE_SALT_BYTES_MIN:
+            return None
+    return parsed
+
+
+def envelope_module_name(envelope: dict[str, Any] | None) -> str:
+    if not isinstance(envelope, dict):
         return ""
-    return string_value(parsed.get("kid")).strip()
+    return normalize_module_optional(envelope.get("m"))
+
+
+def is_valid_encrypted_profile_row(profile: Any, expected_module: str = "") -> bool:
+    envelope = parse_encrypted_envelope(profile)
+    if envelope is None:
+        return False
+    expected = normalize_module_optional(expected_module)
+    if not expected:
+        return True
+    envelope_module = envelope_module_name(envelope)
+    # Legacy envelopes may not include "m".
+    if envelope_module and envelope_module != expected:
+        return False
+    return True
+
+
+def extract_envelope_kid(profile: dict[str, Any]) -> str:
+    envelope = parse_encrypted_envelope(profile)
+    if envelope is None:
+        return ""
+    return string_value(envelope.get("kid")).strip()
 
 
 def is_xaero_encrypted_batch(profiles: list[dict[str, Any]]) -> bool:
-    return bool(profiles) and all(is_encrypted_profile_row(profile) for profile in profiles)
+    return bool(profiles) and all(is_valid_encrypted_profile_row(profile, "xaero-world-map") for profile in profiles)
 
 
 def load_xaero_encrypted_slots(
@@ -235,7 +315,7 @@ def load_xaero_encrypted_slots(
                 profile = normalize_profile(profile_raw)
             else:
                 profile = normalize_profile(value)
-            if not is_encrypted_profile_row(profile):
+            if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
                 continue
             kid = string_value(value.get("kid")).strip() or extract_envelope_kid(profile)
             out[device_id] = {
@@ -276,7 +356,7 @@ def prune_xaero_encrypted_slots(slots: dict[str, dict[str, Any]], reference_ms: 
         if not isinstance(value, dict):
             continue
         profile = value.get("profile")
-        if not is_encrypted_profile_row(profile):
+        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
             continue
         updated_at = max(0, int_value(value.get("updatedAtMs"), 0))
         if updated_at and updated_at < cutoff_ms:
@@ -318,7 +398,7 @@ def xaero_profiles_from_slots(slots: dict[str, dict[str, Any]], active_kid: str 
         if active_kid and slot_kid != active_kid:
             continue
         profile = value.get("profile")
-        if not is_encrypted_profile_row(profile):
+        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
             continue
         out.append(deepcopy(profile))
     if out or not active_kid:
@@ -329,7 +409,7 @@ def xaero_profiles_from_slots(slots: dict[str, dict[str, Any]], active_kid: str 
         if not isinstance(value, dict):
             continue
         profile = value.get("profile")
-        if not is_encrypted_profile_row(profile):
+        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
             continue
         out.append(deepcopy(profile))
     return out
@@ -397,10 +477,10 @@ def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str,
     return merged
 
 
-def is_encrypted_profiles_payload(items: Any) -> bool:
+def is_encrypted_profiles_payload(items: Any, expected_module: str = "") -> bool:
     if not isinstance(items, list) or len(items) != 1:
         return False
-    return is_encrypted_profile_row(items[0])
+    return is_valid_encrypted_profile_row(items[0], expected_module)
 
 
 def canonical_profiles_checksum(profiles: list[dict[str, Any]]) -> str:
@@ -1133,17 +1213,31 @@ class SyncHandler(BaseHTTPRequestHandler):
         target = string_value(self.path).strip()
         return target if target else '/'
 
-    def _read_json(self) -> tuple[bytes, dict[str, Any]]:
-        raw = b'{}'
+    def _content_length(self) -> int:
+        raw = string_value(self.headers.get('Content-Length')).strip()
+        if not raw:
+            return 0
         try:
-            length = int(self.headers.get('Content-Length', '0'))
-            raw = self.rfile.read(length) if length > 0 else b'{}'
-            parsed = json.loads(raw.decode('utf-8'))
-            if not isinstance(parsed, dict):
-                parsed = {}
-            return raw, parsed
+            value = int(raw)
         except Exception:
-            return raw, {}
+            return -1
+        if value < 0:
+            return -1
+        return value
+
+    def _read_json(self, length: int) -> tuple[bytes, dict[str, Any] | None]:
+        if length <= 0:
+            return b"{}", {}
+
+        raw = b""
+        try:
+            raw = self.rfile.read(length)
+            parsed = json.loads(raw.decode('utf-8'))
+        except Exception:
+            return raw, None
+        if not isinstance(parsed, dict):
+            return raw, None
+        return raw, parsed
 
     def _is_authorized(self, admin: bool = False) -> bool:
         auth = string_value(self.headers.get('Authorization')).strip()
@@ -1269,17 +1363,31 @@ class SyncHandler(BaseHTTPRequestHandler):
                 return
 
             query = self._query()
-            module = string_value(query.get('module', ['auto-login'])[0], 'auto-login').strip() or 'auto-login'
-            namespace = string_value(query.get('namespace', [''])[0]).strip().lower()
-            if not namespace:
-                namespace = module.lower() if module else 'default'
-            namespace = namespace_from_payload({'namespace': namespace})
+            module_raw = string_value(query.get('module', [''])[0]).strip()
+            namespace_raw = string_value(query.get('namespace', [''])[0]).strip().lower()
+            if not namespace_raw:
+                namespace_raw = module_raw.lower() if module_raw else 'default'
+            namespace = namespace_from_payload({'namespace': namespace_raw})
+            namespace_module = split_namespace(namespace)[1]
+            module = normalize_module(module_raw) if module_raw else namespace_module
+            if module_raw and module != namespace_module:
+                self._json(
+                    400,
+                    {
+                        'ok': False,
+                        'error': 'module-namespace-mismatch',
+                        'module': module,
+                        'namespace': namespace,
+                        'serverTime': self._server_time(),
+                    },
+                )
+                return
 
             device_id = string_value(query.get('deviceId', ['unknown-device'])[0], 'unknown-device').strip() or 'unknown-device'
             known_revision = int_value(query.get('knownRevision', ['-1'])[0], -1)
             wait_ms_raw = int_value(query.get('waitMs', ['0'])[0], 0)
             wait_cap = int(self.server.pull_wait_max_ms)  # type: ignore[attr-defined]
-            wait_ms = max(2_500, min(wait_cap, wait_ms_raw if wait_ms_raw > 0 else wait_cap))
+            wait_ms = clamp_stream_wait_ms(wait_ms_raw, wait_cap)
             ip = string_value(self.client_address[0], '')
             user_agent = string_value(self.headers.get('User-Agent'), '')
             store.register_client(device_id, namespace, module, ip, user_agent)
@@ -1327,7 +1435,27 @@ class SyncHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self._path()
-        raw_body, payload = self._read_json()
+        content_length = self._content_length()
+        if content_length < 0:
+            self._json(400, {'ok': False, 'error': 'bad-content-length', 'serverTime': self._server_time()})
+            return
+        max_body_bytes = max(1_024, int_value(getattr(self.server, 'max_body_bytes', MAX_BODY_BYTES_DEFAULT), MAX_BODY_BYTES_DEFAULT))
+        if content_length > max_body_bytes:
+            self._json(
+                413,
+                {
+                    'ok': False,
+                    'error': 'payload-too-large',
+                    'maxBodyBytes': max_body_bytes,
+                    'serverTime': self._server_time(),
+                },
+            )
+            return
+
+        raw_body, payload = self._read_json(content_length)
+        if payload is None:
+            self._json(400, {'ok': False, 'error': 'bad-json', 'serverTime': self._server_time()})
+            return
         store = self._state()
 
         if path in ('/pull', '/push', '/v1/client/start', '/v1/sync/pull', '/v1/sync/push', '/v1/sync/ack', '/v1/sync/events'):
@@ -1338,8 +1466,22 @@ class SyncHandler(BaseHTTPRequestHandler):
                 return
 
         device_id = string_value(payload.get('deviceId'), 'unknown-device').strip() or 'unknown-device'
-        module = string_value(payload.get('module'), 'auto-login').strip() or 'auto-login'
+        module_raw = string_value(payload.get('module')).strip()
         namespace = namespace_from_payload(payload)
+        namespace_module = split_namespace(namespace)[1]
+        module = normalize_module(module_raw) if module_raw else namespace_module
+        if module_raw and module != namespace_module:
+            self._json(
+                400,
+                {
+                    'ok': False,
+                    'error': 'module-namespace-mismatch',
+                    'module': module,
+                    'namespace': namespace,
+                    'serverTime': self._server_time(),
+                },
+            )
+            return
         ip = string_value(self.client_address[0], '')
         user_agent = string_value(self.headers.get('User-Agent'), '')
 
@@ -1397,8 +1539,8 @@ class SyncHandler(BaseHTTPRequestHandler):
             request_id = string_value(payload.get('requestId'), '').strip()
             allow_empty_overwrite = bool_value(payload.get('allowEmptyOverwrite'), False) or bool_value(payload.get('allow_empty_overwrite'), False)
             if bool(getattr(self.server, 'require_encrypted_sync', False)):
-                normalized_module = normalize_module(module)
-                if normalized_module in ENCRYPTED_MODULES and not is_encrypted_profiles_payload(payload.get('profiles')):
+                normalized_module = namespace_module
+                if normalized_module in ENCRYPTED_MODULES and not is_encrypted_profiles_payload(payload.get('profiles'), normalized_module):
                     self._json(
                         400,
                         {
@@ -1510,6 +1652,7 @@ def main() -> None:
     allow_cors = bool_value(os.getenv('SYNC_ALLOW_CORS'), False)
     events_max = max(100, int_value(os.getenv('SYNC_EVENTS_MAX'), EVENTS_MAX_DEFAULT))
     pull_wait_max_ms = max(0, int_value(os.getenv('SYNC_PULL_WAIT_MAX_MS'), PULL_WAIT_MAX_MS_DEFAULT))
+    max_body_bytes = max(1_024, int_value(os.getenv('SYNC_MAX_BODY_BYTES'), MAX_BODY_BYTES_DEFAULT))
     log_push_success = bool_value(os.getenv('SYNC_LOG_PUSH_SUCCESS'), False)
     log_pull_success = bool_value(os.getenv('SYNC_LOG_PULL_SUCCESS'), False)
 
@@ -1526,6 +1669,7 @@ def main() -> None:
     server.require_encrypted_sync = require_encrypted_sync  # type: ignore[attr-defined]
     server.allow_cors = allow_cors  # type: ignore[attr-defined]
     server.pull_wait_max_ms = pull_wait_max_ms  # type: ignore[attr-defined]
+    server.max_body_bytes = max_body_bytes  # type: ignore[attr-defined]
     server.log_push_success = log_push_success  # type: ignore[attr-defined]
     server.log_pull_success = log_pull_success  # type: ignore[attr-defined]
     server.require_signed = require_signed  # type: ignore[attr-defined]
@@ -1569,6 +1713,7 @@ def main() -> None:
     print(f'  allow-cors     : {allow_cors}')
     print(f'  events-max     : {events_max}')
     print(f'  pull-wait-max  : {pull_wait_max_ms} ms')
+    print(f'  max-body-bytes : {max_body_bytes}')
     print(f'  log-pull-ok    : {log_pull_success}')
     print(f'  log-push-2xx   : {log_push_success}')
     print('  routes         : /pull, /push, /health')

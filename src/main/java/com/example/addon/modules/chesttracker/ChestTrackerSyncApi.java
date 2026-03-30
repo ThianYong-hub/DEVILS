@@ -100,7 +100,7 @@ public final class ChestTrackerSyncApi {
     private List<Row> readRows(JsonObject json, String encryptionKey) throws Exception {
         JsonArray array = SyncJsonUtils.readArray(json, "profiles");
         if (array == null) return List.of();
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, moduleName);
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, moduleName, true);
 
         ArrayList<Row> rows = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {

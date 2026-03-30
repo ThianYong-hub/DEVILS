@@ -165,7 +165,7 @@ public final class PingSyncCodec {
         JsonArray array = SyncJsonUtils.readArray(json, "profiles");
         if (array == null) array = SyncJsonUtils.readArray(json, "data");
         if (array == null) return List.of();
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, PingConstants.MODULE_NAMESPACE);
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, PingConstants.MODULE_NAMESPACE, true);
 
         ArrayList<SyncPingData> list = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {

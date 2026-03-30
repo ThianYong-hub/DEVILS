@@ -70,8 +70,17 @@ public final class SyncCrypto {
     }
 
     public static JsonArray decryptProfiles(JsonArray wireProfiles, String keyMaterial, String module) throws Exception {
+        return decryptProfiles(wireProfiles, keyMaterial, module, false);
+    }
+
+    public static JsonArray decryptProfiles(JsonArray wireProfiles, String keyMaterial, String module, boolean requireEncryptedEnvelope) throws Exception {
         if (wireProfiles == null) return new JsonArray();
-        if (!isEncryptedEnvelope(wireProfiles)) return deepCopyArray(wireProfiles);
+        if (!isEncryptedEnvelope(wireProfiles)) {
+            if (requireEncryptedEnvelope && !wireProfiles.isEmpty()) {
+                throw new IllegalArgumentException("unencrypted-profiles");
+            }
+            return deepCopyArray(wireProfiles);
+        }
 
         String key = safe(keyMaterial).trim();
         if (key.isBlank()) throw new IllegalArgumentException("missing-key");

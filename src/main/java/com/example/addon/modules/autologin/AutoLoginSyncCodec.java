@@ -223,7 +223,7 @@ public final class AutoLoginSyncCodec {
         if (array == null && json.has("entries") && json.get("entries").isJsonArray()) array = json.getAsJsonArray("entries");
         if (array == null && json.has("data") && json.get("data").isJsonArray()) array = json.getAsJsonArray("data");
         if (array == null) return null;
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, MODULE_NAME);
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, MODULE_NAME, true);
 
         ArrayList<SyncProfileData> list = new ArrayList<>();
         for (JsonElement element : array) {

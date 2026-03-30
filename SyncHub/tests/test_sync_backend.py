@@ -43,6 +43,7 @@ class BackendHarness:
         self.server.signing_key = ""
         self.server.sign_window_sec = 30
         self.server.nonce_replay_guard = BACKEND.NonceReplayGuard(120, 10000)
+        self.server.max_body_bytes = 1_048_576
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -406,6 +407,80 @@ class TestSyncBackend(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(push.get("ok"))
         self.assertTrue(push.get("applied"))
+
+    def test_push_rejects_module_namespace_mismatch(self):
+        self.harness.server.require_encrypted_sync = True
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.post_json(
+                "/push",
+                {
+                    "deviceId": "mismatch-a",
+                    "module": "default",
+                    "namespace": "auto-login",
+                    "baseRevision": 0,
+                    "profiles": [
+                        {
+                            "enabled": True,
+                            "username": "u",
+                            "server": "s",
+                            "mode": "LOGIN",
+                            "password": "/login 123",
+                            "delay": 0,
+                        }
+                    ],
+                },
+            )
+        self.assertEqual(400, ctx.exception.code)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual("module-namespace-mismatch", body.get("error"))
+
+    def test_malformed_encrypted_envelope_is_rejected(self):
+        self.harness.server.require_encrypted_sync = True
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.post_json(
+                "/push",
+                {
+                    "deviceId": "malformed-envelope",
+                    "module": "auto-login",
+                    "baseRevision": 0,
+                    "profiles": [
+                        {
+                            "enabled": True,
+                            "username": "__devils_e2e__",
+                            "server": "*",
+                            "mode": "LOGIN",
+                            "password": "devils-e2e:v2:not-base64",
+                            "delay": 0,
+                        }
+                    ],
+                },
+            )
+        self.assertEqual(400, ctx.exception.code)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual("unencrypted-profiles-rejected", body.get("error"))
+
+    def test_payload_too_large_is_rejected(self):
+        self.harness.server.max_body_bytes = 256
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.post_json(
+                "/push",
+                {
+                    "deviceId": "big-body",
+                    "module": "ping",
+                    "baseRevision": 0,
+                    "profiles": [],
+                    "padding": "x" * 2_048,
+                },
+            )
+        self.assertEqual(413, ctx.exception.code)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual("payload-too-large", body.get("error"))
+
+    def test_stream_wait_clamp_never_exceeds_cap(self):
+        self.assertEqual(100, BACKEND.clamp_stream_wait_ms(100, 1000))
+        self.assertEqual(1000, BACKEND.clamp_stream_wait_ms(5000, 1000))
+        self.assertEqual(2500, BACKEND.clamp_stream_wait_ms(100, 25000))
+        self.assertEqual(25000, BACKEND.clamp_stream_wait_ms(60000, 25000))
 
 
 if __name__ == "__main__":

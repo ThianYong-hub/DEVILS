@@ -172,7 +172,7 @@ public final class XaeroSyncCodec {
         JsonArray array = SyncJsonUtils.readArray(json, "profiles");
         if (array == null) array = SyncJsonUtils.readArray(json, "data");
         if (array == null) return List.of();
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, XaeroSyncConstants.MODULE_NAMESPACE);
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, XaeroSyncConstants.MODULE_NAMESPACE, true);
 
         ArrayList<SyncXaeroData> list = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {

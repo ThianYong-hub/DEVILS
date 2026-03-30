@@ -181,7 +181,7 @@ public final class MiniGamesSyncCodec {
         if (array == null) array = SyncJsonUtils.readArray(json, "entries");
         if (array == null) array = SyncJsonUtils.readArray(json, "data");
         if (array == null) return List.of();
-        array = SyncCrypto.decryptProfiles(array, encryptionKey, MODULE_NAME);
+        array = SyncCrypto.decryptProfiles(array, encryptionKey, MODULE_NAME, true);
 
         ArrayList<SyncRow> rows = new ArrayList<>();
         for (int i = 0; i < array.size(); i++) {
