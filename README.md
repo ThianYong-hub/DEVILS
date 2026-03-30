@@ -19,7 +19,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.36` |
+| Addon Version | `0.0.40` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
@@ -209,11 +209,14 @@ Run tests:
 ./gradlew test
 ```
 
-<<<<<<< HEAD
 ## Release Notes (`v0.0.40`)
-=======
+
+- hardened SyncHub backend envelope parsing and encrypted-profile validation
+- added oversized-body protection and stricter module/namespace checks
+- aligned addon sync codecs and `SyncCrypto` with the stricter backend rules
+- updated SyncHub tests and shipped fresh `1.21.11` build artifacts
+
 ## Repository Structure
->>>>>>> 9f6726a (docs: rewrite README in showcase format)
 
 - `src/main/java/com/example/addon/modules` - public module entrypoints.
 - `src/main/java/com/example/addon/modules/*` - feature-local logic (sync, render, planners, controllers).
