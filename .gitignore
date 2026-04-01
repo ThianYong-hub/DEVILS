@@ -36,7 +36,9 @@ bin/
 # fabric
 
 run/
-src/test/
+src/test/*
+!src/test/java/
+!src/test/java/**
 
 # local refs and root icons
 icon.png

@@ -13,13 +13,13 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current build (`v0.0.40`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.40/devils-addon-0.0.40.jar>
+- Current build (`v0.0.41`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar>
 
 ## Verified Runtime Matrix
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.40` |
+| Addon Version | `0.0.41` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
@@ -209,12 +209,12 @@ Run tests:
 ./gradlew test
 ```
 
-## Release Notes (`v0.0.40`)
+## Release Notes (`v0.0.41`)
 
-- hardened SyncHub backend envelope parsing and encrypted-profile validation
-- added oversized-body protection and stricter module/namespace checks
-- aligned addon sync codecs and `SyncCrypto` with the stricter backend rules
-- updated SyncHub tests and shipped fresh `1.21.11` build artifacts
+- shipped the new slot-driven `AutoCraft` with final-goal chain planning and live runtime validation
+- confirmed `2x2` and `3x3` crafting flows, `Auto Open`, intermediate reuse, and policy behavior in Minecraft runtime
+- added planner, policy, and source regression coverage for the AutoCraft pipeline
+- fixed remaining `craft-all=false` session handling before release packaging
 
 ## Repository Structure
 

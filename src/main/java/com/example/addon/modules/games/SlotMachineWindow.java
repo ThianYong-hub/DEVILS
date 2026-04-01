@@ -27,7 +27,7 @@ final class SlotMachineWindow {
     private static final int SPIN_W = 32;
     private static final int SPIN_H = 20;
 
-    private static final Identifier FRAME = Identifier.of("devils-addon", "textures/games/slot/SMFrame_blank.png");
+    private static final Identifier FRAME = Identifier.of("devils-addon", "textures/games/slot/smframe_blank.png");
     private static final Identifier SPIN = Identifier.of("devils-addon", "textures/games/slot/spin.png");
     private static final Identifier SPIN_PRESSED = Identifier.of("devils-addon", "textures/games/slot/spin_pressed.png");
 

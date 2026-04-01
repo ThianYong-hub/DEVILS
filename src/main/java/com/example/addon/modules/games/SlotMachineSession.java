@@ -39,16 +39,16 @@ final class SlotMachineSession {
     }
 
     private static final Symbol[] SYMBOLS = {
-        new Symbol("Bar1", "textures/games/slot/Bar1.png", 51, 24, 16, 10, 2),
-        new Symbol("Bar2", "textures/games/slot/Bar2.png", 51, 43, 14, 14, 3),
-        new Symbol("Bar3", "textures/games/slot/Bar3.png", 51, 62, 12, 20, 4),
+        new Symbol("Bar1", "textures/games/slot/bar1.png", 51, 24, 16, 10, 2),
+        new Symbol("Bar2", "textures/games/slot/bar2.png", 51, 43, 14, 14, 3),
+        new Symbol("Bar3", "textures/games/slot/bar3.png", 51, 62, 12, 20, 4),
         new Symbol("Bell", "textures/games/slot/bell.png", 56, 56, 10, 16, 3),
         new Symbol("Cherry", "textures/games/slot/cherries.png", 63, 66, 22, 15, 4),
         new Symbol("Clover", "textures/games/slot/clover.png", 45, 54, 10, 18, 3),
         new Symbol("Heart", "textures/games/slot/heart.png", 53, 57, 9, 18, 3),
         new Symbol("Horse", "textures/games/slot/horseshoe.png", 64, 62, 8, 22, 4),
         new Symbol("Lemon", "textures/games/slot/lemon.png", 65, 48, 16, 8, 2),
-        new Symbol("Lucky7", "textures/games/slot/Lucky7_rainbow.png", 40, 53, 5, 50, 8),
+        new Symbol("Lucky7", "textures/games/slot/lucky7_rainbow.png", 40, 53, 5, 50, 8),
         new Symbol("Melon", "textures/games/slot/melon.png", 66, 54, 13, 12, 2)
     };
 

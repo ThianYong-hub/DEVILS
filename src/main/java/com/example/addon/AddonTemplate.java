@@ -3,6 +3,7 @@ package com.example.addon;
 import com.example.addon.config.AddonModulesConfig;
 import com.example.addon.modules.AntiWasp;
 import com.example.addon.modules.AutoAnvilRename;
+import com.example.addon.modules.AutoCraft;
 import com.example.addon.modules.AutoCev;
 import com.example.addon.modules.AutoLogin;
 import com.example.addon.modules.AutoPearl;
@@ -84,6 +85,7 @@ public class AddonTemplate extends MeteorAddon {
         Modules modules = Modules.get();
         modules.add(new AutoPearl());
         modules.add(new AutoAnvilRename());
+        modules.add(new AutoCraft());
         modules.add(new SyncHub());
         modules.add(new ModAutoUpdater());
         modules.add(new AutoLogin());
