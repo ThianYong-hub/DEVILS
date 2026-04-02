@@ -4,7 +4,7 @@ Addon untuk [Meteor Client](https://github.com/MeteorDevelopment/meteor-client):
 
 ## Unduh
 
-- Build saat ini (`v0.0.42`): [Unduh jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar)
+- Build saat ini (`v0.0.42`): [Unduh jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar)
 - Rilis terbaru: [Buka](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Semua rilis: [Buka](https://github.com/ThianYong-hub/DEVILS/releases)
 
