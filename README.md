@@ -13,8 +13,8 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.42`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar>
-- Current game build (`0.0.2`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-game-0.0.2.jar>
+- Current addon build (`0.0.43`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar>
+- Current game build (`0.0.2`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-game-0.0.2.jar>
 
 ## Artifact Model
 
@@ -26,7 +26,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.42` |
+| Addon Version | `0.0.43` |
 | Game Version | `0.0.2` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -103,47 +103,143 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | `.autoraname clearitems` | Clear item filter list for `auto-anvil-rename`. |
 | `.example` | Internal example command. |
 
+## SyncHub Backend Quick Start (For Regular Users)
+
+This is the shortest path to run your own SyncHub backend on a home PC, VPS, or dedicated server.
+
+### 1) Requirements
+
+- Docker + Docker Compose plugin installed
+- Open TCP port (default `7878`) on the host firewall/provider firewall
+
+### 2) Prepare Environment File
+
+```bash
+cd SyncHub
+cp .env.example .env
+```
+
+Generate secrets and paste values into `.env`:
+
+```bash
+python -c "import secrets; print('SYNC_AUTH_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_REQUEST_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_E2E_SECRET=' + secrets.token_urlsafe(48))"
+```
+
+Important:
+- `SYNC_E2E_SECRET` is client-side only. Do not add it to backend `.env`.
+- Keep `SYNC_REQUIRE_REQUEST_SIGNING=true` and `SYNC_REQUIRE_E2E=true` unless this is a throwaway local test server.
+
+### 3) Start Backend
+
+```bash
+cd SyncHub
+docker compose up -d --build
+docker compose ps
+```
+
+Health check:
+
+```text
+GET http://<SERVER_IP>:7878/health
+```
+
+### 4) Configure Meteor `sync-hub` Module
+
+| Setting | Value |
+| --- | --- |
+| `base-url` | `http://<SERVER_IP>:7878` or `https://<DOMAIN>` |
+| `auth-token` | `SYNC_AUTH_TOKEN` |
+| `transport-signing-key` | `SYNC_REQUEST_SIGNING_KEY` |
+| `e2e-secret` | your generated `SYNC_E2E_SECRET` |
+| `allow-http` | `true` only for plain HTTP, `false` for HTTPS |
+
+### 5) Deploy On Your Own Server (VPS / Dedicated)
+
+```bash
+git clone https://github.com/ThianYong-hub/DEVILS.git
+cd DEVILS/SyncHub
+cp .env.example .env
+# edit .env with your real tokens
+docker compose up -d --build
+```
+
+After deploy:
+- allow inbound TCP `7878` or put service behind reverse proxy on `443`
+- keep `.env` private
+- rotate tokens immediately if they were exposed
+
 ## SyncHub Setup (Exact Values)
 
 ### 1) Generate Secrets
 
-Generate three independent values (`token`, `request-signing-key`, `encryption-key`):
+Generate three role-specific values:
+- `SYNC_AUTH_TOKEN`: bearer auth credential
+- `SYNC_REQUEST_SIGNING_KEY`: HMAC key for signed transport requests
+- `SYNC_E2E_SECRET`: client-only E2E payload secret
 
 ```bash
-python -c "import secrets; print('SYNC_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_ENCRYPTION_KEY=' + secrets.token_urlsafe(48))"
+python -c "import secrets; print('SYNC_AUTH_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_REQUEST_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_E2E_SECRET=' + secrets.token_urlsafe(48))"
 ```
 
 ### 2) Backend `.env` (SyncHub)
 
 ```env
-SYNC_TOKEN=replace_me
-SYNC_SIGNING_KEY=replace_me
-SYNC_REQUIRE_SIGNED=true
-SYNC_REQUIRE_ENCRYPTED=true
+# Required
+SYNC_AUTH_TOKEN=replace_me
+SYNC_REQUEST_SIGNING_KEY=replace_me
+SYNC_REQUIRE_REQUEST_SIGNING=true
+SYNC_REQUIRE_E2E=true
+
+# Transport / storage
 SYNC_HOST=0.0.0.0
 SYNC_PORT=7878
 SYNC_STATE_FILE=/data/sync-hub-state.json
 SYNC_NAMESPACES_DIR=/data/modules
+
+# Optional HTTP behavior / limits
+SYNC_ALLOW_CORS=false
+SYNC_PULL_WAIT_MAX_MS=25000
+SYNC_MAX_BODY_BYTES=1048576
+
+# Optional admin token
+SYNC_ADMIN_AUTH_TOKEN=
+
 # Optional HTTPS
 SYNC_TLS_CERT_FILE=
 SYNC_TLS_KEY_FILE=
 SYNC_TLS_MIN_VERSION=TLSv1_3
 ```
 
+Compatibility:
+- backend still accepts legacy `SYNC_TOKEN`, `SYNC_ADMIN_TOKEN`, `SYNC_SIGNING_KEY`, `SYNC_REQUIRE_SIGNED`, `SYNC_REQUIRE_ENCRYPTED`
+- backend does not use `SYNC_E2E_SECRET`; that secret stays client-side
+- legacy backend aliases are deprecated-but-supported during the migration window; preferred names stay authoritative
+
 ### 3) Client `sync-hub` Settings (Meteor)
 
 | Setting | Value |
 | --- | --- |
 | `base-url` | `https://your-domain` or `http://IP:PORT` |
-| `token` | `SYNC_TOKEN` |
-| `request-signing-key` | `SYNC_SIGNING_KEY` |
-| `encryption-key` | `SYNC_ENCRYPTION_KEY` |
+| `auth-token` | `SYNC_AUTH_TOKEN` or legacy `SYNC_TOKEN` |
+| `transport-signing-key` | `SYNC_REQUEST_SIGNING_KEY` or legacy `SYNC_SIGNING_KEY` |
+| `e2e-secret` | `SYNC_E2E_SECRET` or legacy `SYNC_ENCRYPTION_KEY` |
 | `allow-http` | `false` for HTTPS, `true` only for plain HTTP |
 | `use-stream` | `true` (recommended) |
 
 Important:
 - Do not use bare `144.31.167.88:25570` as `base-url`.
 - Correct form is `http://144.31.167.88:25570` (or `https://...` when TLS is configured).
+- `auth-token` is auth only; do not reuse it as crypto material.
+- `transport-signing-key` protects request integrity and replay resistance.
+- `e2e-secret` encrypts payloads before they leave the client; backend never needs it.
+
+Resolve order and migration behavior:
+- preferred names win over legacy aliases
+- if only a legacy client field exists, Devils migrates it to the preferred name for the current session and warns once
+- if preferred and legacy client fields both exist with different values, the preferred value wins and Devils warns once
+- if `auth-token` is empty, sync only works against a backend that allows anonymous requests
+- if `transport-signing-key` is empty, sync only works against a backend with request signing disabled
+- if `e2e-secret` is empty, encrypted sync modules stay blocked until it is filled
 
 ### 4) Run Backend via Docker
 
@@ -158,9 +254,30 @@ Health endpoint:
 GET /health
 ```
 
+Admin-only config diagnostics:
+
+```text
+GET /v1/admin/config
+```
+
+Use `Authorization: Bearer <SYNC_ADMIN_AUTH_TOKEN>` or, if no dedicated admin token is configured, `Authorization: Bearer <SYNC_AUTH_TOKEN>`.
+If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers built from `SYNC_REQUEST_SIGNING_KEY`.
+
+This endpoint reports config mode, deprecated alias usage, and active auth/signing/E2E policy without exposing secret values.
+
 ## SyncHub Stress Tester (2 Modes)
 
 Script: `SyncHub/tests/sync_stress_tester.py`
+
+Preferred flags:
+- `--auth-token`
+- `--request-signing-key`
+- `--e2e-secret`
+
+Deprecated compatibility flags:
+- `--token`
+- `--signing-key`
+- `--encryption-key`
 
 ### Mode 1: Random Traffic (2 minutes)
 
@@ -173,9 +290,9 @@ python SyncHub/tests/sync_stress_tester.py \
   --clients 2 \
   --push-interval-ms 50 \
   --pull-interval-ms 50 \
-  --token "$SYNC_TOKEN" \
-  --signing-key "$SYNC_SIGNING_KEY" \
-  --encryption-key "$SYNC_ENCRYPTION_KEY"
+  --auth-token "$SYNC_AUTH_TOKEN" \
+  --request-signing-key "$SYNC_REQUEST_SIGNING_KEY" \
+  --e2e-secret "$SYNC_E2E_SECRET"
 ```
 
 ### Mode 2: Elytra48 (48 blocks/sec)
@@ -190,9 +307,9 @@ python SyncHub/tests/sync_stress_tester.py \
   --clients 2 \
   --push-interval-ms 50 \
   --pull-interval-ms 50 \
-  --token "$SYNC_TOKEN" \
-  --signing-key "$SYNC_SIGNING_KEY" \
-  --encryption-key "$SYNC_ENCRYPTION_KEY"
+  --auth-token "$SYNC_AUTH_TOKEN" \
+  --request-signing-key "$SYNC_REQUEST_SIGNING_KEY" \
+  --e2e-secret "$SYNC_E2E_SECRET"
 ```
 
 Optional report output:
@@ -242,12 +359,12 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.41`)
+## Release Notes (`v0.0.43`)
 
-- shipped the new slot-driven `AutoCraft` with final-goal chain planning and live runtime validation
-- confirmed `2x2` and `3x3` crafting flows, `Auto Open`, intermediate reuse, and policy behavior in Minecraft runtime
-- added planner, policy, and source regression coverage for the AutoCraft pipeline
-- fixed remaining `craft-all=false` session handling before release packaging
+- reverted `ServerIntel` integration completely (no leftover module registration or runtime references)
+- stabilized SyncHub migration and diagnostics test flow in the current codebase
+- added/updated backend docs for regular users: quick start, docker deployment, and client config checklist
+- kept release packaging for both artifacts: `devils-addon` and `devils-game`
 
 ## Repository Structure
 

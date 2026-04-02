@@ -364,6 +364,42 @@ def load_env_file(path: Path) -> dict[str, str]:
     return out
 
 
+def resolve_input_value(
+    preferred_arg: str,
+    legacy_arg: str,
+    preferred_env_name: str,
+    legacy_env_name: str,
+    env_values: dict[str, str],
+) -> tuple[str, str, list[str]]:
+    preferred_arg_value = (preferred_arg or "").strip()
+    legacy_arg_value = (legacy_arg or "").strip()
+    preferred_env_value = (env_values.get(preferred_env_name, "") or os.getenv(preferred_env_name, "") or "").strip()
+    legacy_env_value = (env_values.get(legacy_env_name, "") or os.getenv(legacy_env_name, "") or "").strip()
+
+    if preferred_arg_value and legacy_arg_value and preferred_arg_value != legacy_arg_value:
+        warnings = [f"Conflict: preferred CLI value wins over deprecated CLI alias for {preferred_env_name}."]
+        return preferred_arg_value, "conflicting", warnings
+    if preferred_arg_value and legacy_arg_value:
+        warnings = [f"Deprecated CLI alias is redundant for {preferred_env_name}; keep only the preferred flag."]
+        return preferred_arg_value, "mixed", warnings
+    if preferred_arg_value:
+        return preferred_arg_value, "preferred-only", []
+    if legacy_arg_value:
+        return legacy_arg_value, "legacy-only", [f"Deprecated CLI alias is active for {preferred_env_name}; use the preferred flag instead."]
+
+    if preferred_env_value and legacy_env_value and preferred_env_value != legacy_env_value:
+        warnings = [f"Conflict: preferred env {preferred_env_name} wins over deprecated {legacy_env_name}."]
+        return preferred_env_value, "conflicting", warnings
+    if preferred_env_value and legacy_env_value:
+        warnings = [f"Deprecated env {legacy_env_name} is redundant because {preferred_env_name} is already set."]
+        return preferred_env_value, "mixed", warnings
+    if preferred_env_value:
+        return preferred_env_value, "preferred-only", []
+    if legacy_env_value:
+        return legacy_env_value, "legacy-only", [f"Deprecated env {legacy_env_name} is active; use {preferred_env_name} instead."]
+    return "", "default", []
+
+
 def request_json(
     session: requests.Session,
     method: str,
@@ -719,9 +755,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stream", action="store_true", default=True, help="Enable stream listener")
     parser.add_argument("--no-stream", action="store_true", help="Disable stream listener")
     parser.add_argument("--stream-wait-ms", type=int, default=1000, help="waitMs for stream endpoint")
-    parser.add_argument("--token", default="", help="Bearer token")
-    parser.add_argument("--signing-key", default="", help="Request signing key")
-    parser.add_argument("--encryption-key", default="", help="E2E encryption key for profile payload")
+    parser.add_argument("--auth-token", default="", help="Preferred bearer auth token")
+    parser.add_argument("--token", default="", help="Deprecated legacy alias for --auth-token")
+    parser.add_argument("--request-signing-key", default="", help="Preferred request signing key used for HMAC headers")
+    parser.add_argument("--signing-key", default="", help="Deprecated legacy alias for --request-signing-key")
+    parser.add_argument("--e2e-secret", default="", help="Preferred client-only E2E secret for payload envelopes")
+    parser.add_argument("--encryption-key", default="", help="Deprecated legacy alias for --e2e-secret")
     parser.add_argument("--env-file", default=str(Path(__file__).resolve().parents[1] / ".env"), help="Optional .env file")
     parser.add_argument("--output-json", default="", help="Optional output file path")
     return parser.parse_args()
@@ -731,17 +770,34 @@ def main() -> int:
     args = parse_args()
     env_values = load_env_file(Path(args.env_file)) if args.env_file else {}
 
-    token = args.token or env_values.get("SYNC_TOKEN", "") or os.getenv("SYNC_TOKEN", "")
-    signing_key = args.signing_key or env_values.get("SYNC_SIGNING_KEY", "") or os.getenv("SYNC_SIGNING_KEY", "")
-    encryption_key = (
-        args.encryption_key
-        or env_values.get("SYNC_ENCRYPTION_KEY", "")
-        or os.getenv("SYNC_ENCRYPTION_KEY", "")
-        or b64url_no_pad(os.urandom(48))
+    token, token_mode, token_warnings = resolve_input_value(
+        args.auth_token,
+        args.token,
+        "SYNC_AUTH_TOKEN",
+        "SYNC_TOKEN",
+        env_values,
     )
+    signing_key, signing_mode, signing_warnings = resolve_input_value(
+        args.request_signing_key,
+        args.signing_key,
+        "SYNC_REQUEST_SIGNING_KEY",
+        "SYNC_SIGNING_KEY",
+        env_values,
+    )
+    encryption_key, e2e_mode, e2e_warnings = resolve_input_value(
+        args.e2e_secret,
+        args.encryption_key,
+        "SYNC_E2E_SECRET",
+        "SYNC_ENCRYPTION_KEY",
+        env_values,
+    )
+    if not encryption_key:
+        encryption_key = b64url_no_pad(os.urandom(48))
+        if e2e_mode == "default":
+            e2e_mode = "generated"
 
     if not signing_key:
-        print("FATAL: signing key is required (SYNC_SIGNING_KEY / --signing-key).")
+        print("FATAL: signing key is required (SYNC_REQUEST_SIGNING_KEY/SYNC_SIGNING_KEY or --request-signing-key/--signing-key).")
         return 2
 
     base_url = args.base_url.rstrip("/")
@@ -757,9 +813,14 @@ def main() -> int:
     print(f"  clients       : {args.clients}")
     print(f"  push interval : {args.push_interval_ms}ms")
     print(f"  pull interval : {args.pull_interval_ms}ms")
+    print(f"  auth-mode     : {token_mode}")
+    print(f"  signing-mode  : {signing_mode}")
+    print(f"  e2e-mode      : {e2e_mode}")
     if args.mode == "elytra48":
         print(f"  elytra speed  : {args.elytra_speed_bps:.1f} blocks/sec")
     print(f"  stream        : {not args.no_stream and args.stream}")
+    for warning in [*token_warnings, *signing_warnings, *e2e_warnings]:
+        print(f"  deprecation   : {warning}")
 
     threads: list[threading.Thread] = []
     for i in range(max(1, args.clients)):

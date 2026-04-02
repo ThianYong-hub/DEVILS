@@ -25,6 +25,18 @@ SIGN_WINDOW_SEC_DEFAULT = 30
 NONCE_TTL_SEC_DEFAULT = 120
 NONCE_CACHE_MAX_DEFAULT = 200_000
 
+SYNC_AUTH_TOKEN_ENV_KEYS = ("SYNC_AUTH_TOKEN", "SYNC_TOKEN")
+SYNC_ADMIN_AUTH_TOKEN_ENV_KEYS = ("SYNC_ADMIN_AUTH_TOKEN", "SYNC_ADMIN_TOKEN")
+SYNC_REQUIRE_E2E_ENV_KEYS = ("SYNC_REQUIRE_E2E", "SYNC_REQUIRE_ENCRYPTED")
+SYNC_REQUIRE_REQUEST_SIGNING_ENV_KEYS = ("SYNC_REQUIRE_REQUEST_SIGNING", "SYNC_REQUIRE_SIGNED")
+SYNC_REQUEST_SIGNING_KEY_ENV_KEYS = ("SYNC_REQUEST_SIGNING_KEY", "SYNC_SIGNING_KEY")
+BACKEND_DEPRECATION_STATUS = "deprecated-but-supported"
+BACKEND_REMOVAL_PREREQUISITES = (
+    "preferred names are the documented default path",
+    "operators have had a compatibility window to migrate",
+    "admin diagnostics show no remaining legacy-only production setup",
+)
+
 MODULE_ALIASES = {
     "autologin": "auto-login",
     "auto_login": "auto-login",
@@ -51,6 +63,91 @@ NONCE_PATTERN = re.compile(r"^[a-fA-F0-9]{16,128}$")
 ENVELOPE_NONCE_BYTES = 12
 ENVELOPE_SALT_BYTES_MIN = 8
 ENVELOPE_MIN_CIPHERTEXT_BYTES = 16
+
+
+@dataclass(frozen=True)
+class ConfigAliasStatus:
+    label: str
+    preferred_key: str
+    legacy_keys: tuple[str, ...]
+    mode: str
+    active_source: str
+    legacy_sources_active: tuple[str, ...]
+    deprecated_alias_active: bool
+    conflicting: bool
+    configured: bool
+    effective_state: bool | None
+    warning: str
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "preferredKey": self.preferred_key,
+            "legacyKeys": list(self.legacy_keys),
+            "mode": self.mode,
+            "activeSource": self.active_source,
+            "legacySourcesActive": list(self.legacy_sources_active),
+            "deprecatedAliasActive": self.deprecated_alias_active,
+            "conflicting": self.conflicting,
+            "configured": self.configured,
+            "effectiveState": self.effective_state,
+        }
+
+
+@dataclass(frozen=True)
+class BackendConfigDiagnostics:
+    overall_mode: str
+    auth_token: ConfigAliasStatus
+    admin_auth_token: ConfigAliasStatus
+    request_signing_key: ConfigAliasStatus
+    require_request_signing: ConfigAliasStatus
+    require_e2e: ConfigAliasStatus
+    warnings: tuple[str, ...]
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "overallMode": self.overall_mode,
+            "deprecationStatus": BACKEND_DEPRECATION_STATUS,
+            "futureRemovalPrerequisites": list(BACKEND_REMOVAL_PREREQUISITES),
+            "warnings": list(self.warnings),
+            "authToken": self.auth_token.public_dict(),
+            "adminAuthToken": self.admin_auth_token.public_dict(),
+            "requestSigningKey": self.request_signing_key.public_dict(),
+            "requireRequestSigning": self.require_request_signing.public_dict(),
+            "requireE2E": self.require_e2e.public_dict(),
+            "activePolicy": {
+                "authEnabled": self.auth_token.configured,
+                "dedicatedAdminToken": self.admin_auth_token.configured,
+                "requestSigningEnabled": bool(self.require_request_signing.effective_state),
+                "e2eRequired": bool(self.require_e2e.effective_state),
+            },
+        }
+
+
+@dataclass(frozen=True)
+class SyncBackendRuntimeConfig:
+    host: str
+    port: int
+    state_file: Path
+    namespaces_dir: Path
+    sync_token: str
+    admin_token: str
+    require_encrypted_sync: bool
+    require_signed: bool
+    signing_key: str
+    sign_window_sec: int
+    nonce_ttl_sec: int
+    nonce_cache_max: int
+    tls_cert_file: str
+    tls_key_file: str
+    tls_min_version: str
+    allow_cors: bool
+    events_max: int
+    pull_wait_max_ms: int
+    max_body_bytes: int
+    log_push_success: bool
+    log_pull_success: bool
+    diagnostics: BackendConfigDiagnostics
 
 
 def now_ts() -> int:
@@ -83,6 +180,224 @@ def string_value(value: Any, fallback: str = "") -> str:
         return str(value)
     except Exception:
         return fallback
+
+
+def env_value(environ: dict[str, Any], keys: tuple[str, ...], fallback: str = "") -> str:
+    for key in keys:
+        value = string_value(environ.get(key)).strip()
+        if value:
+            return value
+    return fallback
+
+
+def env_bool(environ: dict[str, Any], keys: tuple[str, ...], fallback: bool) -> bool:
+    for key in keys:
+        if key in environ:
+            return bool_value(environ.get(key), fallback)
+    return fallback
+
+
+def env_int(environ: dict[str, Any], keys: tuple[str, ...], fallback: int) -> int:
+    for key in keys:
+        if key in environ:
+            return int_value(environ.get(key), fallback)
+    return fallback
+
+
+def _configured_env_value(environ: dict[str, Any], key: str) -> tuple[bool, str]:
+    if key not in environ:
+        return False, ""
+    value = string_value(environ.get(key)).strip()
+    if not value:
+        return False, ""
+    return True, value
+
+
+def build_alias_status(
+    environ: dict[str, Any],
+    label: str,
+    preferred_key: str,
+    legacy_keys: tuple[str, ...],
+    effective_value: str | bool | None,
+) -> ConfigAliasStatus:
+    preferred_present, preferred_value = _configured_env_value(environ, preferred_key)
+    legacy_sources_active = tuple(key for key in legacy_keys if _configured_env_value(environ, key)[0])
+    legacy_values = {key: _configured_env_value(environ, key)[1] for key in legacy_sources_active}
+
+    if preferred_present and legacy_sources_active:
+        conflicting = any(value != preferred_value for value in legacy_values.values())
+        mode = "conflict" if conflicting else "mixed"
+        active_source = preferred_key
+    elif preferred_present:
+        conflicting = False
+        mode = "preferred-only"
+        active_source = preferred_key
+    elif legacy_sources_active:
+        conflicting = False
+        mode = "legacy-only"
+        active_source = legacy_sources_active[0]
+    else:
+        conflicting = False
+        mode = "default"
+        active_source = ""
+
+    deprecated_alias_active = mode in {"legacy-only", "mixed", "conflict"}
+    configured = bool(effective_value) if isinstance(effective_value, bool) else bool(string_value(effective_value).strip())
+
+    if mode == "legacy-only":
+        legacy_label = ", ".join(legacy_sources_active)
+        warning = f"Deprecated backend alias {legacy_label} is active for {label}; use {preferred_key}."
+    elif mode == "mixed":
+        legacy_label = ", ".join(legacy_sources_active)
+        warning = f"Both {preferred_key} and deprecated alias {legacy_label} are set for {label}; {preferred_key} wins."
+    elif mode == "conflict":
+        legacy_label = ", ".join(legacy_sources_active)
+        warning = f"{preferred_key} and deprecated alias {legacy_label} contain different values for {label}; {preferred_key} wins."
+    else:
+        warning = ""
+
+    bool_state = effective_value if isinstance(effective_value, bool) else None
+    return ConfigAliasStatus(
+        label=label,
+        preferred_key=preferred_key,
+        legacy_keys=legacy_keys,
+        mode=mode,
+        active_source=active_source,
+        legacy_sources_active=legacy_sources_active,
+        deprecated_alias_active=deprecated_alias_active,
+        conflicting=conflicting,
+        configured=configured,
+        effective_state=bool_state,
+        warning=warning,
+    )
+
+
+def config_mode_for_statuses(statuses: tuple[ConfigAliasStatus, ...]) -> str:
+    active = [status for status in statuses if status.mode != "default"]
+    if any(status.mode == "conflict" for status in active):
+        return "conflicting"
+    if active and all(status.mode == "legacy-only" for status in active):
+        return "legacy-only"
+    if any(status.mode in {"legacy-only", "mixed"} for status in active):
+        return "mixed"
+    if active:
+        return "preferred-only"
+    return "default"
+
+
+def build_backend_config_diagnostics(
+    environ: dict[str, Any],
+    sync_token: str,
+    admin_token: str,
+    require_encrypted_sync: bool,
+    require_signed: bool,
+    signing_key: str,
+) -> BackendConfigDiagnostics:
+    auth_status = build_alias_status(environ, "auth-token", "SYNC_AUTH_TOKEN", ("SYNC_TOKEN",), sync_token)
+    admin_status = build_alias_status(environ, "admin-auth-token", "SYNC_ADMIN_AUTH_TOKEN", ("SYNC_ADMIN_TOKEN",), admin_token)
+    signing_key_status = build_alias_status(
+        environ,
+        "transport-signing-key",
+        "SYNC_REQUEST_SIGNING_KEY",
+        ("SYNC_SIGNING_KEY",),
+        signing_key,
+    )
+    require_signing_status = build_alias_status(
+        environ,
+        "require-request-signing",
+        "SYNC_REQUIRE_REQUEST_SIGNING",
+        ("SYNC_REQUIRE_SIGNED",),
+        require_signed,
+    )
+    require_e2e_status = build_alias_status(
+        environ,
+        "require-e2e",
+        "SYNC_REQUIRE_E2E",
+        ("SYNC_REQUIRE_ENCRYPTED",),
+        require_encrypted_sync,
+    )
+    statuses = (
+        auth_status,
+        admin_status,
+        signing_key_status,
+        require_signing_status,
+        require_e2e_status,
+    )
+    warnings = tuple(status.warning for status in statuses if status.warning)
+    return BackendConfigDiagnostics(
+        overall_mode=config_mode_for_statuses(statuses),
+        auth_token=auth_status,
+        admin_auth_token=admin_status,
+        request_signing_key=signing_key_status,
+        require_request_signing=require_signing_status,
+        require_e2e=require_e2e_status,
+        warnings=warnings,
+    )
+
+
+def resolve_runtime_config(environ: dict[str, Any] | None = None, script_path: Path | None = None) -> SyncBackendRuntimeConfig:
+    env = environ if environ is not None else os.environ
+
+    host = string_value(env.get('SYNC_HOST'), '127.0.0.1')
+    port = int_value(env.get('SYNC_PORT'), 7878)
+
+    script_file = script_path if script_path is not None else Path(__file__)
+    default_state_file = script_file.with_name('sync_state.json')
+    state_file = Path(string_value(env.get('SYNC_STATE_FILE'), str(default_state_file)))
+
+    default_modules_dir = state_file.parent / 'modules'
+    namespaces_dir = Path(string_value(env.get('SYNC_NAMESPACES_DIR'), str(default_modules_dir)))
+
+    sync_token = env_value(env, SYNC_AUTH_TOKEN_ENV_KEYS)
+    admin_token = env_value(env, SYNC_ADMIN_AUTH_TOKEN_ENV_KEYS)
+    require_encrypted_sync = env_bool(env, SYNC_REQUIRE_E2E_ENV_KEYS, True)
+    require_signed = env_bool(env, SYNC_REQUIRE_REQUEST_SIGNING_ENV_KEYS, True)
+    signing_key = env_value(env, SYNC_REQUEST_SIGNING_KEY_ENV_KEYS)
+    sign_window_sec = max(5, env_int(env, ('SYNC_SIGN_WINDOW_SEC',), SIGN_WINDOW_SEC_DEFAULT))
+    nonce_ttl_sec = max(sign_window_sec + 5, env_int(env, ('SYNC_NONCE_TTL_SEC',), NONCE_TTL_SEC_DEFAULT))
+    nonce_cache_max = max(1_000, env_int(env, ('SYNC_NONCE_CACHE_MAX',), NONCE_CACHE_MAX_DEFAULT))
+    tls_cert_file = string_value(env.get('SYNC_TLS_CERT_FILE'), '').strip()
+    tls_key_file = string_value(env.get('SYNC_TLS_KEY_FILE'), '').strip()
+    tls_min_version = string_value(env.get('SYNC_TLS_MIN_VERSION'), 'TLSv1_3').strip().upper()
+    allow_cors = bool_value(env.get('SYNC_ALLOW_CORS'), False)
+    events_max = max(100, int_value(env.get('SYNC_EVENTS_MAX'), EVENTS_MAX_DEFAULT))
+    pull_wait_max_ms = max(0, int_value(env.get('SYNC_PULL_WAIT_MAX_MS'), PULL_WAIT_MAX_MS_DEFAULT))
+    max_body_bytes = max(1_024, int_value(env.get('SYNC_MAX_BODY_BYTES'), MAX_BODY_BYTES_DEFAULT))
+    log_push_success = bool_value(env.get('SYNC_LOG_PUSH_SUCCESS'), False)
+    log_pull_success = bool_value(env.get('SYNC_LOG_PULL_SUCCESS'), False)
+    diagnostics = build_backend_config_diagnostics(
+        env,
+        sync_token,
+        admin_token,
+        require_encrypted_sync,
+        require_signed,
+        signing_key,
+    )
+
+    return SyncBackendRuntimeConfig(
+        host=host,
+        port=port,
+        state_file=state_file,
+        namespaces_dir=namespaces_dir,
+        sync_token=sync_token,
+        admin_token=admin_token,
+        require_encrypted_sync=require_encrypted_sync,
+        require_signed=require_signed,
+        signing_key=signing_key,
+        sign_window_sec=sign_window_sec,
+        nonce_ttl_sec=nonce_ttl_sec,
+        nonce_cache_max=nonce_cache_max,
+        tls_cert_file=tls_cert_file,
+        tls_key_file=tls_key_file,
+        tls_min_version=tls_min_version,
+        allow_cors=allow_cors,
+        events_max=events_max,
+        pull_wait_max_ms=pull_wait_max_ms,
+        max_body_bytes=max_body_bytes,
+        log_push_success=log_push_success,
+        log_pull_success=log_pull_success,
+        diagnostics=diagnostics,
+    )
 
 
 def normalize_mode(value: Any) -> str:
@@ -1393,6 +1708,16 @@ class SyncHandler(BaseHTTPRequestHandler):
             self._json(200, {'ok': True, 'serverTime': self._server_time(), 'clients': snap.get('clients', {})})
             return
 
+        if path == '/v1/admin/config':
+            if not self._require_auth(admin=True, body=b''):
+                return
+            diagnostics = getattr(self.server, 'config_diagnostics', None)
+            if diagnostics is None:
+                self._json(200, {'ok': True, 'serverTime': self._server_time(), 'config': {}})
+                return
+            self._json(200, {'ok': True, 'serverTime': self._server_time(), 'config': diagnostics.public_dict()})
+            return
+
         if path in ('/v1/sync/events', '/v1/core/sync/events', '/v1/games/sync/events'):
             if not self._require_auth(admin=False, body=b''):
                 return
@@ -1738,93 +2063,73 @@ class SyncHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    host = string_value(os.getenv('SYNC_HOST'), '127.0.0.1')
-    port = int_value(os.getenv('SYNC_PORT'), 7878)
+    config = resolve_runtime_config()
 
-    default_state_file = Path(__file__).with_name('sync_state.json')
-    state_file = Path(string_value(os.getenv('SYNC_STATE_FILE'), str(default_state_file)))
-
-    default_modules_dir = state_file.parent / 'modules'
-    namespaces_dir = Path(string_value(os.getenv('SYNC_NAMESPACES_DIR'), str(default_modules_dir)))
-
-    sync_token = string_value(os.getenv('SYNC_TOKEN'), '').strip()
-    admin_token = string_value(os.getenv('SYNC_ADMIN_TOKEN'), '').strip()
-    require_encrypted_sync = bool_value(os.getenv('SYNC_REQUIRE_ENCRYPTED'), True)
-    require_signed = bool_value(os.getenv('SYNC_REQUIRE_SIGNED'), True)
-    signing_key = string_value(os.getenv('SYNC_SIGNING_KEY'), '').strip()
-    sign_window_sec = max(5, int_value(os.getenv('SYNC_SIGN_WINDOW_SEC'), SIGN_WINDOW_SEC_DEFAULT))
-    nonce_ttl_sec = max(sign_window_sec + 5, int_value(os.getenv('SYNC_NONCE_TTL_SEC'), NONCE_TTL_SEC_DEFAULT))
-    nonce_cache_max = max(1_000, int_value(os.getenv('SYNC_NONCE_CACHE_MAX'), NONCE_CACHE_MAX_DEFAULT))
-    tls_cert_file = string_value(os.getenv('SYNC_TLS_CERT_FILE'), '').strip()
-    tls_key_file = string_value(os.getenv('SYNC_TLS_KEY_FILE'), '').strip()
-    tls_min_version = string_value(os.getenv('SYNC_TLS_MIN_VERSION'), 'TLSv1_3').strip().upper()
-    allow_cors = bool_value(os.getenv('SYNC_ALLOW_CORS'), False)
-    events_max = max(100, int_value(os.getenv('SYNC_EVENTS_MAX'), EVENTS_MAX_DEFAULT))
-    pull_wait_max_ms = max(0, int_value(os.getenv('SYNC_PULL_WAIT_MAX_MS'), PULL_WAIT_MAX_MS_DEFAULT))
-    max_body_bytes = max(1_024, int_value(os.getenv('SYNC_MAX_BODY_BYTES'), MAX_BODY_BYTES_DEFAULT))
-    log_push_success = bool_value(os.getenv('SYNC_LOG_PUSH_SUCCESS'), False)
-    log_pull_success = bool_value(os.getenv('SYNC_LOG_PULL_SUCCESS'), False)
-
-    if require_signed and not signing_key:
-        print('FATAL: SYNC_REQUIRE_SIGNED=true but SYNC_SIGNING_KEY is empty.')
+    if config.require_signed and not config.signing_key:
+        print('FATAL: request signing is enabled but no signing key was provided.')
+        print('       Use SYNC_REQUEST_SIGNING_KEY (preferred) or legacy SYNC_SIGNING_KEY.')
         raise SystemExit(2)
 
-    store = SyncStore(state_file, namespaces_dir, events_max)
+    store = SyncStore(config.state_file, config.namespaces_dir, config.events_max)
 
-    server = QuietThreadingHTTPServer((host, port), SyncHandler)
+    server = QuietThreadingHTTPServer((config.host, config.port), SyncHandler)
     server.sync_store = store  # type: ignore[attr-defined]
-    server.sync_token = sync_token  # type: ignore[attr-defined]
-    server.admin_token = admin_token  # type: ignore[attr-defined]
-    server.require_encrypted_sync = require_encrypted_sync  # type: ignore[attr-defined]
-    server.allow_cors = allow_cors  # type: ignore[attr-defined]
-    server.pull_wait_max_ms = pull_wait_max_ms  # type: ignore[attr-defined]
-    server.max_body_bytes = max_body_bytes  # type: ignore[attr-defined]
-    server.log_push_success = log_push_success  # type: ignore[attr-defined]
-    server.log_pull_success = log_pull_success  # type: ignore[attr-defined]
-    server.require_signed = require_signed  # type: ignore[attr-defined]
-    server.signing_key = signing_key  # type: ignore[attr-defined]
-    server.sign_window_sec = sign_window_sec  # type: ignore[attr-defined]
-    server.nonce_replay_guard = NonceReplayGuard(nonce_ttl_sec, nonce_cache_max)  # type: ignore[attr-defined]
+    server.sync_token = config.sync_token  # type: ignore[attr-defined]
+    server.admin_token = config.admin_token  # type: ignore[attr-defined]
+    server.require_encrypted_sync = config.require_encrypted_sync  # type: ignore[attr-defined]
+    server.allow_cors = config.allow_cors  # type: ignore[attr-defined]
+    server.pull_wait_max_ms = config.pull_wait_max_ms  # type: ignore[attr-defined]
+    server.max_body_bytes = config.max_body_bytes  # type: ignore[attr-defined]
+    server.log_push_success = config.log_push_success  # type: ignore[attr-defined]
+    server.log_pull_success = config.log_pull_success  # type: ignore[attr-defined]
+    server.require_signed = config.require_signed  # type: ignore[attr-defined]
+    server.signing_key = config.signing_key  # type: ignore[attr-defined]
+    server.sign_window_sec = config.sign_window_sec  # type: ignore[attr-defined]
+    server.nonce_replay_guard = NonceReplayGuard(config.nonce_ttl_sec, config.nonce_cache_max)  # type: ignore[attr-defined]
+    server.config_diagnostics = config.diagnostics  # type: ignore[attr-defined]
 
     listen_scheme = 'http'
-    if tls_cert_file or tls_key_file:
-        if not tls_cert_file or not tls_key_file:
+    if config.tls_cert_file or config.tls_key_file:
+        if not config.tls_cert_file or not config.tls_key_file:
             print('FATAL: both SYNC_TLS_CERT_FILE and SYNC_TLS_KEY_FILE are required for HTTPS.')
             raise SystemExit(2)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.options |= ssl.OP_NO_COMPRESSION
-        if tls_min_version == 'TLSV1_3':
+        if config.tls_min_version == 'TLSV1_3':
             context.minimum_version = ssl.TLSVersion.TLSv1_3
-        elif tls_min_version == 'TLSV1_2':
+        elif config.tls_min_version == 'TLSV1_2':
             context.minimum_version = ssl.TLSVersion.TLSv1_2
         else:
-            print(f'FATAL: unsupported SYNC_TLS_MIN_VERSION={tls_min_version} (expected TLSv1_2 or TLSv1_3).')
+            print(f'FATAL: unsupported SYNC_TLS_MIN_VERSION={config.tls_min_version} (expected TLSv1_2 or TLSv1_3).')
             raise SystemExit(2)
-        context.load_cert_chain(certfile=tls_cert_file, keyfile=tls_key_file)
+        context.load_cert_chain(certfile=config.tls_cert_file, keyfile=config.tls_key_file)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         listen_scheme = 'https'
 
     print('Devils sync hub backend started')
-    print(f'  listen         : {listen_scheme}://{host}:{port}')
-    print(f'  meta-state     : {state_file}')
-    print(f'  namespaces-dir : {namespaces_dir}')
-    print(f"  token          : {'enabled' if sync_token else 'disabled'}")
-    print(f"  admin-token    : {'enabled' if admin_token else 'disabled (fallback to user token)'}")
-    print(f'  require-e2e    : {require_encrypted_sync}')
-    print(f'  require-signed : {require_signed}')
-    print(f'  sign-window    : {sign_window_sec} sec')
-    print(f'  nonce-ttl      : {nonce_ttl_sec} sec')
-    print(f'  nonce-max      : {nonce_cache_max}')
+    print(f'  listen         : {listen_scheme}://{config.host}:{config.port}')
+    print(f'  meta-state     : {config.state_file}')
+    print(f'  namespaces-dir : {config.namespaces_dir}')
+    print(f"  auth-token     : {'enabled' if config.sync_token else 'disabled'}")
+    print(f"  admin-auth     : {'enabled' if config.admin_token else 'disabled (fallback to user token)'}")
+    print(f'  require-e2e    : {config.require_encrypted_sync}')
+    print(f'  require-signed : {config.require_signed}')
+    print(f'  sign-window    : {config.sign_window_sec} sec')
+    print(f'  nonce-ttl      : {config.nonce_ttl_sec} sec')
+    print(f'  nonce-max      : {config.nonce_cache_max}')
     if listen_scheme == 'https':
-        print(f'  tls-cert-file  : {tls_cert_file}')
-        print(f'  tls-key-file   : {tls_key_file}')
-        print(f'  tls-min-ver    : {tls_min_version}')
-    print(f'  allow-cors     : {allow_cors}')
-    print(f'  events-max     : {events_max}')
-    print(f'  pull-wait-max  : {pull_wait_max_ms} ms')
-    print(f'  max-body-bytes : {max_body_bytes}')
-    print(f'  log-pull-ok    : {log_pull_success}')
-    print(f'  log-push-2xx   : {log_push_success}')
+        print(f'  tls-cert-file  : {config.tls_cert_file}')
+        print(f'  tls-key-file   : {config.tls_key_file}')
+        print(f'  tls-min-ver    : {config.tls_min_version}')
+    print(f'  allow-cors     : {config.allow_cors}')
+    print(f'  events-max     : {config.events_max}')
+    print(f'  pull-wait-max  : {config.pull_wait_max_ms} ms')
+    print(f'  max-body-bytes : {config.max_body_bytes}')
+    print(f'  log-pull-ok    : {config.log_pull_success}')
+    print(f'  log-push-2xx   : {config.log_push_success}')
+    print(f'  config-mode    : {config.diagnostics.overall_mode}')
+    for warning in config.diagnostics.warnings:
+        print(f'  deprecation    : {warning}')
     print('  routes         : /pull, /push, /health')
     print('  api-v3         : /v1/client/start, /v1/sync/*, /v1/admin/*')
     print('  stream         : /stream, /v1/sync/stream')

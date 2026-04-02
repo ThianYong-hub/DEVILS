@@ -106,7 +106,7 @@ final class AutoLoginSyncDiagnostics {
         String normalized = safeError.toLowerCase(Locale.ROOT);
         if (isLikelyAuthError(normalized)) {
             backoffUntilMs = Math.max(backoffUntilMs, now + SYNC_AUTH_BACKOFF_MS);
-            logSync("AutoLogin sync hint: check token and request-signing-key (SYNC_TOKEN + SYNC_SIGNING_KEY on server).");
+            logSync("AutoLogin sync hint: check auth-token and transport-signing-key. If one is intentionally blank, the backend must allow anonymous/unsigned sync. Preferred envs: SYNC_AUTH_TOKEN and SYNC_REQUEST_SIGNING_KEY.");
             return;
         }
         if (isLikelyBaseUrlError(normalized)) {

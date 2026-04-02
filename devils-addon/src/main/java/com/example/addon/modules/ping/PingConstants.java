@@ -83,7 +83,7 @@ final class PingSyncProblemTracker {
         SyncErrorType type = classifySyncError(safeError);
         if (type == SyncErrorType.AUTH) {
             syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + PingConstants.SYNC_AUTH_BACKOFF_MS);
-            module.logSyncInternal("Ping sync hint: check token and request-signing-key (SYNC_TOKEN + SYNC_SIGNING_KEY on server).");
+            module.logSyncInternal("Ping sync hint: check auth-token and transport-signing-key. If one is intentionally blank, the backend must allow anonymous/unsigned sync. Preferred envs: SYNC_AUTH_TOKEN and SYNC_REQUEST_SIGNING_KEY.");
             return;
         }
         if (type == SyncErrorType.CONFIG) {
@@ -93,7 +93,7 @@ final class PingSyncProblemTracker {
         }
         if (type == SyncErrorType.CRYPTO) {
             syncBackoffUntilMs = Math.max(syncBackoffUntilMs, now + PingConstants.SYNC_CRYPTO_BACKOFF_MS);
-            module.logSyncInternal("Ping sync hint: encryption-key mismatch between clients.");
+            module.logSyncInternal("Ping sync hint: e2e-secret mismatch between clients.");
             return;
         }
         if (type == SyncErrorType.NETWORK) {

@@ -62,6 +62,124 @@ class ProjectConfigSuiteTest {
     }
 
     @Test
+    void sharedSyncConfigExposesClearPreferredNamesAndKeepsLegacyFallbacks() throws IOException {
+        String source = readRepoFile(
+            "devils-shared",
+            "src",
+            "main",
+            "java",
+            "com",
+            "example",
+            "addon",
+            "shared",
+            "sync",
+            "AbstractSyncConfigModule.java"
+        );
+
+        assertTrue(source.contains(".name(\"auth-token\")"));
+        assertTrue(source.contains(".name(\"transport-signing-key\")"));
+        assertTrue(source.contains(".name(\"e2e-secret\")"));
+        assertTrue(source.contains("inspectSyncConfig(boolean requireE2e, boolean allowUnsignedRequests)"));
+        assertTrue(source.contains("emitSyncConfigDiagnostics(String consumerName, SyncConfigDiagnostics.Audit audit)"));
+        assertTrue(source.contains("clearDuplicateLegacyValue("));
+        assertTrue(source.contains("refreshLegacyMigration()"));
+        assertTrue(source.contains("public NbtCompound toTag()"));
+        assertTrue(source.contains("public Module fromTag(NbtCompound tag)"));
+        assertTrue(source.contains(".name(\"token\")"));
+        assertTrue(source.contains(".name(\"request-signing-key\")"));
+        assertTrue(source.contains(".name(\"encryption-key\")"));
+        assertTrue(source.contains("firstNonBlank(authToken.get(), legacyToken.get())"));
+        assertTrue(source.contains("firstNonBlank(transportSigningKey.get(), legacyRequestSigningKey.get())"));
+        assertTrue(source.contains("firstNonBlank(e2eSecret.get(), legacyEncryptionKey.get())"));
+
+        String diagnosticsSource = readRepoFile(
+            "devils-shared",
+            "src",
+            "main",
+            "java",
+            "com",
+            "example",
+            "addon",
+            "shared",
+            "sync",
+            "SyncConfigDiagnostics.java"
+        );
+        assertTrue(diagnosticsSource.contains("class SyncConfigDiagnostics"));
+        assertTrue(diagnosticsSource.contains("sync-http-disabled"));
+        assertTrue(diagnosticsSource.contains("sync-auth-token-empty"));
+        assertTrue(diagnosticsSource.contains("sync-e2e-secret-empty"));
+        assertTrue(diagnosticsSource.contains("sync-config-legacy-mode"));
+        assertTrue(diagnosticsSource.contains("sync-config-conflicting-mode"));
+        assertTrue(diagnosticsSource.contains("enum Mode"));
+        assertTrue(diagnosticsSource.contains("overallMode("));
+    }
+
+    @Test
+    void syncDocsAndTemplatesPreferNewNamesAndDemoteLegacyToCompatibility() throws IOException {
+        String readme = readRepoFile("README.md");
+        String envExample = readRepoFile("SyncHub", ".env.example");
+        String backendSource = readRepoFile("SyncHub", "sync_backend.py");
+        String dockerCompose = readRepoFile("SyncHub", "docker-compose.yml");
+        String adminProbe = readRepoFile("SyncHub", "tests", "admin_config_runtime_probe.py");
+        String migrationRuntimeTest = readRepoFile(
+            "devils-addon",
+            "src",
+            "test",
+            "java",
+            "com",
+            "example",
+            "addon",
+            "shared",
+            "sync",
+            "SyncConfigMigrationRuntimeTest.java"
+        );
+
+        assertTrue(readme.contains("SYNC_AUTH_TOKEN"));
+        assertTrue(readme.contains("SYNC_REQUEST_SIGNING_KEY"));
+        assertTrue(readme.contains("SYNC_E2E_SECRET"));
+        assertTrue(readme.contains("Resolve order and migration behavior:"));
+        assertTrue(readme.contains("preferred names win over legacy aliases"));
+        assertTrue(readme.contains("If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers"));
+
+        assertTrue(envExample.contains("Required auth + transport signing"));
+        assertTrue(envExample.contains("Compatibility window only. Prefer the names above."));
+        assertTrue(envExample.contains("SYNC_ADMIN_AUTH_TOKEN"));
+        assertTrue(envExample.contains("SYNC_E2E_SECRET=replace_me"));
+
+        assertTrue(backendSource.contains("path == '/v1/admin/config'"));
+        assertTrue(backendSource.contains("config-mode"));
+        assertTrue(backendSource.contains("BACKEND_DEPRECATION_STATUS"));
+        assertTrue(dockerCompose.contains("SYNC_REQUIRE_REQUEST_SIGNING"));
+        assertFalse(dockerCompose.contains("SYNC_REQUIRE_SIGNED:"));
+        assertTrue(adminProbe.contains("ARTIFACT_DIR = REPO_ROOT / \"codex log\""));
+        assertTrue(adminProbe.contains("admin-config-runtime-probe.json"));
+        assertTrue(migrationRuntimeTest.contains("Path.of(\"..\", \"codex log\", \"sync-config-migration-runtime.json\")"));
+    }
+
+    @Test
+    void codexArtifactIndexListsCanonicalEvidenceSet() throws IOException {
+        String index = readRepoFile("codex log", "ARTIFACT_INDEX.md");
+
+        assertTrue(index.contains("codex log/CLAIM_VALIDATION_MATRIX.md"));
+        assertTrue(index.contains("codex log/CONFIG_MIGRATION_RUNTIME_REPORT.md"));
+        assertTrue(index.contains("codex log/ADMIN_CONFIG_RUNTIME_VALIDATION_REPORT.md"));
+        assertTrue(index.contains("codex log/LEGACY_REFERENCE_SWEEP_REPORT.md"));
+        assertTrue(index.contains("codex log/LEGACY_REMOVAL_READINESS_MATRIX.md"));
+        assertTrue(index.contains("codex log/SYNC_BACKEND_TEST_REPORT.md"));
+        assertTrue(index.contains("codex log/DEVILS_LIMITATIONS_AND_FOLLOWUPS.md"));
+        assertTrue(index.contains("codex log/FINAL_MIGRATION_ACCEPTANCE_TAIL_REPORT.md"));
+        assertTrue(index.contains("codex log/REGRESSION_SUMMARY.md"));
+        assertTrue(index.contains("codex log/SMOKE_TEST_OUTPUTS.md"));
+        assertTrue(index.contains("codex log/FINAL_EXECUTION_REPORT.md"));
+        assertTrue(index.contains("codex log/sync-config-migration-runtime.json"));
+        assertTrue(index.contains("codex log/admin-config-runtime-probe.json"));
+        assertTrue(index.contains("codex log/gradle-build-no-daemon.log"));
+        assertTrue(index.contains("codex log/python-unittest-sync-backend.log"));
+        assertTrue(index.contains("codex log/admin-config-runtime-probe.log"));
+        assertTrue(index.contains("codex log/git-diff-check.log"));
+    }
+
+    @Test
     void mixinConfigReferencesCurrentMixinEntryPoints() throws IOException {
         String mixinJson = readFile(Path.of("src", "main", "resources", "addon-template.mixins.json"));
 

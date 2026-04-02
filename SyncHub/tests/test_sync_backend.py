@@ -44,6 +44,7 @@ class BackendHarness:
         self.server.sign_window_sec = 30
         self.server.nonce_replay_guard = BACKEND.NonceReplayGuard(120, 10000)
         self.server.max_body_bytes = 1_048_576
+        self.server.config_diagnostics = BACKEND.build_backend_config_diagnostics({}, "", "", False, False, "")
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -85,6 +86,38 @@ class BackendHarness:
                 "X-Devils-Signature-Version": "v1",
             },
             method="POST",
+        )
+        with urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode("utf-8")
+            return resp.status, json.loads(raw)
+
+    def get_json(self, path: str, headers: dict | None = None):
+        req = Request(
+            self.base_url + path,
+            headers={"Accept": "application/json", **(headers or {})},
+            method="GET",
+        )
+        with urlopen(req, timeout=5) as resp:
+            raw = resp.read().decode("utf-8")
+            return resp.status, json.loads(raw)
+
+    def get_json_signed(self, path: str, signing_key: str, headers: dict | None = None):
+        ts = str(int(time.time()))
+        nonce = hashlib.sha256(f"{time.time_ns()}-{path}".encode("utf-8")).hexdigest()[:32]
+        body_hash = hashlib.sha256(b"").hexdigest()
+        canonical = "\n".join(["GET", path, ts, nonce, body_hash]).encode("utf-8")
+        signature = hmac.new(signing_key.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+        req = Request(
+            self.base_url + path,
+            headers={
+                "Accept": "application/json",
+                "X-Devils-Timestamp": ts,
+                "X-Devils-Nonce": nonce,
+                "X-Devils-Signature": signature,
+                "X-Devils-Signature-Version": "v1",
+                **(headers or {}),
+            },
+            method="GET",
         )
         with urlopen(req, timeout=5) as resp:
             raw = resp.read().decode("utf-8")
@@ -520,6 +553,150 @@ class TestSyncBackend(unittest.TestCase):
         self.assertEqual(1000, BACKEND.clamp_stream_wait_ms(5000, 1000))
         self.assertEqual(2500, BACKEND.clamp_stream_wait_ms(100, 25000))
         self.assertEqual(25000, BACKEND.clamp_stream_wait_ms(60000, 25000))
+
+    def test_runtime_config_prefers_clear_env_aliases(self):
+        cfg = BACKEND.resolve_runtime_config(
+            {
+                "SYNC_HOST": "0.0.0.0",
+                "SYNC_PORT": "8787",
+                "SYNC_AUTH_TOKEN": "preferred-auth",
+                "SYNC_TOKEN": "legacy-auth",
+                "SYNC_ADMIN_AUTH_TOKEN": "preferred-admin",
+                "SYNC_ADMIN_TOKEN": "legacy-admin",
+                "SYNC_REQUIRE_E2E": "false",
+                "SYNC_REQUIRE_ENCRYPTED": "true",
+                "SYNC_REQUIRE_REQUEST_SIGNING": "true",
+                "SYNC_REQUIRE_SIGNED": "false",
+                "SYNC_REQUEST_SIGNING_KEY": "preferred-signing",
+                "SYNC_SIGNING_KEY": "legacy-signing",
+            },
+            Path("SyncHub") / "sync_backend.py",
+        )
+
+        self.assertEqual("0.0.0.0", cfg.host)
+        self.assertEqual(8787, cfg.port)
+        self.assertEqual("preferred-auth", cfg.sync_token)
+        self.assertEqual("preferred-admin", cfg.admin_token)
+        self.assertFalse(cfg.require_encrypted_sync)
+        self.assertTrue(cfg.require_signed)
+        self.assertEqual("preferred-signing", cfg.signing_key)
+
+    def test_runtime_config_falls_back_to_legacy_env_names(self):
+        cfg = BACKEND.resolve_runtime_config(
+            {
+                "SYNC_TOKEN": "legacy-auth",
+                "SYNC_ADMIN_TOKEN": "legacy-admin",
+                "SYNC_REQUIRE_ENCRYPTED": "false",
+                "SYNC_REQUIRE_SIGNED": "false",
+                "SYNC_SIGNING_KEY": "legacy-signing",
+            },
+            Path("SyncHub") / "sync_backend.py",
+        )
+
+        self.assertEqual("legacy-auth", cfg.sync_token)
+        self.assertEqual("legacy-admin", cfg.admin_token)
+        self.assertFalse(cfg.require_encrypted_sync)
+        self.assertFalse(cfg.require_signed)
+        self.assertEqual("legacy-signing", cfg.signing_key)
+
+    def test_backend_config_diagnostics_detects_mixed_and_conflicting_modes(self):
+        diagnostics = BACKEND.build_backend_config_diagnostics(
+            {
+                "SYNC_AUTH_TOKEN": "preferred-auth",
+                "SYNC_TOKEN": "legacy-auth",
+                "SYNC_REQUEST_SIGNING_KEY": "preferred-signing",
+                "SYNC_SIGNING_KEY": "preferred-signing",
+                "SYNC_REQUIRE_REQUEST_SIGNING": "true",
+                "SYNC_REQUIRE_SIGNED": "true",
+                "SYNC_REQUIRE_E2E": "true",
+            },
+            "preferred-auth",
+            "",
+            True,
+            True,
+            "preferred-signing",
+        )
+
+        self.assertEqual("conflicting", diagnostics.overall_mode)
+        self.assertEqual("conflict", diagnostics.auth_token.mode)
+        self.assertEqual("mixed", diagnostics.request_signing_key.mode)
+        self.assertTrue(any("SYNC_TOKEN" in warning for warning in diagnostics.warnings))
+
+    def test_admin_config_endpoint_is_safe_and_does_not_leak_secret_values(self):
+        self.harness.server.admin_token = "admin-secret"
+        self.harness.server.config_diagnostics = BACKEND.build_backend_config_diagnostics(
+            {
+                "SYNC_TOKEN": "legacy-auth-value",
+                "SYNC_SIGNING_KEY": "legacy-signing-value",
+                "SYNC_REQUIRE_SIGNED": "true",
+            },
+            "legacy-auth-value",
+            "admin-secret",
+            True,
+            True,
+            "legacy-signing-value",
+        )
+
+        status, body = self.harness.get_json(
+            "/v1/admin/config",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        self.assertEqual(200, status)
+        self.assertTrue(body.get("ok"))
+        config = body.get("config", {})
+        encoded = json.dumps(config)
+        self.assertEqual("legacy-only", config.get("overallMode"))
+        self.assertNotIn("legacy-auth-value", encoded)
+        self.assertNotIn("legacy-signing-value", encoded)
+        self.assertIn("warnings", config)
+        self.assertEqual("SYNC_TOKEN", config.get("authToken", {}).get("activeSource"))
+
+    def test_admin_config_endpoint_requires_admin_auth(self):
+        self.harness.server.admin_token = "admin-secret"
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.get_json("/v1/admin/config")
+
+        self.assertEqual(401, ctx.exception.code)
+
+    def test_admin_config_endpoint_requires_signature_when_backend_requires_signed_requests(self):
+        self.harness.server.admin_token = "admin-secret"
+        self.harness.server.require_signed = True
+        self.harness.server.signing_key = "admin-signing-secret"
+        self.harness.server.config_diagnostics = BACKEND.build_backend_config_diagnostics(
+            {
+                "SYNC_AUTH_TOKEN": "auth-secret",
+                "SYNC_ADMIN_AUTH_TOKEN": "admin-secret",
+                "SYNC_REQUEST_SIGNING_KEY": "admin-signing-secret",
+                "SYNC_REQUIRE_REQUEST_SIGNING": "true",
+            },
+            "auth-secret",
+            "admin-secret",
+            False,
+            True,
+            "admin-signing-secret",
+        )
+
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.get_json(
+                "/v1/admin/config",
+                headers={"Authorization": "Bearer admin-secret"},
+            )
+
+        self.assertEqual(401, ctx.exception.code)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual("signature-headers-missing", body.get("error"))
+
+        status, signed_body = self.harness.get_json_signed(
+            "/v1/admin/config",
+            "admin-signing-secret",
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        self.assertEqual(200, status)
+        self.assertTrue(signed_body.get("ok"))
+        self.assertEqual("preferred-only", signed_body.get("config", {}).get("overallMode"))
 
 
 if __name__ == "__main__":

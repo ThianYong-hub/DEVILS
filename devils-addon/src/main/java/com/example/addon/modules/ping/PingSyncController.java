@@ -2,6 +2,7 @@ package com.example.addon.modules.ping;
 
 import com.example.addon.modules.Ping;
 import com.example.addon.modules.SyncHub;
+import com.example.addon.shared.sync.SyncConfigDiagnostics;
 import com.example.addon.shared.sync.SyncJsonUtils;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 
@@ -315,23 +316,23 @@ public final class PingSyncController {
         SyncHub syncHub = modules.get(SyncHub.class);
         if (syncHub == null || !syncHub.isFeatureEnabled(SyncHub.SyncFeature.PING)) return null;
 
-        String deviceId = syncHub.getOrCreateDeviceId();
-        if (deviceId.isBlank()) return null;
-        String encryptionKey = syncHub.getEncryptionKeyMaterial();
-        if (encryptionKey.isBlank()) return null;
-        String signingKey = syncHub.getRequestSigningKey();
-        if (signingKey.isBlank()) return null;
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("Ping", audit);
+        if (audit.hasErrors()) {
+            lastSyncStatus = audit.firstErrorCode();
+            return null;
+        }
 
         return new SyncRuntimeConfig(
-            syncHub.getBaseUrl(),
-            syncHub.getToken(),
-            deviceId,
+            audit.baseUrl(),
+            audit.authToken().resolvedValue(),
+            audit.deviceId(),
             true,
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(50, syncHub.streamWaitMs()),
-            encryptionKey,
-            signingKey
+            audit.e2eSecret().resolvedValue(),
+            audit.transportSigningKey().resolvedValue()
         );
     }
 }

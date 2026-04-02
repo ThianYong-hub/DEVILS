@@ -11,6 +11,7 @@ import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncPull;
 import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncPush;
 import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncResult;
 import com.example.addon.modules.chesttracker.ChestTrackerSupport.SyncRuntimeConfig;
+import com.example.addon.shared.sync.SyncConfigDiagnostics;
 import com.example.addon.shared.sync.SyncDomainRoutes;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
@@ -410,22 +411,19 @@ public class ChestTrackerModule extends Module {
         SyncHub syncHub = modules.get(SyncHub.class);
         if (syncHub == null || !syncHub.isFeatureEnabled(SyncHub.SyncFeature.CHEST_TRACKER)) return null;
 
-        String deviceId = syncHub.getOrCreateDeviceId();
-        if (deviceId.isBlank()) return null;
-        String encryptionKey = syncHub.getEncryptionKeyMaterial();
-        if (encryptionKey.isBlank()) return null;
-        String signingKey = syncHub.getRequestSigningKey();
-        if (signingKey.isBlank()) return null;
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("ChestTracker", audit);
+        if (audit.hasErrors()) return null;
 
         return new SyncRuntimeConfig(
-            syncHub.getBaseUrl(),
-            syncHub.getToken(),
-            deviceId,
+            audit.baseUrl(),
+            audit.authToken().resolvedValue(),
+            audit.deviceId(),
             syncHub.useStream(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(1_000, syncHub.streamWaitMs()),
-            encryptionKey,
-            signingKey
+            audit.e2eSecret().resolvedValue(),
+            audit.transportSigningKey().resolvedValue()
         );
     }
 

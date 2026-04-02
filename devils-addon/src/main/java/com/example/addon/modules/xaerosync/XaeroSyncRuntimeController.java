@@ -2,6 +2,7 @@ package com.example.addon.modules.xaerosync;
 
 import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.XaeroSync;
+import com.example.addon.shared.sync.SyncConfigDiagnostics;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 
 import java.util.List;
@@ -351,10 +352,11 @@ public final class XaeroSyncRuntimeController {
         SyncHub syncHub = modules.get(SyncHub.class);
         if (syncHub == null) return "sync-hub-missing";
         if (!syncHub.isFeatureEnabled(SyncHub.SyncFeature.XAERO_WORLD_MAP)) return "sync-hub-xaero-feature-disabled";
-        if (syncHub.getOrCreateDeviceId().isBlank()) return "sync-hub-device-id-empty";
-        if (syncHub.getEncryptionKeyMaterial().isBlank()) return "sync-hub-encryption-key-empty";
-        if (syncHub.getRequestSigningKey().isBlank()) return "sync-hub-signing-key-empty";
-        return "unknown";
+
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("XaeroSync", audit);
+        String errorCode = audit.firstErrorCode();
+        return errorCode.isBlank() ? "unknown" : errorCode;
     }
 
     private SyncRuntimeConfig resolveSyncRuntimeConfig() {
@@ -365,23 +367,23 @@ public final class XaeroSyncRuntimeController {
         if (syncHub == null) return null;
         if (!syncHub.isFeatureEnabled(SyncHub.SyncFeature.XAERO_WORLD_MAP)) return null;
 
-        String deviceId = syncHub.getOrCreateDeviceId();
-        if (deviceId.isBlank()) return null;
-        String encryptionKey = syncHub.getEncryptionKeyMaterial();
-        if (encryptionKey.isBlank()) return null;
-        String signingKey = syncHub.getRequestSigningKey();
-        if (signingKey.isBlank()) return null;
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("XaeroSync", audit);
+        if (audit.hasErrors()) {
+            lastSyncStatus = audit.firstErrorCode();
+            return null;
+        }
 
         return new SyncRuntimeConfig(
-            syncHub.getBaseUrl(),
-            syncHub.getToken(),
-            deviceId,
+            audit.baseUrl(),
+            audit.authToken().resolvedValue(),
+            audit.deviceId(),
             true,
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(50, syncHub.streamWaitMs()),
-            encryptionKey,
-            signingKey
+            audit.e2eSecret().resolvedValue(),
+            audit.transportSigningKey().resolvedValue()
         );
     }
 }

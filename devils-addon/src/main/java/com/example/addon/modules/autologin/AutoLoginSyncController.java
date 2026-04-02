@@ -6,6 +6,7 @@ import com.example.addon.modules.autologin.AutoLoginProfile.SyncProfileData;
 import com.example.addon.modules.autologin.AutoLoginProfile.SyncPullResult;
 import com.example.addon.modules.autologin.AutoLoginProfile.SyncPushResult;
 import com.example.addon.modules.autologin.AutoLoginProfile.SyncRuntimeConfig;
+import com.example.addon.shared.sync.SyncConfigDiagnostics;
 import com.example.addon.shared.sync.SyncJsonUtils;
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -325,23 +326,23 @@ public final class AutoLoginSyncController {
         SyncHub syncHub = modules.get(SyncHub.class);
         if (syncHub == null || !syncHub.isFeatureEnabled(SyncHub.SyncFeature.AUTO_LOGIN)) return null;
 
-        String deviceId = syncHub.getOrCreateDeviceId();
-        if (deviceId.isBlank()) return null;
-        String encryptionKey = syncHub.getEncryptionKeyMaterial();
-        if (encryptionKey.isBlank()) return null;
-        String signingKey = syncHub.getRequestSigningKey();
-        if (signingKey.isBlank()) return null;
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("AutoLogin", audit);
+        if (audit.hasErrors()) {
+            lastSyncStatus = audit.firstErrorCode();
+            return null;
+        }
 
         return new SyncRuntimeConfig(
-            syncHub.getBaseUrl(),
-            syncHub.getToken(),
-            deviceId,
+            audit.baseUrl(),
+            audit.authToken().resolvedValue(),
+            audit.deviceId(),
             syncHub.useStream(),
             syncHub.allowHttp(),
             Math.max(3, syncHub.requestTimeoutSec()),
             Math.max(1_000, syncHub.streamWaitMs()),
-            encryptionKey,
-            signingKey
+            audit.e2eSecret().resolvedValue(),
+            audit.transportSigningKey().resolvedValue()
         );
     }
 

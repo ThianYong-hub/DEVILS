@@ -16,6 +16,7 @@ import com.example.addon.games.MiniGamesContracts.SessionView;
 import com.example.addon.games.checkers.CheckersLogic;
 import com.example.addon.games.chess.ChessLogic;
 import com.example.addon.modules.games.GameSyncHub;
+import com.example.addon.shared.sync.SyncConfigDiagnostics;
 import com.example.addon.shared.sync.SyncJsonUtils;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -449,24 +450,35 @@ public final class MiniGamesSyncRuntime {
         if (modules == null) return null;
         GameSyncHub syncHub = modules.get(GameSyncHub.class);
         if (syncHub == null || !syncHub.isActive()) return null;
-        String deviceId = syncHub.getOrCreateDeviceId();
-        if (deviceId.isBlank()) return null;
-        String encryptionKey = syncHub.getEncryptionKeyMaterial();
-        if (encryptionKey.isBlank()) return null;
-        String signingKey = syncHub.getRequestSigningKey();
-        if (signingKey.isBlank()) return null;
-        String baseUrl = codec.normalizeSyncBaseUrl(syncHub.getBaseUrl());
-        if (baseUrl.isBlank()) return null;
+
+        SyncConfigDiagnostics.Audit audit = syncHub.inspectSyncConfig(true, true);
+        syncHub.emitSyncConfigDiagnostics("GameSync", audit);
+        if (audit.hasErrors()) {
+            lastStatus = audit.firstErrorCode();
+            return null;
+        }
+
+        String baseUrl = codec.normalizeSyncBaseUrl(audit.baseUrl());
+        if (baseUrl.isBlank()) {
+            lastStatus = "sync-base-url-empty";
+            return null;
+        }
         String baseError = codec.validateSyncBaseUrl(baseUrl);
-        if (baseError != null) return null;
-        if (!syncHub.allowHttp() && baseUrl.startsWith("http://")) return null;
+        if (baseError != null) {
+            lastStatus = "sync-base-url-invalid";
+            return null;
+        }
+        if (!syncHub.allowHttp() && baseUrl.startsWith("http://")) {
+            lastStatus = "sync-http-disabled";
+            return null;
+        }
         return new SyncRuntimeConfig(
             baseUrl,
-            syncHub.getToken(),
-            deviceId,
+            audit.authToken().resolvedValue(),
+            audit.deviceId(),
             Math.max(3, syncHub.requestTimeoutSec()),
-            encryptionKey,
-            signingKey
+            audit.e2eSecret().resolvedValue(),
+            audit.transportSigningKey().resolvedValue()
         );
     }
 }
