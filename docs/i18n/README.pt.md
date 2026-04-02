@@ -1,10 +1,10 @@
-# Devils Addon
+﻿# Devils Addon
 
 Addon para [Meteor Client](https://github.com/MeteorDevelopment/meteor-client): PvP, utilidade e automação avançada de highway no Nether.
 
 ## Download
 
-- Build atual (`v0.0.41`): [Baixar jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar)
+- Build atual (`v0.0.42`): [Baixar jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar)
 - Último release: [Abrir](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Todos os releases: [Abrir](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -54,3 +54,5 @@ Testes:
 ```bash
 ./gradlew test
 ```
+
+

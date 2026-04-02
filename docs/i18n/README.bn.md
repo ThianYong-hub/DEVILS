@@ -1,10 +1,10 @@
-# Devils Addon
+﻿# Devils Addon
 
 [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)-এর জন্য অ্যাডঅন: PvP, utility এবং Nether highway automation।
 
 ## ডাউনলোড
 
-- বর্তমান বিল্ড (`v0.0.41`): [jar ডাউনলোড](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar)
+- বর্তমান বিল্ড (`v0.0.42`): [jar ডাউনলোড](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar)
 - সর্বশেষ রিলিজ পেজ: [খুলুন](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - সব রিলিজ: [খুলুন](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -54,3 +54,5 @@ gradlew.bat build
 ```bash
 ./gradlew test
 ```
+
+

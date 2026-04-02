@@ -124,7 +124,7 @@ class TestSyncBackend(unittest.TestCase):
 
     def test_module_and_namespace_storage_are_isolated(self):
         status, push_ping = self.harness.post_json(
-            "/push",
+            "/v1/core/sync/push",
             {
                 "deviceId": "device-a",
                 "module": "ping",
@@ -145,7 +145,7 @@ class TestSyncBackend(unittest.TestCase):
         self.assertTrue(push_ping.get("ok"))
 
         status, push_ct = self.harness.post_json(
-            "/push",
+            "/v1/core/sync/push",
             {
                 "deviceId": "device-b",
                 "module": "chest-tracker",
@@ -166,13 +166,13 @@ class TestSyncBackend(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(push_ct.get("ok"))
 
-        ping_file = self.harness.modules_dir / "ping" / "ping.json"
-        ct_file = self.harness.modules_dir / "chest-tracker" / "2k2f.ru.json"
+        ping_file = self.harness.modules_dir / "core-sensitive" / "ping" / "ping.json"
+        ct_file = self.harness.modules_dir / "core-sensitive" / "chest-tracker" / "2k2f.ru.json"
         self.assertTrue(ping_file.exists(), "ping namespace file is missing")
         self.assertTrue(ct_file.exists(), "chest-tracker namespace file is missing")
 
         status, pull_ping = self.harness.post_json(
-            "/pull",
+            "/v1/core/sync/pull",
             {"deviceId": "device-a", "module": "ping", "knownRevision": -1},
         )
         self.assertEqual(200, status)
@@ -181,7 +181,7 @@ class TestSyncBackend(unittest.TestCase):
         self.assertEqual(1, len(pull_ping.get("profiles", [])))
 
         status, pull_ct = self.harness.post_json(
-            "/pull",
+            "/v1/core/sync/pull",
             {
                 "deviceId": "device-b",
                 "module": "chest-tracker",
@@ -193,6 +193,45 @@ class TestSyncBackend(unittest.TestCase):
         self.assertTrue(pull_ct.get("ok"))
         self.assertEqual("chest-tracker:2k2f.ru", pull_ct.get("namespace"))
         self.assertEqual(1, len(pull_ct.get("profiles", [])))
+
+    def test_game_routes_use_dedicated_storage_domain(self):
+        payload = {
+            "deviceId": "games-a",
+            "module": "mini-games",
+            "baseRevision": 0,
+            "profiles": [
+                {
+                    "enabled": True,
+                    "username": "games-a",
+                    "server": "2k2f.ru",
+                    "mode": "LOGIN",
+                    "password": "{\"v\":1,\"deviceId\":\"games-a\",\"name\":\"Games A\",\"server\":\"2k2f.ru\",\"lastSeen\":1}",
+                    "delay": 0,
+                }
+            ],
+        }
+
+        status, push = self.harness.post_json("/v1/games/sync/push", payload)
+        self.assertEqual(200, status)
+        self.assertTrue(push.get("ok"))
+
+        game_file = self.harness.modules_dir / "games" / "mini-games" / "mini-games.json"
+        self.assertTrue(game_file.exists(), "mini-games namespace file is missing")
+
+    def test_route_domain_mismatch_is_rejected(self):
+        with self.assertRaises(HTTPError) as ctx:
+            self.harness.post_json(
+                "/v1/games/sync/push",
+                {
+                    "deviceId": "ping-on-games-route",
+                    "module": "ping",
+                    "baseRevision": 0,
+                    "profiles": [],
+                },
+            )
+        self.assertEqual(400, ctx.exception.code)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertEqual("route-domain-mismatch", body.get("error"))
 
     def test_chest_tracker_empty_push_is_protected_by_default(self):
         status, first_push = self.harness.post_json(

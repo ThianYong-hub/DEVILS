@@ -40,15 +40,15 @@ jobs:
 
           echo "release_tag=${tag_value}" >> "${GITHUB_OUTPUT}"
 
-      - name: Set APP_VERSION From Tag
-        id: app_version
+      - name: Resolve Module Versions
+        id: module_versions
         shell: bash
         run: |
           set -euo pipefail
-          app_version="${{ steps.resolve_tag.outputs.release_tag }}"
-          app_version="${app_version#v}"
-          echo "APP_VERSION=${app_version}" >> "${GITHUB_ENV}"
-          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
+          addon_version="$(grep '^addon_version=' gradle.properties | cut -d= -f2)"
+          game_version="$(grep '^game_version=' gradle.properties | cut -d= -f2)"
+          echo "addon_version=${addon_version}" >> "${GITHUB_OUTPUT}"
+          echo "game_version=${game_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -68,24 +68,17 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
 
-      - name: Prepare release artifact name
-        id: prepare_asset
+      - name: Verify release artifacts
+        id: verify_assets
         shell: bash
         run: |
           set -euo pipefail
 
-          jar_path="$(find build/libs -maxdepth 1 -type f -name '*.jar' | head -n1)"
-          if [[ -z "${jar_path}" ]]; then
-            echo "::error::No .jar artifact found in build/libs."
-            exit 1
-          fi
+          addon_asset="build/libs/devils-addon-${{ steps.module_versions.outputs.addon_version }}.jar"
+          game_asset="build/libs/devils-game-${{ steps.module_versions.outputs.game_version }}.jar"
 
-          asset_path="build/libs/devils-addon-${{ steps.app_version.outputs.app_version }}.jar"
-          if [[ "${jar_path}" != "${asset_path}" ]]; then
-            cp "${jar_path}" "${asset_path}"
-          fi
-
-          echo "release_asset=${asset_path}" >> "${GITHUB_OUTPUT}"
+          test -f "${addon_asset}" || { echo "::error::Missing addon artifact ${addon_asset}"; exit 1; }
+          test -f "${game_asset}" || { echo "::error::Missing game artifact ${game_asset}"; exit 1; }
 
       - name: Generate release notes
         shell: bash
@@ -256,11 +249,11 @@ jobs:
           Path("RELEASE_NOTES.md").write_text("\n".join(lines), encoding="utf-8")
           PY
 
-      - name: Upload build artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-build-${{ steps.resolve_tag.outputs.release_tag }}
-          path: ${{ steps.prepare_asset.outputs.release_asset }}
+          path: build/libs/*.jar
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -271,7 +264,7 @@ jobs:
           draft: false
           prerelease: false
           body_path: RELEASE_NOTES.md
-          files: ${{ steps.prepare_asset.outputs.release_asset }}
+          files: build/libs/*.jar
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -292,14 +285,32 @@ jobs:
           import glob
           import os
           import re
+          import subprocess
           from pathlib import Path
 
           release_tag = os.environ["RELEASE_TAG"]
-          version = release_tag[1:]
-          new_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{version}.jar"
+          props_text = subprocess.check_output(
+              ["git", "show", f"{release_tag}:gradle.properties"],
+              text=True,
+              encoding="utf-8"
+          )
+
+          props = {}
+          for line in props_text.splitlines():
+            if "=" not in line or line.strip().startswith("#"):
+              continue
+            key, value = line.split("=", 1)
+          props[key.strip()] = value.strip()
+
+          addon_version = props["addon_version"]
+          game_version = props["game_version"]
+          version = addon_version
+          addon_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{addon_version}.jar"
+          game_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-game-{game_version}.jar"
 
           files = [Path("README.md")] + [Path(p) for p in glob.glob("docs/i18n/*.md")]
           url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-addon-\d+\.\d+\.\d+\.jar")
+          game_url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-game-\d+\.\d+\.\d+\.jar")
           ver_plain_re = re.compile(r"\(v\d+\.\d+\.\d+\)")
           ver_backtick_re = re.compile(r"\(`v\d+\.\d+\.\d+`\)")
 
@@ -307,9 +318,15 @@ jobs:
             if not file.exists():
               continue
             text = file.read_text(encoding="utf-8")
-            text = url_re.sub(new_url, text)
+            text = url_re.sub(addon_url, text)
+            text = game_url_re.sub(game_url, text)
             text = ver_backtick_re.sub(f"(`v{version}`)", text)
             text = ver_plain_re.sub(f"(v{version})", text)
+            if file.name == "README.md":
+              text = re.sub(r"Current addon build \(`\d+\.\d+\.\d+`\)", f"Current addon build (`{addon_version}`)", text)
+              text = re.sub(r"Current game build \(`\d+\.\d+\.\d+`\)", f"Current game build (`{game_version}`)", text)
+              text = re.sub(r"\| Addon Version \| `\d+\.\d+\.\d+` \|", f"| Addon Version | `{addon_version}` |", text)
+              text = re.sub(r"\| Game Version \| `\d+\.\d+\.\d+` \|", f"| Game Version | `{game_version}` |", text)
             file.write_text(text, encoding="utf-8")
           PY
 

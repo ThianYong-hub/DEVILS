@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "devils-game",
+  "version": "${version}",
+  "name": "Devils Game",
+  "description": "Standalone Devils mini-games addon for Meteor Client.",
+  "authors": [
+    "23XT",
+    "SOCKETLOST"
+  ],
+  "contact": {
+    "sources": "https://github.com/ThianYong-hub/DEVILS"
+  },
+  "environment": "client",
+  "entrypoints": {
+    "meteor": [
+      "com.example.addon.games.DevilsGameAddon"
+    ]
+  },
+  "custom": {
+    "meteor-client:color": "225,25,25"
+  },
+  "depends": {
+    "java": ">=21",
+    "minecraft": [
+      "${mc_version}"
+    ],
+    "meteor-client": "*"
+  }
+}

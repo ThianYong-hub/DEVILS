@@ -1,10 +1,10 @@
-# Devils Addon
+﻿# Devils Addon
 
 إضافة لـ [Meteor Client](https://github.com/MeteorDevelopment/meteor-client): PvP وأدوات مساعدة وأتمتة بناء الطرق في الـNether.
 
 ## التنزيل
 
-- الإصدار الحالي (`v0.0.41`): [تنزيل jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar)
+- الإصدار الحالي (`v0.0.42`): [تنزيل jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar)
 - أحدث إصدار: [فتح](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - جميع الإصدارات: [فتح](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -54,3 +54,5 @@ gradlew.bat build
 ```bash
 ./gradlew test
 ```
+
+

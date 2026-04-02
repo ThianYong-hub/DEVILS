@@ -13,13 +13,21 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current build (`v0.0.41`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar>
+- Current addon build (`0.0.42`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar>
+- Current game build (`0.0.2`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-game-0.0.2.jar>
+
+## Artifact Model
+
+- `devils-addon` is the main addon jar with combat, utility, world, SyncHub, AutoCraft, and Xaero integrations.
+- `devils-game` is a separate addon jar that contains checkers, chess, blackjack, slot machine, Doom, and dedicated game sync.
+- `devils-addon` and `devils-game` can be installed separately or together. Shared sync/config primitives live in an internal shared layer.
 
 ## Verified Runtime Matrix
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.41` |
+| Addon Version | `0.0.42` |
+| Game Version | `0.0.2` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
@@ -74,6 +82,18 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | `chest-tracker` | Integrated ChestTracker module with Devils theme, local storage and SyncHub sync. |
 | `mod-auto-updater` | One-click migration helper from `1.21.8` to `1.21.11` (Modrinth + GitHub lookups). |
 | `xaero-sync` | Internal runtime integration for Xaero World Map overlay and tracked players. Auto-started by `sync-hub`. |
+
+### Devils Game Companion Modules
+
+| Module | Description |
+| --- | --- |
+| `games` | Launcher module for the companion games pack. |
+| `chess-overlay` | Floating chess window with script and SyncHub play modes. |
+| `devils-game-overlay` | Floating checkers window with script and SyncHub play modes. |
+| `blackjack-overlay` | Blackjack overlay window and session runtime. |
+| `slot-machine` | Slot machine overlay with bundled assets. |
+| `russian-roulette` | Russian roulette overlay and death-sequence runtime. |
+| `devilsdoom-overlay` | Embedded Doom runtime with bundled Freedoom assets. |
 
 ## Commands
 
@@ -185,9 +205,10 @@ Optional report output:
 
 1. Install Minecraft + Fabric + Fabric API for `1.21.11`.
 2. Install Meteor Client for `1.21.11`.
-3. Download latest `devils-addon-*.jar` from releases.
-4. Put jar into `.minecraft/mods`.
-5. Launch game and open `Devils` category in Meteor.
+3. Download `devils-addon-*.jar` from releases.
+4. Optional: download `devils-game-*.jar` if you want the games companion pack.
+5. Put the selected jars into `.minecraft/mods`.
+6. Launch game and open `Devils` and, when installed, `Devils-Game` categories in Meteor.
 
 ## Build From Source
 
@@ -209,6 +230,18 @@ Run tests:
 ./gradlew test
 ```
 
+Build only the main addon:
+
+```bash
+./gradlew :devils-addon:build
+```
+
+Build only the game companion:
+
+```bash
+./gradlew :devils-game:build
+```
+
 ## Release Notes (`v0.0.41`)
 
 - shipped the new slot-driven `AutoCraft` with final-goal chain planning and live runtime validation
@@ -218,9 +251,11 @@ Run tests:
 
 ## Repository Structure
 
-- `src/main/java/com/example/addon/modules` - public module entrypoints.
-- `src/main/java/com/example/addon/modules/*` - feature-local logic (sync, render, planners, controllers).
-- `src/main/java/com/example/addon/util/xaerosync` - waypoint and tracked-player integration helpers.
+- `devils-addon/` - main addon sources, tests, fabric metadata, and embedded integration packaging.
+- `devils-game/` - companion games addon sources, assets, and fabric metadata.
+- `devils-addon/src/main/java/com/example/addon/modules` - public module entrypoints for the main addon.
+- `devils-game/src/main/java/com/example/addon/modules/games` - game overlays, sessions, windows, and launcher runtime.
+- `devils-addon/src/main/java/com/example/addon/util/xaerosync` - waypoint and tracked-player integration helpers.
 - `SyncHub/` - standalone sync backend (`sync_backend.py`, Docker files, tests).
 - `SyncHub/tests/sync_stress_tester.py` - load and propagation test harness.
 

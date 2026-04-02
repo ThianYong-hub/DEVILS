@@ -39,6 +39,9 @@ run/
 src/test/*
 !src/test/java/
 !src/test/java/**
+*/src/test/*
+!*/src/test/java/
+!*/src/test/java/**
 
 # local refs and root icons
 icon.png

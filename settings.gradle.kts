@@ -10,3 +10,7 @@ pluginManagement {
 }
 
 rootProject.name = "Devils-Addon"
+
+include("devils-addon")
+include("devils-game")
+include("devils-shared")

@@ -32,6 +32,12 @@ MODULE_ALIASES = {
     "chest_tracker": "chest-tracker",
 }
 
+CORE_SENSITIVE_MODULES = {"auto-login", "ping", "chest-tracker", "xaero-world-map"}
+GAME_MODULES = {"mini-games"}
+SYNC_DOMAIN_DEFAULT = "default"
+SYNC_DOMAIN_CORE = "core-sensitive"
+SYNC_DOMAIN_GAMES = "games"
+
 ENCRYPTED_PROFILE_USERNAME = "__devils_e2e__"
 ENCRYPTED_PROFILE_PASSWORD_PREFIXES = ("devils-e2e:v1:", "devils-e2e:v2:")
 ENCRYPTED_MODULES = {"auto-login", "ping", "chest-tracker", "xaero-world-map"}
@@ -97,6 +103,24 @@ def normalize_module(value: str) -> str:
     if not module:
         module = "default"
     return module
+
+
+def sync_domain_for_module(module: str) -> str:
+    normalized = normalize_module(module)
+    if normalized in CORE_SENSITIVE_MODULES:
+        return SYNC_DOMAIN_CORE
+    if normalized in GAME_MODULES:
+        return SYNC_DOMAIN_GAMES
+    return SYNC_DOMAIN_DEFAULT
+
+
+def sync_route_domain(path: str) -> str:
+    raw = string_value(path).strip().lower()
+    if raw.startswith("/v1/core/sync/"):
+        return SYNC_DOMAIN_CORE
+    if raw.startswith("/v1/games/sync/"):
+        return SYNC_DOMAIN_GAMES
+    return ""
 
 
 def split_namespace(raw_namespace: str) -> tuple[str, str, str]:
@@ -632,6 +656,11 @@ class SyncStore:
 
     def _namespace_file(self, namespace: str) -> tuple[str, str, Path]:
         canonical, module, local_key = split_namespace(namespace)
+        module_dir = self.namespaces_dir / slugify(sync_domain_for_module(module)) / slugify(module)
+        return canonical, module, module_dir / f"{slugify(local_key)}.json"
+
+    def _legacy_namespace_file(self, namespace: str) -> tuple[str, str, Path]:
+        canonical, module, local_key = split_namespace(namespace)
         module_dir = self.namespaces_dir / slugify(module)
         return canonical, module, module_dir / f"{slugify(local_key)}.json"
 
@@ -708,6 +737,15 @@ class SyncStore:
     def _load_ns(self, namespace: str) -> dict[str, Any] | None:
         canonical, _, file_path = self._namespace_file(namespace)
         if not file_path.exists():
+            _, _, legacy_file = self._legacy_namespace_file(namespace)
+            if legacy_file.exists():
+                try:
+                    raw = json.loads(legacy_file.read_text(encoding="utf-8"))
+                    if isinstance(raw, dict):
+                        self._save_json_atomic(file_path, self._normalize_ns(raw, canonical))
+                except Exception:
+                    pass
+        if not file_path.exists():
             return None
         try:
             raw = json.loads(file_path.read_text(encoding="utf-8"))
@@ -766,16 +804,17 @@ class SyncStore:
     def _namespace_names(self) -> list[str]:
         names = set(self.namespaces.keys())
         if self.namespaces_dir.exists():
-            for file_path in self.namespaces_dir.glob('*/*.json'):
-                try:
-                    raw = json.loads(file_path.read_text(encoding='utf-8'))
-                    if not isinstance(raw, dict):
+            for pattern in ('*/*/*.json', '*/*.json'):
+                for file_path in self.namespaces_dir.glob(pattern):
+                    try:
+                        raw = json.loads(file_path.read_text(encoding='utf-8'))
+                        if not isinstance(raw, dict):
+                            continue
+                        canonical, _, _ = split_namespace(string_value(raw.get('namespace'), ''))
+                        if canonical:
+                            names.add(canonical)
+                    except Exception:
                         continue
-                    canonical, _, _ = split_namespace(string_value(raw.get('namespace'), ''))
-                    if canonical:
-                        names.add(canonical)
-                except Exception:
-                    continue
         if 'default' not in names:
             names.add('default')
         return sorted(names)
@@ -784,21 +823,29 @@ class SyncStore:
         if not self.namespaces_dir.exists():
             return
 
-        for file_path in self.namespaces_dir.glob('*/*.json'):
-            try:
-                file_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            for suffix in ('.bak', '.tmp'):
+        for pattern in ('*/*/*.json', '*/*.json'):
+            for file_path in self.namespaces_dir.glob(pattern):
                 try:
-                    file_path.with_suffix(file_path.suffix + suffix).unlink(missing_ok=True)
+                    file_path.unlink(missing_ok=True)
                 except Exception:
                     pass
+                for suffix in ('.bak', '.tmp'):
+                    try:
+                        file_path.with_suffix(file_path.suffix + suffix).unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
-        for module_dir in self.namespaces_dir.glob('*'):
+        for module_dir in self.namespaces_dir.glob('*/*'):
             if module_dir.is_dir():
                 try:
                     module_dir.rmdir()
+                except Exception:
+                    pass
+
+        for top_dir in self.namespaces_dir.glob('*'):
+            if top_dir.is_dir():
+                try:
+                    top_dir.rmdir()
                 except Exception:
                     pass
 
@@ -1346,7 +1393,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             self._json(200, {'ok': True, 'serverTime': self._server_time(), 'clients': snap.get('clients', {})})
             return
 
-        if path == '/v1/sync/events':
+        if path in ('/v1/sync/events', '/v1/core/sync/events', '/v1/games/sync/events'):
             if not self._require_auth(admin=False, body=b''):
                 return
             query = self._query()
@@ -1358,7 +1405,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             return
 
 
-        if path in ('/stream', '/v1/sync/stream'):
+        if path in ('/stream', '/v1/sync/stream', '/v1/core/sync/stream', '/v1/games/sync/stream'):
             if not self._require_auth(admin=False, body=b''):
                 return
 
@@ -1382,6 +1429,23 @@ class SyncHandler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            route_domain = sync_route_domain(path)
+            if route_domain:
+                module_domain = sync_domain_for_module(module)
+                if module_domain != route_domain:
+                    self._json(
+                        400,
+                        {
+                            'ok': False,
+                            'error': 'route-domain-mismatch',
+                            'module': module,
+                            'namespace': namespace,
+                            'routeDomain': route_domain,
+                            'moduleDomain': module_domain,
+                            'serverTime': self._server_time(),
+                        },
+                    )
+                    return
 
             device_id = string_value(query.get('deviceId', ['unknown-device'])[0], 'unknown-device').strip() or 'unknown-device'
             known_revision = int_value(query.get('knownRevision', ['-1'])[0], -1)
@@ -1441,6 +1505,16 @@ class SyncHandler(BaseHTTPRequestHandler):
             return
         max_body_bytes = max(1_024, int_value(getattr(self.server, 'max_body_bytes', MAX_BODY_BYTES_DEFAULT), MAX_BODY_BYTES_DEFAULT))
         if content_length > max_body_bytes:
+            remaining = content_length
+            while remaining > 0:
+                chunk = min(65_536, remaining)
+                try:
+                    data = self.rfile.read(chunk)
+                except Exception:
+                    break
+                if not data:
+                    break
+                remaining -= len(data)
             self._json(
                 413,
                 {
@@ -1458,7 +1532,25 @@ class SyncHandler(BaseHTTPRequestHandler):
             return
         store = self._state()
 
-        if path in ('/pull', '/push', '/v1/client/start', '/v1/sync/pull', '/v1/sync/push', '/v1/sync/ack', '/v1/sync/events'):
+        if path in (
+            '/pull',
+            '/push',
+            '/v1/client/start',
+            '/v1/core/client/start',
+            '/v1/games/client/start',
+            '/v1/sync/pull',
+            '/v1/sync/push',
+            '/v1/sync/ack',
+            '/v1/sync/events',
+            '/v1/core/sync/pull',
+            '/v1/core/sync/push',
+            '/v1/core/sync/ack',
+            '/v1/core/sync/events',
+            '/v1/games/sync/pull',
+            '/v1/games/sync/push',
+            '/v1/games/sync/ack',
+            '/v1/games/sync/events',
+        ):
             if not self._require_auth(admin=False, body=raw_body):
                 return
         elif path.startswith('/v1/admin/'):
@@ -1482,10 +1574,27 @@ class SyncHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        route_domain = sync_route_domain(path)
+        if route_domain:
+            module_domain = sync_domain_for_module(module)
+            if module_domain != route_domain:
+                self._json(
+                    400,
+                    {
+                        'ok': False,
+                        'error': 'route-domain-mismatch',
+                        'module': module,
+                        'namespace': namespace,
+                        'routeDomain': route_domain,
+                        'moduleDomain': module_domain,
+                        'serverTime': self._server_time(),
+                    },
+                )
+                return
         ip = string_value(self.client_address[0], '')
         user_agent = string_value(self.headers.get('User-Agent'), '')
 
-        if path == '/v1/client/start':
+        if path in ('/v1/client/start', '/v1/core/client/start', '/v1/games/client/start'):
             result = store.start_client(device_id, namespace, module, ip, user_agent)
             self._json(
                 200,
@@ -1510,7 +1619,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if path in ('/pull', '/v1/sync/pull'):
+        if path in ('/pull', '/v1/sync/pull', '/v1/core/sync/pull', '/v1/games/sync/pull'):
             store.register_client(device_id, namespace, module, ip, user_agent)
             known_revision = int_value(payload.get('knownRevision'), int_value(payload.get('known_revision'), -1))
             wait_ms = int_value(payload.get('waitMs'), 0)
@@ -1533,7 +1642,7 @@ class SyncHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if path in ('/push', '/v1/sync/push'):
+        if path in ('/push', '/v1/sync/push', '/v1/core/sync/push', '/v1/games/sync/push'):
             store.register_client(device_id, namespace, module, ip, user_agent)
             base_revision = int_value(payload.get('baseRevision'), int_value(payload.get('base_revision'), -1))
             request_id = string_value(payload.get('requestId'), '').strip()
@@ -1570,14 +1679,14 @@ class SyncHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if path == '/v1/sync/ack':
+        if path in ('/v1/sync/ack', '/v1/core/sync/ack', '/v1/games/sync/ack'):
             revision = int_value(payload.get('revision'), -1)
             if revision >= 0:
                 store.ack(namespace, device_id, revision)
             self._json(200, {'ok': True, 'serverTime': self._server_time(), 'namespace': namespace, 'revision': revision})
             return
 
-        if path == '/v1/sync/events':
+        if path in ('/v1/sync/events', '/v1/core/sync/events', '/v1/games/sync/events'):
             since = int_value(payload.get('sinceEventId'), int_value(payload.get('since'), 0))
             limit = max(1, min(500, int_value(payload.get('limit'), 100)))
             events = store.events_since(namespace, since, limit)
@@ -1617,11 +1726,11 @@ class SyncHandler(BaseHTTPRequestHandler):
             return
         if ip in {'127.0.0.1', '::1', 'localhost'} and status_code is not None and 200 <= status_code < 300:
             return
-        if path in {'/push', '/v1/sync/push'}:
+        if path in {'/push', '/v1/sync/push', '/v1/core/sync/push', '/v1/games/sync/push'}:
             log_push_success = bool(getattr(self.server, 'log_push_success', False))
             if not log_push_success and status_code is not None and 200 <= status_code < 300:
                 return
-        if path in {'/pull', '/v1/sync/pull'}:
+        if path in {'/pull', '/v1/sync/pull', '/v1/core/sync/pull', '/v1/games/sync/pull'}:
             log_pull_success = bool(getattr(self.server, 'log_pull_success', False))
             if not log_pull_success and status_code is not None and 200 <= status_code < 300:
                 return

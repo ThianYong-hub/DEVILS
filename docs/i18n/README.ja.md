@@ -1,10 +1,10 @@
-# Devils Addon
+﻿# Devils Addon
 
 [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) 向けアドオン: PvP、ユーティリティ、ネザー高速道路の自動化。
 
 ## ダウンロード
 
-- 現在のビルド（`v0.0.15`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.41/devils-addon-0.0.41.jar)
+- 現在のビルド（`v0.0.42`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.42/devils-addon-0.0.42.jar)
 - 最新リリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - すべてのリリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases)
 
@@ -54,3 +54,5 @@ gradlew.bat build
 ```bash
 ./gradlew test
 ```
+
+
