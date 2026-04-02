@@ -52,13 +52,13 @@ class ProjectConfigSuiteTest {
         assertTrue(addonJson.contains("\"com.example.addon.AddonTemplate\""));
         assertTrue(addonJson.contains("\"addon-template.mixins.json\""));
         assertTrue(addonJson.contains("\"java\": \">=21\""));
-        assertFalse(addonJson.contains("\"icon\":"));
+        assertTrue(addonJson.contains("\"icon\": \"assets/devils-addon/icon.png\""));
 
         assertTrue(gameJson.contains("\"id\": \"devils-game\""));
         assertTrue(gameJson.contains("\"com.example.addon.games.DevilsGameAddon\""));
         assertTrue(gameJson.contains("\"meteor-client\": \"*\""));
         assertFalse(gameJson.contains("\"devils-addon\": \"*\""));
-        assertFalse(gameJson.contains("\"icon\":"));
+        assertTrue(gameJson.contains("\"icon\": \"assets/devils-game/icon.png\""));
     }
 
     @Test

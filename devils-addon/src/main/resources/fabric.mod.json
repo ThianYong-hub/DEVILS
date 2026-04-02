@@ -4,6 +4,7 @@
   "version": "${version}",
   "name": "Devils",
   "description": "Devils Addon for Meteor Client.",
+  "icon": "assets/devils-addon/icon.png",
   "authors": [
     "23XT",
     "SOCKETLOST"

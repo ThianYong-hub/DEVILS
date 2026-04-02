@@ -4,6 +4,7 @@
   "version": "${version}",
   "name": "Devils Game",
   "description": "Standalone Devils mini-games addon for Meteor Client.",
+  "icon": "assets/devils-game/icon.png",
   "authors": [
     "23XT",
     "SOCKETLOST"
