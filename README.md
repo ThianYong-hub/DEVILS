@@ -386,4 +386,4 @@ Build only the game companion:
 
 ## License
 
-Project license: [CC0](LICENSE).
+Project license: [GPL-3.0](LICENSE).
