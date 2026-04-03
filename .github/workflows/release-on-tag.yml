@@ -306,7 +306,7 @@ jobs:
             if "=" not in line or line.strip().startswith("#"):
               continue
             key, value = line.split("=", 1)
-          props[key.strip()] = value.strip()
+            props[key.strip()] = value.strip()
 
           addon_version = props["addon_version"]
           game_version = props["game_version"]
