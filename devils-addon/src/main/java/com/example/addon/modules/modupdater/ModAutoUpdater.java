@@ -144,7 +144,7 @@ public class ModAutoUpdater extends Module {
         super(
             AddonTemplate.CATEGORY,
             "mod-auto-updater",
-            "One-click migration helper from 1.21.8 to 1.21.11. Supports Modrinth + GitHub release updates."
+            "One-click migration helper for 1.21.11 updates. Supports Modrinth + GitHub release updates."
         );
         runInMainMenu = true;
         autoSubscribe = false;

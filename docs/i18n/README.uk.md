@@ -1,19 +1,19 @@
-﻿# Devils Addon
+# Devils Addon
 
 Аддон для [Meteor Client](https://github.com/MeteorDevelopment/meteor-client): PvP, utility та автоматизація побудови магістралей у Незері.
 
 ## Завантажити
 
-- Поточна збірка (`v0.0.42`): [Завантажити jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar)
+- Поточна збірка (`v0.0.44`): [Завантажити jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar)
 - Останній реліз: [Відкрити](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - Усі релізи: [Відкрити](https://github.com/ThianYong-hub/DEVILS/releases)
 
 ## Вимоги
 
-- Minecraft `1.21.8`
+- Minecraft `1.21.11`
 - Fabric Loader `0.16.14+`
 - Java `21`
-- Meteor Client для `1.21.8`
+- Meteor Client для `1.21.11`
 
 ## Встановлення
 

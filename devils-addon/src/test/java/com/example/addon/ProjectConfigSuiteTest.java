@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -158,7 +159,9 @@ class ProjectConfigSuiteTest {
 
     @Test
     void codexArtifactIndexListsCanonicalEvidenceSet() throws IOException {
-        String index = readRepoFile("codex log", "ARTIFACT_INDEX.md");
+        Path indexPath = Path.of("..", "codex log", "ARTIFACT_INDEX.md").normalize();
+        assumeTrue(Files.exists(indexPath), "Optional local artifact index is absent in a clean checkout.");
+        String index = Files.readString(indexPath);
 
         assertTrue(index.contains("codex log/CLAIM_VALIDATION_MATRIX.md"));
         assertTrue(index.contains("codex log/CONFIG_MIGRATION_RUNTIME_REPORT.md"));
@@ -238,11 +241,14 @@ class ProjectConfigSuiteTest {
         assertFalse(releaseOnTag.contains("push:"));
         assertTrue(releaseOnTag.contains("ref: ${{ inputs.tag }}"));
         assertTrue(releaseOnTag.contains("id: module_versions"));
+        assertTrue(releaseOnTag.contains("id: verify_assets"));
+        assertTrue(releaseOnTag.contains("addon_asset=${addon_asset}"));
+        assertTrue(releaseOnTag.contains("game_asset=${game_asset}"));
         assertTrue(releaseOnTag.contains("Generate release notes"));
         assertTrue(releaseOnTag.contains("softprops/action-gh-release@v2"));
         assertTrue(releaseOnTag.contains("body_path: RELEASE_NOTES.md"));
-        assertTrue(releaseOnTag.contains("build/libs/*.jar"));
-        assertTrue(releaseOnTag.contains("devils-game-"));
+        assertTrue(releaseOnTag.contains("steps.verify_assets.outputs.addon_asset"));
+        assertTrue(releaseOnTag.contains("steps.verify_assets.outputs.game_asset"));
 
         assertTrue(manualTag.contains("name: Manual Release Tag"));
         assertTrue(manualTag.contains("workflow_dispatch"));

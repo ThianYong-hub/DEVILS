@@ -1,19 +1,19 @@
-﻿# Devils Addon
+# Devils Addon
 
 Addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client): PvP, utility, plus advanced Nether highway automation.
 
 ## Download
 
-- Current build (`v0.0.42`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar)
+- Current build (`v0.0.44`): [Download jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar)
 - Latest release page: [Open](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - All releases: [Open](https://github.com/ThianYong-hub/DEVILS/releases)
 
 ## Wetin you need
 
-- Minecraft `1.21.8`
+- Minecraft `1.21.11`
 - Fabric Loader `0.16.14+`
 - Java `21`
-- Meteor Client for `1.21.8`
+- Meteor Client for `1.21.11`
 
 ## How to install
 

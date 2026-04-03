@@ -79,6 +79,8 @@ jobs:
 
           test -f "${addon_asset}" || { echo "::error::Missing addon artifact ${addon_asset}"; exit 1; }
           test -f "${game_asset}" || { echo "::error::Missing game artifact ${game_asset}"; exit 1; }
+          echo "addon_asset=${addon_asset}" >> "${GITHUB_OUTPUT}"
+          echo "game_asset=${game_asset}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate release notes
         shell: bash
@@ -253,7 +255,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-build-${{ steps.resolve_tag.outputs.release_tag }}
-          path: build/libs/*.jar
+          path: |
+            ${{ steps.verify_assets.outputs.addon_asset }}
+            ${{ steps.verify_assets.outputs.game_asset }}
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -264,7 +268,9 @@ jobs:
           draft: false
           prerelease: false
           body_path: RELEASE_NOTES.md
-          files: build/libs/*.jar
+          files: |
+            ${{ steps.verify_assets.outputs.addon_asset }}
+            ${{ steps.verify_assets.outputs.game_asset }}
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

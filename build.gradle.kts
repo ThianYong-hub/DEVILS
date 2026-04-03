@@ -5,16 +5,19 @@ plugins {
 group = properties["maven_group"] as String
 version = properties["addon_version"] as String
 
+val addonVersion = properties["addon_version"] as String
+val gameVersion = properties["game_version"] as String
+
 val collectReleaseArtifacts by tasks.registering(Sync::class) {
     dependsOn(":devils-addon:build", ":devils-game:build")
     into(layout.buildDirectory.dir("libs"))
 
     from(project(":devils-addon").layout.buildDirectory.dir("libs")) {
-        include("devils-addon-*.jar")
+        include("devils-addon-$addonVersion.jar")
     }
 
     from(project(":devils-game").layout.buildDirectory.dir("libs")) {
-        include("devils-game-*.jar")
+        include("devils-game-$gameVersion.jar")
     }
 }
 

@@ -1,19 +1,19 @@
-﻿# Devils Addon
+# Devils Addon
 
 [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) 向けアドオン: PvP、ユーティリティ、ネザー高速道路の自動化。
 
 ## ダウンロード
 
-- 現在のビルド（`v0.0.42`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar)
+- 現在のビルド（`v0.0.44`）: [jar をダウンロード](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar)
 - 最新リリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - すべてのリリース: [開く](https://github.com/ThianYong-hub/DEVILS/releases)
 
 ## 要件
 
-- Minecraft `1.21.8`
+- Minecraft `1.21.11`
 - Fabric Loader `0.16.14+`
 - Java `21`
-- `1.21.8` 向け Meteor Client
+- `1.21.11` 向け Meteor Client
 
 ## インストール
 

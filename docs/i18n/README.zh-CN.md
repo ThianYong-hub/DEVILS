@@ -1,19 +1,19 @@
-﻿# Devils Addon
+# Devils Addon
 
 适用于 [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) 的附加模组：PvP、实用功能与地狱高速自动化。
 
 ## 下载
 
-- 当前构建（`v0.0.42`）：[下载 jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar)
+- 当前构建（`v0.0.44`）：[下载 jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar)
 - 最新发布页：[打开](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - 全部发布：[打开](https://github.com/ThianYong-hub/DEVILS/releases)
 
 ## 需求
 
-- Minecraft `1.21.8`
+- Minecraft `1.21.11`
 - Fabric Loader `0.16.14+`
 - Java `21`
-- 适配 `1.21.8` 的 Meteor Client
+- 适配 `1.21.11` 的 Meteor Client
 
 ## 安装
 

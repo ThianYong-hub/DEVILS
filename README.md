@@ -13,8 +13,8 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.43`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-addon-0.0.43.jar>
-- Current game build (`0.0.2`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.43/devils-game-0.0.2.jar>
+- Current addon build (`0.0.44`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar>
+- Current game build (`0.0.3`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-game-0.0.3.jar>
 
 ## Artifact Model
 
@@ -26,8 +26,8 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.43` |
-| Game Version | `0.0.2` |
+| Addon Version | `0.0.44` |
+| Game Version | `0.0.3` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
@@ -80,7 +80,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | --- | --- |
 | `sync-hub` | Shared sync settings for `auto-login`, `ping`, `chest-tracker`, `xaero-world-map`. |
 | `chest-tracker` | Integrated ChestTracker module with Devils theme, local storage and SyncHub sync. |
-| `mod-auto-updater` | One-click migration helper from `1.21.8` to `1.21.11` (Modrinth + GitHub lookups). |
+| `mod-auto-updater` | One-click migration helper for `1.21.11` updates (Modrinth + GitHub lookups). |
 | `xaero-sync` | Internal runtime integration for Xaero World Map overlay and tracked players. Auto-started by `sync-hub`. |
 
 ### Devils Game Companion Modules
@@ -359,11 +359,11 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.43`)
+## Release Notes (`v0.0.44`)
 
-- reverted `ServerIntel` integration completely (no leftover module registration or runtime references)
-- stabilized SyncHub migration and diagnostics test flow in the current codebase
-- added/updated backend docs for regular users: quick start, docker deployment, and client config checklist
+- switched the project license from `CC0-1.0` to `GPL-3.0`
+- removed stale local `1.21.8` jars and cleaned rebuildable workspace artifacts
+- fixed clean-checkout test stability by making optional local `codex log` evidence non-blocking
 - kept release packaging for both artifacts: `devils-addon` and `devils-game`
 
 ## Repository Structure
