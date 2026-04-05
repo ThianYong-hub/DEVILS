@@ -40,6 +40,28 @@ val sourceNativeModuleDirs = listOf(
 val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
+val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
+val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
+val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
+val relocatedMixinConfigs = setOf(
+    "addon-template.mixins.json",
+    "chesttracker.mixins.json",
+    "whereisit.mixins.json",
+    "searchables.mixins.json",
+    "searchables.fabric.mixins.json",
+    "yacl.mixins.json",
+    "yacl-fabric.mixins.json",
+    "xaerolib.mixins.json",
+    "xaerolib.fabric.mixins.json",
+    "xaerohud.mixins.json",
+    "xaerohud.fabric.mixins.json",
+    "xaerominimap.mixins.json",
+    "xaerominimap.fabric.mixins.json",
+    "xaeroworldmap.mixins.json",
+    "xaeroworldmap.fabric.mixins.json",
+    "xaeroplus.mixins.json",
+    "xaeroplus-fabric.mixins.json"
+)
 val sourceNativeJavaDirs = listOf(
     file("src/main/thirdparty-audio/java"),
     sourceNativePatchJavaDir
@@ -63,6 +85,8 @@ val sourceNativeResourceExcludes = arrayOf(
     "LICENSE*",
     "NOTICE*",
     "COPYING*",
+    "icon.png",
+    "yacl-128x.png",
     "pack.mcmeta",
     "architectury_inject_*",
     "architectury_inject_*/**"
@@ -85,6 +109,7 @@ val sourceNativeJavaExcludes = arrayOf(
     "xaero/lib/common/compat/ftbranks/**",
     "xaero/lib/common/compat/luckperms/**",
     "xaero/lib/common/compat/permissionapi/**",
+    "architectury_inject_*/**",
 )
 val sharedMainOutput = project(":devils-shared")
     .extensions
@@ -390,6 +415,18 @@ tasks {
 
         from(generatedThirdPartyNoticeDir)
 
+        filesMatching(relocatedMixinConfigs.toList()) {
+            path = "$mergedMixinResourceDir/$name"
+        }
+
+        filesMatching("devils-addon.assimilated.accesswidener") {
+            path = assimilatedAccessWidenerJarPath
+        }
+
+        filesMatching("sqlite-jdbc.properties") {
+            path = sqliteJdbcResourceJarPath
+        }
+
         filesMatching("fabric.mod.json") {
             expand(propertyMap)
         }
@@ -405,7 +442,8 @@ tasks {
         from(sharedMainOutput)
 
         from(rootProject.file("LICENSE")) {
-            rename { "LICENSE" }
+            into("META-INF/licenses")
+            rename { "DEVILS-ADDON_LICENSE.txt" }
         }
     }
 

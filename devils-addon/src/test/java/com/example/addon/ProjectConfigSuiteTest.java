@@ -53,9 +53,10 @@ class ProjectConfigSuiteTest {
 
         assertTrue(addonJson.contains("\"id\": \"devils-addon\""));
         assertTrue(addonJson.contains("\"com.example.addon.AddonTemplate\""));
-        assertTrue(addonJson.contains("\"addon-template.mixins.json\""));
+        assertTrue(addonJson.contains("\"META-INF/devils-addon/mixins/addon-template.mixins.json\""));
         assertTrue(addonJson.contains("\"java\": \">=21\""));
         assertTrue(addonJson.contains("\"icon\": \"assets/devils-addon/icon.png\""));
+        assertTrue(addonJson.contains("\"accessWidener\": \"META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener\""));
 
         assertTrue(gameJson.contains("\"id\": \"devils-game\""));
         assertTrue(gameJson.contains("\"com.example.addon.games.DevilsGameAddon\""));
@@ -167,7 +168,7 @@ class ProjectConfigSuiteTest {
         assertTrue(Files.exists(indexPath), "codex log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
         String index = Files.readString(indexPath);
 
-        assertTrue(index.contains("FINAL_DEEP_INTERACTION_REGRESSION_REPORT.md"));
+        assertTrue(index.contains("FINAL_JAR_STRUCTURE_HYGIENE_REPORT.md"));
         assertTrue(index.contains("FINAL_EXECUTION_REPORT.md"));
         assertTrue(index.contains("FINAL_ACCEPTANCE_STATUS.md"));
         assertTrue(index.contains("FINAL_VALIDATION_REPORT.md"));
@@ -200,7 +201,7 @@ class ProjectConfigSuiteTest {
             "FINAL_ACCEPTANCE_STATUS.md",
             "FINAL_VALIDATION_REPORT.md",
             "FINAL_LIMITATIONS_AND_NEXT_STEP.md",
-            "FINAL_DEEP_INTERACTION_REGRESSION_REPORT.md",
+            "FINAL_JAR_STRUCTURE_HYGIENE_REPORT.md",
             "FINAL_JAR_CONTENT_AUDIT.md",
             "FUNCTIONAL_PARITY_ACCEPTANCE_MATRIX.md",
             "runtime-smoke.log"
