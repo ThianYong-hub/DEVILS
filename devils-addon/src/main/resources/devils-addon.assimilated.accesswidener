@@ -1,0 +1,23 @@
+accessWidener v2 named
+
+accessible class net/minecraft/network/packet/c2s/play/PlayerInteractEntityC2SPacket$InteractType
+accessible method net/minecraft/client/gui/widget/TabNavigationWidget getCurrentTabIndex ()I
+accessible field net/minecraft/client/gui/screen/ingame/HandledScreen focusedSlot Lnet/minecraft/screen/slot/Slot;
+accessible field net/minecraft/client/gui/screen/recipebook/RecipeBookWidget ghostRecipe Lnet/minecraft/client/gui/screen/recipebook/GhostRecipe;
+accessible field net/minecraft/client/gui/screen/recipebook/GhostRecipe items Lit/unimi/dsi/fastutil/objects/Reference2ObjectMap;
+accessible class net/minecraft/client/gui/screen/recipebook/GhostRecipe$CyclingItem
+accessible field net/minecraft/client/gui/screen/ingame/HandledScreen x I
+accessible field net/minecraft/client/gui/screen/ingame/HandledScreen y I
+accessible method net/minecraft/enchantment/EnchantmentHelper getEnchantmentsComponentType (Lnet/minecraft/item/ItemStack;)Lnet/minecraft/component/ComponentType;
+accessible field net/minecraft/client/gui/screen/ingame/CreativeInventoryScreen searchBox Lnet/minecraft/client/gui/widget/TextFieldWidget;
+accessible field net/minecraft/client/gui/screen/ingame/AnvilScreen nameField Lnet/minecraft/client/gui/widget/TextFieldWidget;
+accessible field net/minecraft/client/gui/screen/ingame/RecipeBookScreen recipeBook Lnet/minecraft/client/gui/screen/recipebook/RecipeBookWidget;
+accessible field net/minecraft/client/gui/screen/recipebook/RecipeBookWidget searchField Lnet/minecraft/client/gui/widget/TextFieldWidget;
+accessible class net/minecraft/world/chunk/PalettedContainer$Data
+accessible field net/minecraft/world/chunk/PalettedContainer data Lnet/minecraft/world/chunk/PalettedContainer$Data;
+accessible field net/minecraft/client/option/GameOptions serverViewDistance I
+accessible field net/minecraft/client/render/WorldRenderer chunks Lnet/minecraft/client/render/BuiltChunkStorage;
+transitive-accessible field net/minecraft/client/gl/RenderPipelines TRANSFORMS_AND_PROJECTION_SNIPPET Lcom/mojang/blaze3d/pipeline/RenderPipeline$Snippet;
+transitive-accessible field net/minecraft/client/MinecraftClient framebuffer Lnet/minecraft/client/gl/Framebuffer;
+transitive-mutable field net/minecraft/client/MinecraftClient framebuffer Lnet/minecraft/client/gl/Framebuffer;
+accessible field net/minecraft/client/world/ClientWorld entityManager Lnet/minecraft/world/entity/ClientEntityManager;

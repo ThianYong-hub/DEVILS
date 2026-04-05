@@ -121,7 +121,7 @@ class SyncConfigMigrationRuntimeTest {
         assertEquals(SyncConfigDiagnostics.Mode.PREFERRED_ONLY.name(), preferredOnly.secondAuditMode);
         assertTrue(preferredOnly.secondIssueCodes.isEmpty());
 
-        Path reportPath = Path.of("..", "codex log", "sync-config-migration-runtime.json").normalize();
+        Path reportPath = Path.of("build", "test-artifacts", "sync-config-migration-runtime.json").normalize();
         Files.createDirectories(reportPath.getParent());
         JsonObject root = new JsonObject();
         root.add("scenarios", asScenarioJsonArray(List.of(legacyOnly, duplicate, conflict, preferredOnly)));

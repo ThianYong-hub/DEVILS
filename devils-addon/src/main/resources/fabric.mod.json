@@ -1,6 +1,17 @@
 {
   "schemaVersion": 1,
   "id": "devils-addon",
+  "provides": [
+    "chesttracker",
+    "xaeroplus",
+    "xaerominimap",
+    "xaeroworldmap",
+    "xaerolib",
+    "whereisit",
+    "searchables",
+    "yet_another_config_lib_v3",
+    "jackfredlib"
+  ],
   "version": "${version}",
   "name": "Devils",
   "description": "Devils Addon for Meteor Client.",
@@ -9,7 +20,13 @@
     "23XT",
     "SOCKETLOST"
   ],
-  "license": "GPL-3.0-only",
+  "license": [
+    "GPL-3.0-only",
+    "MIT",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    "All Rights Reserved"
+  ],
   "contact": {
     "sources": "https://github.com/ThianYong-hub/DEVILS"
   },
@@ -20,32 +37,84 @@
     ],
     "meteor": [
       "com.example.addon.AddonTemplate"
+    ],
+    "main": [
+      "red.jackf.jackfredlib.impl.base.ServerTrackerImpl::setup",
+      "red.jackf.whereisit.WhereIsIt"
+    ],
+    "client": [
+      "xaero.lib.XaeroLibFabric",
+      "xaero.minimap.XaeroMinimapFabric",
+      "xaero.map.WorldMapFabric",
+      "xaeroplus.fabric.XaeroPlusFabric",
+      "red.jackf.chesttracker.impl.ChestTracker",
+      "red.jackf.whereisit.client.WhereIsItClient",
+      "dev.isxander.yacl3.platform.PlatformEntrypoint"
+    ],
+    "server": [
+      "xaero.lib.XaeroLibFabric",
+      "xaero.minimap.XaeroMinimapFabric",
+      "xaero.map.WorldMapFabric"
+    ],
+    "chesttracker": [
+      "red.jackf.chesttracker.impl.DefaultChestTrackerPlugin"
+    ],
+    "whereisit": [
+      "red.jackf.whereisit.defaults.WhereIsItDefaultPlugin"
+    ],
+    "whereisit_client": [
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerWhereIsItPlugin",
+      "red.jackf.whereisit.client.defaults.WhereIsItDefaultClientPlugin"
+    ],
+    "modmenu": [
+      "xaero.lib.mods.XaeroLibModMenu",
+      "xaero.common.XaeroHudModMenu",
+      "xaero.map.mods.XaeroWorldMapModMenu",
+      "xaeroplus.fabric.XaeroPlusModMenu",
+      "red.jackf.chesttracker.impl.compat.mods.ChestTrackerModMenu",
+      "red.jackf.whereisit.client.compat.WhereIsItModMenu"
+    ],
+    "shulkerboxtooltip": [
+      "red.jackf.chesttracker.impl.compat.mods.shulkerboxtooltip.ChestTrackerShulkerBoxTooltip"
+    ],
+    "jade": [
+      "red.jackf.chesttracker.impl.compat.mods.jade.ChestTrackerJadePlugin"
+    ],
+    "sodium:config_api_user": [
+      "xaeroplus.fabric.XaeroPlusSodiumConfigBuilder"
     ]
   },
-  "accessWidener": "devils-addon.accesswidener",
+  "accessWidener": "devils-addon.assimilated.accesswidener",
   "mixins": [
-    "addon-template.mixins.json"
-  ],
-  "jars": [
-    {
-      "file": "META-INF/jars/${xaero_minimap_jar}"
-    },
-    {
-      "file": "META-INF/jars/${xaero_worldmap_jar}"
-    },
-    {
-      "file": "META-INF/jars/${xaeroplus_jar}"
-    },
-    {
-      "file": "META-INF/jars/chesttracker-port-embedded.jar"
-    }
+    "addon-template.mixins.json",
+    "chesttracker.mixins.json",
+    "whereisit.mixins.json",
+    "searchables.mixins.json",
+    "searchables.fabric.mixins.json",
+    "yacl.mixins.json",
+    "yacl-fabric.mixins.json",
+    "xaerolib.mixins.json",
+    "xaerolib.fabric.mixins.json",
+    "xaerohud.mixins.json",
+    "xaerohud.fabric.mixins.json",
+    "xaerominimap.mixins.json",
+    "xaerominimap.fabric.mixins.json",
+    "xaeroworldmap.mixins.json",
+    "xaeroworldmap.fabric.mixins.json",
+    "xaeroplus.mixins.json",
+    "xaeroplus-fabric.mixins.json"
   ],
   "custom": {
-    "meteor-client:color": "225,25,25"
+    "meteor-client:color": "225,25,25",
+    "minimap_version": "25.3.10",
+    "worldmap_version": "1.40.11",
+    "xaeroplus_version": "2.30.9"
   },
   "depends": {
     "java": ">=21",
     "minecraft": ["${mc_version}"],
-    "meteor-client": "*"
+    "meteor-client": "*",
+    "fabricloader": ">=0.18.4",
+    "fabric-api": "*"
   }
 }

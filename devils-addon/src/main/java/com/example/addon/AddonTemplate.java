@@ -23,6 +23,7 @@ import com.example.addon.modules.modupdater.ModAutoUpdater;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
 import com.example.addon.util.PrismLauncherControl;
+import com.example.addon.util.smoke.AssimilatedQualitySmoke;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
@@ -57,6 +58,7 @@ public class AddonTemplate extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
         CrashGuard.installLogFilters();
+        AssimilatedQualitySmoke.install();
         AddonModulesConfig.init();
         CrashGuard.logXaeroState();
         applyPrismMultiSessionDefaults();

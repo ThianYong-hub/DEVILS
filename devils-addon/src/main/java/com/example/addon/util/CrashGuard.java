@@ -95,16 +95,20 @@ public final class CrashGuard implements PreLaunchEntrypoint {
         }
 
         ModContainer container = optional.get();
-        String version = container.getMetadata().getVersion().getFriendlyString();
+        boolean assimilated = isAssimilatedProvidedMod(modId, container);
+        String version = assimilated
+            ? EXPECTED_XAERO_VERSIONS.getOrDefault(modId, container.getMetadata().getVersion().getFriendlyString())
+            : container.getMetadata().getVersion().getFriendlyString();
         String origins = stringifyOrigins(container);
         boolean embedded = isEmbeddedMod(container) || isEmbeddedOrigin(origins);
         String expected = EXPECTED_XAERO_VERSIONS.getOrDefault(modId, "");
+        String source = assimilated ? "assimilated" : embedded ? "embedded" : "external";
 
         AddonTemplate.LOG.info(
             "[Devils/Xaero] {} loaded: version={} source={} origin={}",
             display,
             version,
-            embedded ? "embedded" : "external",
+            source,
             origins
         );
 
@@ -117,13 +121,18 @@ public final class CrashGuard implements PreLaunchEntrypoint {
             );
         }
 
-        if (!embedded) {
+        if (!assimilated && !embedded) {
             AddonTemplate.LOG.warn(
                 "[Devils/Xaero] External {} detected. Fabric resolves root mods before nested jars; remove standalone {} jar to force embedded Devils stack.",
                 display,
                 display
             );
         }
+    }
+
+    private static boolean isAssimilatedProvidedMod(String modId, ModContainer container) {
+        if (container == null || modId == null) return false;
+        return "devils-addon".equalsIgnoreCase(container.getMetadata().getId()) && EXPECTED_XAERO_VERSIONS.containsKey(modId);
     }
 
     private static String stringifyOrigins(ModContainer container) {

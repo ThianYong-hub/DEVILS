@@ -82,7 +82,7 @@ abstract class ExampleMixin {
 @Pseudo
 @Mixin(targets = "xaero.map.gui.GuiMap", remap = false)
 abstract class GuiMapXaeroSyncMixin {
-    @Inject(method = "method_25394", at = @At("TAIL"), require = 0)
+    @Inject(method = "render", at = @At("TAIL"), require = 0, remap = false)
     private void devilsAddon$xaeroSyncGuiMapRenderHook(DrawContext drawContext, int mouseX, int mouseY, float tickDelta, CallbackInfo ci) {
         Screen self = (Screen) (Object) this;
         double cameraX = readDouble(self, "cameraX");

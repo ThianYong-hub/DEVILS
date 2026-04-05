@@ -3,6 +3,8 @@ package com.example.addon;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -152,34 +154,67 @@ class ProjectConfigSuiteTest {
         assertTrue(backendSource.contains("BACKEND_DEPRECATION_STATUS"));
         assertTrue(dockerCompose.contains("SYNC_REQUIRE_REQUEST_SIGNING"));
         assertFalse(dockerCompose.contains("SYNC_REQUIRE_SIGNED:"));
-        assertTrue(adminProbe.contains("ARTIFACT_DIR = REPO_ROOT / \"codex log\""));
+        assertTrue(adminProbe.contains("ARTIFACT_DIR = REPO_ROOT / \"build\" / \"test-artifacts\""));
         assertTrue(adminProbe.contains("admin-config-runtime-probe.json"));
-        assertTrue(migrationRuntimeTest.contains("Path.of(\"..\", \"codex log\", \"sync-config-migration-runtime.json\")"));
+        assertTrue(migrationRuntimeTest.contains("Path.of(\"build\", \"test-artifacts\", \"sync-config-migration-runtime.json\")"));
     }
 
     @Test
     void codexArtifactIndexListsCanonicalEvidenceSet() throws IOException {
-        Path indexPath = Path.of("..", "codex log", "ARTIFACT_INDEX.md").normalize();
-        assumeTrue(Files.exists(indexPath), "Optional local artifact index is absent in a clean checkout.");
+        Path artifactDir = Path.of("..", "codex log").normalize();
+        assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
+        Path indexPath = artifactDir.resolve("ARTIFACT_INDEX.md");
+        assertTrue(Files.exists(indexPath), "codex log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
         String index = Files.readString(indexPath);
 
-        assertTrue(index.contains("codex log/CLAIM_VALIDATION_MATRIX.md"));
-        assertTrue(index.contains("codex log/CONFIG_MIGRATION_RUNTIME_REPORT.md"));
-        assertTrue(index.contains("codex log/ADMIN_CONFIG_RUNTIME_VALIDATION_REPORT.md"));
-        assertTrue(index.contains("codex log/LEGACY_REFERENCE_SWEEP_REPORT.md"));
-        assertTrue(index.contains("codex log/LEGACY_REMOVAL_READINESS_MATRIX.md"));
-        assertTrue(index.contains("codex log/SYNC_BACKEND_TEST_REPORT.md"));
-        assertTrue(index.contains("codex log/DEVILS_LIMITATIONS_AND_FOLLOWUPS.md"));
-        assertTrue(index.contains("codex log/FINAL_MIGRATION_ACCEPTANCE_TAIL_REPORT.md"));
-        assertTrue(index.contains("codex log/REGRESSION_SUMMARY.md"));
-        assertTrue(index.contains("codex log/SMOKE_TEST_OUTPUTS.md"));
-        assertTrue(index.contains("codex log/FINAL_EXECUTION_REPORT.md"));
-        assertTrue(index.contains("codex log/sync-config-migration-runtime.json"));
-        assertTrue(index.contains("codex log/admin-config-runtime-probe.json"));
-        assertTrue(index.contains("codex log/gradle-build-no-daemon.log"));
-        assertTrue(index.contains("codex log/python-unittest-sync-backend.log"));
-        assertTrue(index.contains("codex log/admin-config-runtime-probe.log"));
-        assertTrue(index.contains("codex log/git-diff-check.log"));
+        assertTrue(index.contains("FINAL_DEEP_INTERACTION_REGRESSION_REPORT.md"));
+        assertTrue(index.contains("FINAL_EXECUTION_REPORT.md"));
+        assertTrue(index.contains("FINAL_ACCEPTANCE_STATUS.md"));
+        assertTrue(index.contains("FINAL_VALIDATION_REPORT.md"));
+        assertTrue(index.contains("FINAL_LIMITATIONS_AND_NEXT_STEP.md"));
+        assertTrue(index.contains("FINAL_JAR_CONTENT_AUDIT.md"));
+        assertTrue(index.contains("FUNCTIONAL_PARITY_ACCEPTANCE_MATRIX.md"));
+        assertTrue(index.contains("runtime-smoke.log"));
+        assertTrue(index.contains("ARTIFACT_INDEX.md"));
+        assertTrue(index.contains("overwrite"));
+        assertTrue(index.contains("No version suffixes"));
+    }
+
+    @Test
+    void codexLogDirectoryRemainsSmallAndWhitelistedWhenPresent() throws IOException {
+        Path artifactDir = Path.of("..", "codex log").normalize();
+        assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
+
+        List<String> files;
+        try (var stream = Files.list(artifactDir)) {
+            files = stream
+                .filter(Files::isRegularFile)
+                .map(path -> path.getFileName().toString())
+                .sorted()
+                .toList();
+        }
+
+        Set<String> allowed = Set.of(
+            "ARTIFACT_INDEX.md",
+            "FINAL_EXECUTION_REPORT.md",
+            "FINAL_ACCEPTANCE_STATUS.md",
+            "FINAL_VALIDATION_REPORT.md",
+            "FINAL_LIMITATIONS_AND_NEXT_STEP.md",
+            "FINAL_DEEP_INTERACTION_REGRESSION_REPORT.md",
+            "FINAL_JAR_CONTENT_AUDIT.md",
+            "FUNCTIONAL_PARITY_ACCEPTANCE_MATRIX.md",
+            "runtime-smoke.log"
+        );
+
+        assertTrue(files.size() <= 12, "codex log must stay small and canonical: " + files);
+        for (String file : files) {
+            assertTrue(allowed.contains(file), "Unexpected file in codex log: " + file);
+        }
+        assertFalse(
+            files.stream().anyMatch(name -> name.endsWith(".log") && !name.equals("runtime-smoke.log")),
+            "Only runtime-smoke.log may remain as a canonical raw log: " + files
+        );
+        assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when codex log contains artifacts.");
     }
 
     @Test

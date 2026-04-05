@@ -18,7 +18,7 @@ from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_PATH = REPO_ROOT / "SyncHub" / "sync_backend.py"
-ARTIFACT_DIR = REPO_ROOT / "codex log"
+ARTIFACT_DIR = REPO_ROOT / "build" / "test-artifacts"
 NONCE_PATTERN = re.compile(r"^[a-fA-F0-9]{16,128}$")
 
 
