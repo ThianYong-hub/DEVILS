@@ -3,8 +3,10 @@ package com.example.addon.games;
 import com.example.addon.modules.games.BlackjackOverlay;
 import com.example.addon.modules.games.CheckersOverlay;
 import com.example.addon.modules.games.ChessOverlay;
+import com.example.addon.modules.games.DevilsGameRecoverySmoke;
 import com.example.addon.modules.games.DoomOverlay;
 import com.example.addon.modules.games.GameSyncHub;
+import com.example.addon.modules.games.RussianRouletteOverlay;
 import com.example.addon.modules.games.SlotMachineOverlay;
 import com.mojang.logging.LogUtils;
 import meteordevelopment.meteorclient.addons.GithubRepo;
@@ -22,6 +24,7 @@ public class DevilsGameAddon extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Game");
         registerModules();
+        DevilsGameRecoverySmoke.install();
     }
 
     private void registerModules() {
@@ -31,6 +34,7 @@ public class DevilsGameAddon extends MeteorAddon {
         modules.add(new ChessOverlay());
         modules.add(new SlotMachineOverlay());
         modules.add(new BlackjackOverlay());
+        modules.add(new RussianRouletteOverlay());
         modules.add(new DoomOverlay());
     }
 

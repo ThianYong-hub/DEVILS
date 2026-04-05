@@ -34,6 +34,19 @@ base {
     group = properties["maven_group"] as String
 }
 
+loom {
+    runs {
+        create("gamesRecoverySmoke") {
+            client()
+            ideConfigGenerated(false)
+            configName = "Devils Game Recovery Smoke"
+            runDir("run-devils-game-smoke")
+            vmArg("-Ddevils.game.recovery.smoke=true")
+            vmArg("-Ddevils.game.recovery.smoke.path=${rootProject.file("codex log/runtime-smoke.log").absolutePath}")
+        }
+    }
+}
+
 repositories {
     maven {
         name = "meteor-maven"
@@ -67,6 +80,13 @@ dependencies {
 }
 
 tasks {
+    named("runGamesRecoverySmoke") {
+        doFirst {
+            val smokeRunDir = layout.projectDirectory.dir("run-devils-game-smoke").asFile
+            if (smokeRunDir.exists()) smokeRunDir.deleteRecursively()
+        }
+    }
+
     processResources {
         val propertyMap = mapOf(
             "version" to project.version,

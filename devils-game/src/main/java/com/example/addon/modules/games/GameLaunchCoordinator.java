@@ -9,6 +9,7 @@ final class GameLaunchCoordinator {
         CHESS(ChessOverlay.class),
         SLOT_MACHINE(SlotMachineOverlay.class),
         BLACKJACK(BlackjackOverlay.class),
+        RUSSIAN_ROULETTE(RussianRouletteOverlay.class),
         DOOM(DoomOverlay.class);
 
         private final Class<? extends Module> moduleClass;
@@ -37,7 +38,6 @@ final class GameLaunchCoordinator {
             if (entry.moduleClass() == activeClass) continue;
             disable(modules, entry.moduleClass());
         }
-        if (activeClass != RussianRouletteOverlay.class) disable(modules, RussianRouletteOverlay.class);
     }
 
     static void launch(Entry entry) {
@@ -57,7 +57,6 @@ final class GameLaunchCoordinator {
         Modules modules = Modules.get();
         if (modules == null) return;
         for (Entry entry : Entry.values()) disable(modules, entry.moduleClass());
-        disable(modules, RussianRouletteOverlay.class);
     }
 
     private static void disable(Modules modules, Class<? extends Module> klass) {

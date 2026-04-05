@@ -19,6 +19,7 @@ class DevilsGameSourceTest {
         assertTrue(source.contains("modules.add(new ChessOverlay());"));
         assertTrue(source.contains("modules.add(new SlotMachineOverlay());"));
         assertTrue(source.contains("modules.add(new BlackjackOverlay());"));
+        assertTrue(source.contains("modules.add(new RussianRouletteOverlay());"));
         assertTrue(source.contains("modules.add(new DoomOverlay());"));
         assertFalse(source.contains("modules.add(new GamesModule());"));
         assertFalse(source.contains("hiddenModules"));
@@ -49,11 +50,15 @@ class DevilsGameSourceTest {
     void gamesCategoryNoLongerExposesMonolithicGamesLauncher() throws IOException {
         String checkersSource = Files.readString(Path.of("src", "main", "java", "com", "example", "addon", "modules", "games", "CheckersOverlay.java"));
         String chessSource = Files.readString(Path.of("src", "main", "java", "com", "example", "addon", "modules", "games", "ChessOverlay.java"));
+        String rouletteSource = Files.readString(Path.of("src", "main", "java", "com", "example", "addon", "modules", "games", "RussianRouletteOverlay.java"));
         String coordinatorSource = Files.readString(Path.of("src", "main", "java", "com", "example", "addon", "modules", "games", "GameLaunchCoordinator.java"));
 
         assertTrue(checkersSource.contains("super(DevilsGameAddon.GAMES_CATEGORY, \"checkers\""));
         assertTrue(chessSource.contains("super(DevilsGameAddon.GAMES_CATEGORY, \"chess\""));
+        assertTrue(rouletteSource.contains("super(DevilsGameAddon.GAMES_CATEGORY, \"russian-roulette\""));
         assertTrue(coordinatorSource.contains("enum Entry"));
+        assertTrue(coordinatorSource.contains("RUSSIAN_ROULETTE(RussianRouletteOverlay.class)"));
+        assertTrue(rouletteSource.contains("GameLaunchCoordinator.launchNext(GameLaunchCoordinator.Entry.RUSSIAN_ROULETTE)"));
         assertFalse(Files.exists(Path.of("src", "main", "java", "com", "example", "addon", "modules", "games", "GamesModule.java")));
         assertFalse(Files.exists(Path.of("src", "main", "java", "com", "example", "addon", "gui", "screens", "games", "MiniGamesHubScreen.java")));
     }

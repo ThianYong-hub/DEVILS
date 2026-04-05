@@ -14,7 +14,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
 - Current addon build (`0.0.46`): `build/libs/devils-addon-0.0.46.jar`
-- Current game build (`0.0.3`): `build/libs/devils-game-0.0.3.jar`
+- Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
 ## Artifact Model
@@ -28,7 +28,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | Item | Value |
 | --- | --- |
 | Addon Version | `0.0.46` |
-| Game Version | `0.0.3` |
+| Game Version | `0.0.4` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |

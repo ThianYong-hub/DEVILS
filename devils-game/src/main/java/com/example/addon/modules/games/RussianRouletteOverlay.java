@@ -167,7 +167,7 @@ public final class RussianRouletteOverlay extends Module {
                 client(),
                 pinned.get(),
                 this::setPinned,
-                () -> GameLaunchCoordinator.launch(GameLaunchCoordinator.Entry.CHECKERS),
+                () -> GameLaunchCoordinator.launchNext(GameLaunchCoordinator.Entry.RUSSIAN_ROULETTE),
                 GameLaunchCoordinator::closeAll
             );
             if (consumed) event.setCancelled(true);
