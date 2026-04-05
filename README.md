@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.45`): `build/libs/devils-addon-0.0.45.jar`
+- Current addon build (`0.0.46`): `build/libs/devils-addon-0.0.46.jar`
 - Current game build (`0.0.3`): `build/libs/devils-game-0.0.3.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
@@ -27,7 +27,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.45` |
+| Addon Version | `0.0.46` |
 | Game Version | `0.0.3` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -361,12 +361,12 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.45`)
+## Release Notes (`v0.0.46`)
 
-- bumped addon artifact version from `0.0.44` to `0.0.45`
-- finished final jar structure hygiene so non-code metadata moved out of jar root into cleaner `META-INF/devils-addon/*` and `META-INF/licenses/*` paths
-- kept the addon de-jarred and source-native while preserving green compile, test, remap, runtime smoke, and full build validation
-- refreshed README wording to describe the current source-native assimilated runtime instead of the older embedded-jar model
+- bumped addon artifact version from `0.0.45` to `0.0.46`
+- fixed the broken packaged runtime by bundling the required non-mod runtime libraries into the final addon jar
+- preserved the de-jarred source-native addon layout while keeping compile, test, remap, runtime smoke, and full build validation green
+- kept the cleaned final jar structure introduced in the previous pass
 
 ## Repository Structure
 

@@ -40,6 +40,11 @@ val sourceNativeModuleDirs = listOf(
 val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
+val bundledRuntimeLibs by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = true
+}
 val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
 val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
@@ -262,17 +267,28 @@ dependencies {
     modCompileOnly("maven.modrinth:immediatelyfast:1.5.2+1.20.4-fabric")
     modCompileOnly("meteordevelopment:baritone:1.21.10-SNAPSHOT")
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
+    add(bundledRuntimeLibs.name, "com.github.ben-manes.caffeine:caffeine:3.2.0")
     implementation("net.lenni0451:LambdaEvents:2.4.2")
+    add(bundledRuntimeLibs.name, "net.lenni0451:LambdaEvents:2.4.2")
     implementation("com.github.rfresh2:OldBiomes:1.0.0")
+    add(bundledRuntimeLibs.name, "com.github.rfresh2:OldBiomes:1.0.0")
     implementation("org.rfresh.xerial:sqlite-jdbc:3.51.2.0")
     implementation("com.twelvemonkeys.imageio:imageio-core:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.imageio:imageio-core:3.12.0")
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.imageio:imageio-webp:3.12.0")
     implementation("com.twelvemonkeys.imageio:imageio-metadata:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.imageio:imageio-metadata:3.12.0")
     implementation("com.twelvemonkeys.common:common-lang:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.common:common-lang:3.12.0")
     implementation("com.twelvemonkeys.common:common-io:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.common:common-io:3.12.0")
     implementation("com.twelvemonkeys.common:common-image:3.12.0")
+    add(bundledRuntimeLibs.name, "com.twelvemonkeys.common:common-image:3.12.0")
     implementation("org.quiltmc.parsers:json:0.2.1")
+    add(bundledRuntimeLibs.name, "org.quiltmc.parsers:json:0.2.1")
     implementation("org.quiltmc.parsers:gson:0.2.1")
+    add(bundledRuntimeLibs.name, "org.quiltmc.parsers:gson:0.2.1")
     compileOnly("com.google.code.findbugs:jsr305:3.0.2")
 
     productionRuntimeMods("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
@@ -438,8 +454,32 @@ tasks {
 
     jar {
         inputs.property("archivesName", project.base.archivesName.get())
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
         from(sharedMainOutput)
+
+        from({
+            bundledRuntimeLibs.resolve().map { dependencyArtifact ->
+                val dependencyTree =
+                    if (dependencyArtifact.isDirectory) fileTree(dependencyArtifact) else zipTree(dependencyArtifact)
+                dependencyTree.matching {
+                    exclude(
+                        "META-INF/MANIFEST.MF",
+                        "META-INF/*.SF",
+                        "META-INF/*.RSA",
+                        "META-INF/*.DSA",
+                        "META-INF/LICENSE*",
+                        "META-INF/NOTICE*",
+                        "META-INF/licenses/**",
+                        "META-INF/maven/**",
+                        "LICENSE*",
+                        "NOTICE*",
+                        "COPYING*",
+                        "module-info.class"
+                    )
+                }
+            }
+        })
 
         from(rootProject.file("LICENSE")) {
             into("META-INF/licenses")
