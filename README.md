@@ -13,8 +13,9 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.44`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-addon-0.0.44.jar>
-- Current game build (`0.0.3`): <https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.44/devils-game-0.0.3.jar>
+- Current addon build (`0.0.45`): `build/libs/devils-addon-0.0.45.jar`
+- Current game build (`0.0.3`): `build/libs/devils-game-0.0.3.jar`
+- GitHub release links should be treated as latest published release, not as the current local workspace build.
 
 ## Artifact Model
 
@@ -26,19 +27,20 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.44` |
+| Addon Version | `0.0.45` |
 | Game Version | `0.0.3` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
 | Java | `21` |
 | Meteor Client | build for `1.21.11` |
-| Embedded Integrations | `Xaero MiniMap`, `Xaero World Map`, `XaeroPlus`, `ChestTracker Port` |
+| Source-Native Assimilations | `Xaero MiniMap`, `Xaero World Map`, `XaeroPlus`, `ChestTracker Port` |
 
 ## Why This Addon
 
 - Combat and movement modules are bundled with sync-aware team tooling.
 - SyncHub supports signed requests and encrypted payload flow.
-- Xaero integration is not cosmetic: live player markers and managed waypoint pipeline are integrated into addon runtime.
+- Xaero integration is not cosmetic: live player markers and managed waypoint pipeline are integrated into addon runtime as source-native addon code, not nested mod jars.
+- ChestTracker / WhereIsIt / Searchables / YACL are assimilated into the addon build instead of shipping as jar-in-jar payload.
 - Includes migration tooling (`mod-auto-updater`) and dedicated backend stress tests (`SyncHub/tests/sync_stress_tester.py`).
 
 ## Modules
@@ -359,16 +361,16 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.44`)
+## Release Notes (`v0.0.45`)
 
-- switched the project license from `CC0-1.0` to `GPL-3.0`
-- removed stale local `1.21.8` jars and cleaned rebuildable workspace artifacts
-- fixed clean-checkout test stability by making optional local `codex log` evidence non-blocking
-- kept release packaging for both artifacts: `devils-addon` and `devils-game`
+- bumped addon artifact version from `0.0.44` to `0.0.45`
+- finished final jar structure hygiene so non-code metadata moved out of jar root into cleaner `META-INF/devils-addon/*` and `META-INF/licenses/*` paths
+- kept the addon de-jarred and source-native while preserving green compile, test, remap, runtime smoke, and full build validation
+- refreshed README wording to describe the current source-native assimilated runtime instead of the older embedded-jar model
 
 ## Repository Structure
 
-- `devils-addon/` - main addon sources, tests, fabric metadata, and embedded integration packaging.
+- `devils-addon/` - main addon sources, tests, fabric metadata, and source-native assimilated integrations.
 - `devils-game/` - companion games addon sources, assets, and fabric metadata.
 - `devils-addon/src/main/java/com/example/addon/modules` - public module entrypoints for the main addon.
 - `devils-game/src/main/java/com/example/addon/modules/games` - game overlays, sessions, windows, and launcher runtime.
