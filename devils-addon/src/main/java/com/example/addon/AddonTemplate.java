@@ -20,10 +20,13 @@ import com.example.addon.modules.SyncHub;
 import com.example.addon.modules.TnTBomber;
 import com.example.addon.modules.highwaybuilder.HighwayBuilder;
 import com.example.addon.modules.modupdater.ModAutoUpdater;
+import com.example.addon.modules.stashmover.StashMoverCommand;
+import com.example.addon.modules.stashmover.StashMover;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
 import com.example.addon.util.PrismLauncherControl;
 import com.example.addon.util.smoke.AssimilatedQualitySmoke;
+import com.example.addon.util.smoke.StashMoverTargetedRuntimeValidation;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
@@ -59,6 +62,7 @@ public class AddonTemplate extends MeteorAddon {
         LOG.info("Initializing Devils Addon");
         CrashGuard.installLogFilters();
         AssimilatedQualitySmoke.install();
+        StashMoverTargetedRuntimeValidation.install();
         AddonModulesConfig.init();
         CrashGuard.logXaeroState();
         applyPrismMultiSessionDefaults();
@@ -97,11 +101,13 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new MaceSpoof());
         modules.add(new SpearSpoof());
         modules.add(new ChestTrackerModule());
+        modules.add(new StashMover());
     }
 
     private void registerCommands() {
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
+        Commands.add(new StashMoverCommand());
     }
 
     private void applyPrismMultiSessionDefaults() {

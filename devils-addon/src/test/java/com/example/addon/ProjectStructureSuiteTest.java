@@ -22,6 +22,8 @@ class ProjectStructureSuiteTest {
         assertTrue(source.contains("registerModules();"));
         assertTrue(source.contains("registerCommands();"));
         assertTrue(source.contains("registerHudElements();"));
+        assertTrue(source.contains("AssimilatedQualitySmoke.install();"));
+        assertTrue(source.contains("StashMoverTargetedRuntimeValidation.install();"));
         assertTrue(source.contains("class CommandExample extends Command"));
         assertTrue(source.contains("class AutoAnvilRenameCommand extends Command"));
         assertTrue(source.contains("class HudExample extends HudElement"));
@@ -41,8 +43,10 @@ class ProjectStructureSuiteTest {
         assertTrue(source.contains("modules.add(new JoinWatcher());"));
         assertTrue(source.contains("modules.add(new HighwayBuilder());"));
         assertTrue(source.contains("modules.add(new ChestTrackerModule());"));
+        assertTrue(source.contains("modules.add(new StashMover());"));
         assertTrue(source.contains("Commands.add(new CommandExample());"));
         assertTrue(source.contains("Commands.add(new AutoAnvilRenameCommand());"));
+        assertTrue(source.contains("Commands.add(new StashMoverCommand());"));
         assertTrue(source.contains("Hud.get().register(HudExample.INFO);"));
         assertFalse(source.contains("modules.add(new GamesModule());"));
     }
@@ -55,13 +59,21 @@ class ProjectStructureSuiteTest {
             mainJava("com", "example", "addon", "mixin", "ClientPlayerInteractionManagerInvoker.java"),
             mainJava("com", "example", "addon", "mixin", "XaeroMixinSupport.java"),
             mainJava("com", "example", "addon", "modules", "Ping.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMover.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverSupport.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverInteraction.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverRuntime.java"),
             mainJava("com", "example", "addon", "modules", "XaeroSync.java"),
             mainJava("com", "example", "addon", "modules", "ClipModules.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverCommand.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverOwnPearlTracker.java"),
+            mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverSlotPolicy.java"),
             mainJava("com", "example", "addon", "modules", "autologin", "AutoLoginSyncController.java"),
             mainJava("com", "example", "addon", "modules", "autologin", "AutoLoginSyncDiagnostics.java"),
             mainJava("com", "example", "addon", "modules", "highwaybuilder", "HighwayBuilderTypes.java"),
             mainJava("com", "example", "addon", "modules", "highwaybuilder", "EChestMinerSupport.java"),
             mainJava("com", "example", "addon", "util", "XaeroSyncWaypoints.java"),
+            mainJava("com", "example", "addon", "util", "smoke", "StashMoverTargetedRuntimeValidation.java"),
             mainJava("com", "example", "addon", "util", "xaerosync", "XaeroWaypointManagedWaypoints.java")
         );
 

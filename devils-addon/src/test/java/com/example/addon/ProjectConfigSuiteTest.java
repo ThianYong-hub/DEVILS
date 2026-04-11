@@ -168,14 +168,30 @@ class ProjectConfigSuiteTest {
         assertTrue(Files.exists(indexPath), "codex log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
         String index = Files.readString(indexPath);
 
-        assertTrue(index.contains("FINAL_JAR_STRUCTURE_HYGIENE_REPORT.md"));
-        assertTrue(index.contains("FINAL_EXECUTION_REPORT.md"));
-        assertTrue(index.contains("FINAL_ACCEPTANCE_STATUS.md"));
-        assertTrue(index.contains("FINAL_VALIDATION_REPORT.md"));
-        assertTrue(index.contains("FINAL_LIMITATIONS_AND_NEXT_STEP.md"));
-        assertTrue(index.contains("FINAL_JAR_CONTENT_AUDIT.md"));
-        assertTrue(index.contains("FUNCTIONAL_PARITY_ACCEPTANCE_MATRIX.md"));
+        assertTrue(index.contains("STASHMOVER_MIGRATION_AUDIT.md"));
+        assertTrue(index.contains("STASHMOVER_ASSIMILATION_PLAN.md"));
+        assertTrue(index.contains("STASHMOVER_PEARL_ROTATION_FIX_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_OWN_PEARL_TRACKING_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_SLOT_POLICY_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_BARITONE_INTEGRATION_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_CONTAINER_AUDIT_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_STATE_MACHINE_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_LEGACY_CLEANUP_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_SETTINGS_INTEGRATION_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_LIVE_REPRO_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_PEARL_TRAJECTORY_ROOT_CAUSE_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_PEARL_TARGETING_FIX_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_POST_PEARL_PHASE_EXIT_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_MOVER_CONTINUATION_FIX_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_BARITONE_HANDOFF_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_STALL_RECOVERY_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_RUNTIME_DIAGNOSTICS_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_TARGETED_RUNTIME_VALIDATION_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_FINAL_EXECUTION_REPORT.md"));
+        assertTrue(index.contains("STASHMOVER_BUILD.log"));
         assertTrue(index.contains("runtime-smoke.log"));
+        assertTrue(index.contains("stashmover-live-repro.log"));
+        assertTrue(index.contains("stashmover-targeted-runtime.log"));
         assertTrue(index.contains("ARTIFACT_INDEX.md"));
         assertTrue(index.contains("overwrite"));
         assertTrue(index.contains("No version suffixes"));
@@ -197,23 +213,40 @@ class ProjectConfigSuiteTest {
 
         Set<String> allowed = Set.of(
             "ARTIFACT_INDEX.md",
-            "FINAL_EXECUTION_REPORT.md",
-            "FINAL_ACCEPTANCE_STATUS.md",
-            "FINAL_VALIDATION_REPORT.md",
-            "FINAL_LIMITATIONS_AND_NEXT_STEP.md",
-            "FINAL_JAR_STRUCTURE_HYGIENE_REPORT.md",
-            "FINAL_JAR_CONTENT_AUDIT.md",
-            "FUNCTIONAL_PARITY_ACCEPTANCE_MATRIX.md",
-            "runtime-smoke.log"
+            "STASHMOVER_MIGRATION_AUDIT.md",
+            "STASHMOVER_ASSIMILATION_PLAN.md",
+            "STASHMOVER_PEARL_ROTATION_FIX_REPORT.md",
+            "STASHMOVER_OWN_PEARL_TRACKING_REPORT.md",
+            "STASHMOVER_SLOT_POLICY_REPORT.md",
+            "STASHMOVER_BARITONE_INTEGRATION_REPORT.md",
+            "STASHMOVER_CONTAINER_AUDIT_REPORT.md",
+            "STASHMOVER_STATE_MACHINE_REPORT.md",
+            "STASHMOVER_LEGACY_CLEANUP_REPORT.md",
+            "STASHMOVER_SETTINGS_INTEGRATION_REPORT.md",
+            "STASHMOVER_LIVE_REPRO_REPORT.md",
+            "STASHMOVER_PEARL_TRAJECTORY_ROOT_CAUSE_REPORT.md",
+            "STASHMOVER_PEARL_TARGETING_FIX_REPORT.md",
+            "STASHMOVER_POST_PEARL_PHASE_EXIT_REPORT.md",
+            "STASHMOVER_MOVER_CONTINUATION_FIX_REPORT.md",
+            "STASHMOVER_BARITONE_HANDOFF_REPORT.md",
+            "STASHMOVER_STALL_RECOVERY_REPORT.md",
+            "STASHMOVER_RUNTIME_DIAGNOSTICS_REPORT.md",
+            "STASHMOVER_TARGETED_RUNTIME_VALIDATION_REPORT.md",
+            "STASHMOVER_FINAL_EXECUTION_REPORT.md",
+            "STASHMOVER_BUILD.log",
+            "runtime-smoke.log",
+            "stashmover-live-repro.log",
+            "stashmover-targeted-runtime.log",
+            "STASHMOVER_ARTIFACT_INSPECTION_NOTE.md"
         );
 
-        assertTrue(files.size() <= 12, "codex log must stay small and canonical: " + files);
+        assertTrue(files.size() <= 26, "codex log must stay small and canonical: " + files);
         for (String file : files) {
             assertTrue(allowed.contains(file), "Unexpected file in codex log: " + file);
         }
         assertFalse(
-            files.stream().anyMatch(name -> name.endsWith(".log") && !name.equals("runtime-smoke.log")),
-            "Only runtime-smoke.log may remain as a canonical raw log: " + files
+            files.stream().anyMatch(name -> name.endsWith(".log") && !Set.of("STASHMOVER_BUILD.log", "runtime-smoke.log", "stashmover-live-repro.log", "stashmover-targeted-runtime.log").contains(name)),
+            "Only canonical StashMover raw logs may remain in codex log: " + files
         );
         assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when codex log contains artifacts.");
     }

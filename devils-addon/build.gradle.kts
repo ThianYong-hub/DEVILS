@@ -21,6 +21,18 @@ val modVersionFallback = properties["addon_version"] as String
 val resolvedAppVersion = appVersionFromEnv
     ?: appVersionFromProperty
     ?: modVersionFallback
+val gameVersionFromEnv = System.getenv("DEVILS_GAME_VERSION")
+    ?.removePrefix("v")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+val gameVersionFromProperty = (findProperty("game_version_override") as String?)
+    ?.removePrefix("v")
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+val resolvedGameVersion = gameVersionFromEnv
+    ?: gameVersionFromProperty
+    ?: (properties["game_version"] as String)
+val gameArchivesBaseName = properties["game_archives_base_name"] as String
 
 val minecraftVersion = properties["minecraft_version"] as String
 val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
@@ -151,6 +163,14 @@ loom {
             runDir("run-assimilated-smoke")
             vmArg("-Ddevils.assimilated.quality.smoke=true")
             vmArg("-Ddevils.runtime.smoke.path=${rootProject.file("codex log/runtime-smoke.log").absolutePath}")
+        }
+        create("stashMoverTargetedRuntime") {
+            client()
+            ideConfigGenerated(false)
+            configName = "StashMover Targeted Runtime"
+            runDir("run-stashmover-targeted")
+            vmArg("-Ddevils.stashmover.targeted.runtime=true")
+            vmArg("-Ddevils.stashmover.targeted.runtime.path=${rootProject.file("codex log/stashmover-targeted-runtime.log").absolutePath}")
         }
     }
 }
@@ -300,6 +320,19 @@ dependencies {
 }
 
 tasks {
+    val exportAddonArtifactsToRootLibs by registering(Sync::class) {
+        dependsOn(remapJar, ":devils-game:remapJar")
+        into(rootProject.layout.projectDirectory.dir("libs"))
+
+        from(layout.buildDirectory.dir("libs")) {
+            include("${project.base.archivesName.get()}-$resolvedAppVersion.jar")
+        }
+
+        from(project(":devils-game").layout.buildDirectory.dir("libs")) {
+            include("$gameArchivesBaseName-$resolvedGameVersion.jar")
+        }
+    }
+
     val verifySourceNativeBuildBasis by registering {
         doLast {
             val requiredPaths = listOf(
@@ -579,6 +612,21 @@ tasks {
         }
     }
 
+    val validateStashMoverTargetedRuntime by registering {
+        val canonicalRuntimeLog = rootProject.file("codex log/stashmover-targeted-runtime.log")
+
+        doLast {
+            check(canonicalRuntimeLog.isFile) {
+                "StashMover targeted runtime log was not produced at ${canonicalRuntimeLog.absolutePath}"
+            }
+
+            val lines = canonicalRuntimeLog.readLines(StandardCharsets.UTF_8)
+            check(lines.any { it.startsWith("RESULT PASS") }) {
+                "StashMover targeted runtime did not report PASS. See ${canonicalRuntimeLog.absolutePath}"
+            }
+        }
+    }
+
     named("runAssimilatedClientSmoke") {
         doFirst {
             val smokeRunDir = layout.projectDirectory.dir("run-assimilated-smoke").asFile
@@ -597,6 +645,24 @@ tasks {
         finalizedBy(writeAssimilatedRuntimeEvidence)
     }
 
+    named("runStashMoverTargetedRuntime") {
+        doFirst {
+            val smokeRunDir = layout.projectDirectory.dir("run-stashmover-targeted").asFile
+            val staleEvidencePaths = listOf(
+                smokeRunDir.resolve("saves"),
+                smokeRunDir.resolve("config"),
+                smokeRunDir.resolve("devils-addon"),
+                smokeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
+        }
+        finalizedBy(validateStashMoverTargetedRuntime)
+    }
+
     java {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -604,6 +670,10 @@ tasks {
 
     test {
         useJUnitPlatform()
+    }
+
+    named("build") {
+        dependsOn(exportAddonArtifactsToRootLibs)
     }
 
     withType<JavaCompile> {

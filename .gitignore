@@ -4,6 +4,7 @@
 .gradle-codex/
 .gradle-home/
 build/
+libs/
 out/
 classes/
 

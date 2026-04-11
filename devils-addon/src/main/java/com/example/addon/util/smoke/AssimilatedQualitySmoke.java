@@ -1,6 +1,7 @@
 package com.example.addon.util.smoke;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.modules.stashmover.StashMover;
 import com.example.addon.util.xaerosync.XaeroWaypointContext;
 import com.example.addon.util.xaerosync.XaeroWaypointManagedWaypoints;
 import com.example.addon.util.xaerosync.XaeroWaypointReflection;
@@ -18,6 +19,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
@@ -96,6 +98,7 @@ public final class AssimilatedQualitySmoke {
         runAndRecord(results, AssimilatedInteractionChecks.xaeroWaypointListEditFlow(client));
         runAndRecord(results, AssimilatedInteractionChecks.xaeroPlusCopyCoordinatesHookFlow(client));
         runAndRecord(results, AssimilatedInteractionChecks.xaeroPlusPortalsFeatureFlow());
+        runAndRecord(results, stashMoverNativeIdleFlow());
 
         boolean success = results.stream().allMatch(SmokeCheckResult::success);
         appendLine("RESULT " + (success ? "PASS" : "FAIL") + " checks=" + results.size());
@@ -235,6 +238,36 @@ public final class AssimilatedQualitySmoke {
     private static void runAndRecord(List<SmokeCheckResult> results, SmokeCheckResult result) {
         results.add(result);
         appendLine((result.success() ? "PASS " : "FAIL ") + result.id() + " " + result.detail());
+    }
+
+    private static SmokeCheckResult stashMoverNativeIdleFlow() {
+        try {
+            StashMover module = Modules.get().get(StashMover.class);
+            if (module == null) return SmokeCheckResult.fail("stashmover-native-idle", "module not registered");
+
+            String modes = java.util.Arrays.toString(StashMover.Mode.values());
+            boolean toggledActive;
+            if (module.isActive()) {
+                toggledActive = true;
+                module.toggle();
+            } else {
+                module.toggle();
+                toggledActive = module.isActive();
+                module.toggle();
+            }
+
+            if (module.isActive()) {
+                module.toggle();
+                return SmokeCheckResult.fail("stashmover-native-idle", "module did not cleanly toggle back off");
+            }
+
+            return SmokeCheckResult.pass(
+                "stashmover-native-idle",
+                "registered=true toggleRoundTrip=" + toggledActive + " modes=" + modes + " modeNow=" + module.modeValue()
+            );
+        } catch (Throwable t) {
+            return SmokeCheckResult.fail("stashmover-native-idle", t.getClass().getSimpleName() + ": " + t.getMessage());
+        }
     }
 
     private static Path resolveOutputPath() {
