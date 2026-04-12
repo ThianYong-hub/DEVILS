@@ -53,6 +53,13 @@ final class DoomWindow {
         dragging = false;
         resizing = false;
     }
+    void restoreBounds(int x, int y, int w, int h) {
+        windowX = x;
+        windowY = y;
+        windowW = w;
+        windowH = h;
+        stopInteraction();
+    }
 
     void onActivate() {
         session.startIfNeeded();
@@ -161,7 +168,7 @@ final class DoomWindow {
             closeOverlay.run();
             return true;
         }
-        if (inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
+        if (!pinned && inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
             session.setInputFocused(false);
             resizing = true;
             dragging = false;
@@ -171,7 +178,7 @@ final class DoomWindow {
             resizeStartH = windowH;
             return true;
         }
-        if (inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
+        if (!pinned && inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
             session.setInputFocused(false);
             dragging = true;
             resizing = false;
@@ -345,9 +352,7 @@ final class DoomWindow {
     }
 
     private static boolean shouldRender(MinecraftClient mc, boolean pinned) {
-        if (mc == null) return false;
-        Screen current = mc.currentScreen;
-        return pinned || current == null;
+        return mc != null && mc.player != null;
     }
 
     private static boolean inside(int mx, int my, int x, int y, int w, int h) {

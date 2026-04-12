@@ -61,6 +61,13 @@ final class RussianRouletteWindow {
         resizing = false;
         session.reset();
     }
+    void restoreBounds(int x, int y, int w, int h) {
+        windowX = x;
+        windowY = y;
+        windowW = w;
+        windowH = h;
+        stopInteraction();
+    }
     void stopInteraction() {
         dragging = false;
         resizing = false;
@@ -113,7 +120,7 @@ final class RussianRouletteWindow {
             closeOverlay.run();
             return true;
         }
-        if (inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
+        if (!pinned && inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
             resizing = true;
             dragging = false;
             resizeStartX = mouseX;
@@ -122,7 +129,7 @@ final class RussianRouletteWindow {
             resizeStartH = windowH;
             return true;
         }
-        if (inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
+        if (!pinned && inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
             dragging = true;
             resizing = false;
             dragOffsetX = mouseX - windowX;
@@ -377,9 +384,7 @@ final class RussianRouletteWindow {
         );
     }
     private static boolean shouldRender(MinecraftClient mc, boolean pinned) {
-        if (mc == null || mc.player == null) return false;
-        Screen screen = mc.currentScreen;
-        return pinned || screen == null;
+        return mc != null && mc.player != null;
     }
     private static int scaledMouseX(MinecraftClient mc) {
         if (mc.getWindow() == null || mc.mouse == null) return 0;

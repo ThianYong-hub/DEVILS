@@ -51,7 +51,7 @@ public final class RussianRouletteOverlay extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final Setting<Boolean> pinned = sgGeneral.add(new BoolSetting.Builder()
         .name("pinned")
-        .description("Keep roulette overlay visible over chat/other screens.")
+        .description("Fix the window in place. Unpin returns it to the start position.")
         .defaultValue(true)
         .visible(() -> false)
         .build()
@@ -176,6 +176,15 @@ public final class RussianRouletteOverlay extends Module {
 
     private void setPinned(boolean value) {
         pinned.set(value);
+        if (value) window.stopInteraction();
+        else {
+            window.restoreBounds(
+                startX.get(),
+                startY.get(),
+                clamp(startW.get(), MIN_W, MAX_W),
+                clamp(startH.get(), MIN_H, MAX_H)
+            );
+        }
     }
 
     private void beginDeathSequence() {

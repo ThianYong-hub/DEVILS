@@ -26,7 +26,6 @@ import com.example.addon.modules.stashmover.StashMoverCommand;
 import com.example.addon.modules.stashmover.StashMover;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
-import com.example.addon.util.PrismLauncherControl;
 import com.example.addon.util.smoke.AssimilatedQualitySmoke;
 import com.example.addon.util.smoke.StashMoverTargetedRuntimeValidation;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -67,7 +66,6 @@ public class AddonTemplate extends MeteorAddon {
         StashMoverTargetedRuntimeValidation.install();
         AddonModulesConfig.init();
         CrashGuard.logXaeroState();
-        applyPrismMultiSessionDefaults();
         registerTrackerPlayersSettingFactory();
         registerModules();
         registerCommands();
@@ -112,27 +110,6 @@ public class AddonTemplate extends MeteorAddon {
         Commands.add(new AutoAnvilRenameCommand());
         Commands.add(new SessionCommand());
         Commands.add(new StashMoverCommand());
-    }
-
-    private void applyPrismMultiSessionDefaults() {
-        try {
-            MinecraftClient mc = MinecraftClient.getInstance();
-            var result = PrismLauncherControl.ensureMultiSessionFlags(mc != null ? mc.runDirectory.toPath() : null);
-            if (result.ok()) {
-                LOG.info("[PrismControl] {} root={} cfg={}", result.message(), result.prismRoot(), result.configPath());
-            } else {
-                LOG.warn("[PrismControl] {}", result.message());
-            }
-
-            var restart = PrismLauncherControl.restartLauncherForParallelSameInstance(mc != null ? mc.runDirectory.toPath() : null);
-            if (restart.ok()) {
-                LOG.info("[PrismControl] {}", restart.message());
-            } else {
-                LOG.warn("[PrismControl] {}", restart.message());
-            }
-        } catch (Exception e) {
-            LOG.warn("[PrismControl] Failed to auto-apply Prism multi-session flags: {}", e.toString());
-        }
     }
 
     private void registerHudElements() {

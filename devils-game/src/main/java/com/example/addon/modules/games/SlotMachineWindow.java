@@ -66,6 +66,13 @@ final class SlotMachineWindow {
         resizing = false;
         session.reset();
     }
+    void restoreBounds(int x, int y, int w, int h) {
+        windowX = x;
+        windowY = y;
+        windowW = w;
+        windowH = h;
+        stopInteraction();
+    }
 
     void stopInteraction() {
         dragging = false;
@@ -126,7 +133,7 @@ final class SlotMachineWindow {
             closeOverlay.run();
             return true;
         }
-        if (inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
+        if (!pinned && inside(mouseX, mouseY, l.resizeX, l.resizeY, l.resizeSize, l.resizeSize)) {
             resizing = true;
             dragging = false;
             resizeStartX = mouseX;
@@ -135,7 +142,7 @@ final class SlotMachineWindow {
             resizeStartH = windowH;
             return true;
         }
-        if (inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
+        if (!pinned && inside(mouseX, mouseY, l.x, l.y, l.w, l.headerH)) {
             dragging = true;
             resizing = false;
             dragOffsetX = mouseX - windowX;
@@ -259,10 +266,20 @@ final class SlotMachineWindow {
         context.fill(l.panelX + l.panelW - 1, l.panelY, l.panelX + l.panelW, l.panelY + l.panelH, PANEL_BORDER);
 
         TextRenderer tr = MinecraftClient.getInstance().textRenderer;
-        context.drawTextWithShadow(tr, "Credits: " + session.credits(), l.panelX + 8, l.panelY + 8, 0xFFDCE9FF);
-        context.drawTextWithShadow(tr, "Bet: " + session.bet(), l.panelX + 8, l.panelY + 22, 0xFFDCE9FF);
-        context.drawTextWithShadow(tr, "Jackpot: " + session.jackpot(), l.panelX + 132, l.panelY + 8, 0xFFFFE69E);
-        context.drawTextWithShadow(tr, "Won: " + session.totalWon() + "  Spent: " + session.totalSpent(), l.panelX + 132, l.panelY + 22, 0xFFC0D4F2);
+        int row1Y = l.panelY + 8;
+        int row2Y = l.panelY + 22;
+        String creditsText = "Credits: " + session.credits();
+        String jackpotText = "Jackpot: " + session.jackpot();
+        String betText = "Bet: " + session.bet();
+        String wonText = "Won: " + session.totalWon() + "  Spent: " + session.totalSpent();
+        int rightColumnMinX = l.betMaxX + l.betBtnW + 22;
+        int rightColumnPreferredX = l.panelX + Math.max(132, l.panelW / 2);
+        int rightColumnMaxX = l.panelX + l.panelW - 8 - Math.max(tr.getWidth(jackpotText), tr.getWidth(wonText));
+        int rightColumnX = Math.min(Math.max(rightColumnMinX, rightColumnPreferredX), Math.max(rightColumnMinX, rightColumnMaxX));
+        context.drawTextWithShadow(tr, creditsText, l.panelX + 8, row1Y, 0xFFDCE9FF);
+        context.drawTextWithShadow(tr, betText, l.panelX + 8, row2Y, 0xFFDCE9FF);
+        context.drawTextWithShadow(tr, jackpotText, rightColumnX, row1Y, 0xFFFFE69E);
+        context.drawTextWithShadow(tr, wonText, rightColumnX, row2Y, 0xFFC0D4F2);
 
         drawBetButton(context, tr, l.betMinusX, l.betBtnY, l.betBtnW, l.betBtnH, "-");
         drawBetButton(context, tr, l.betPlusX, l.betBtnY, l.betBtnW, l.betBtnH, "+");
@@ -373,10 +390,12 @@ final class SlotMachineWindow {
         int closeX = windowX + windowW - btnW - 5;
         int pinX = closeX - btnW - 4;
 
-        int betBtnY = panelY + 20;
+        TextRenderer tr = MinecraftClient.getInstance().textRenderer;
+        int betTextW = tr == null ? 44 : tr.getWidth("Bet: 0000");
+        int betBtnY = panelY + 19;
         int betBtnW = 22;
         int betBtnH = 14;
-        int betMinusX = panelX + 68;
+        int betMinusX = panelX + 8 + betTextW + 12;
         int betPlusX = betMinusX + betBtnW + 6;
         int betMaxX = betPlusX + betBtnW + 6;
 
@@ -426,9 +445,7 @@ final class SlotMachineWindow {
     }
 
     private static boolean shouldRender(MinecraftClient mc, boolean pinned) {
-        if (mc == null || mc.player == null) return false;
-        Screen screen = mc.currentScreen;
-        return pinned || screen == null;
+        return mc != null && mc.player != null;
     }
 
     private static int scaledMouseX(MinecraftClient mc) {
