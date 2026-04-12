@@ -423,6 +423,12 @@ public class AutoLogin extends Module {
     private void clearPendingReceiveFallback() { pendingFallbackMessage = null; pendingFallbackCapturedAtMs = 0; }
     private void ensureJoinContextInitialized(String source) { if (joinTimeMs > 0 || mc.player == null || mc.world == null) return; joinTimeMs = System.currentTimeMillis(); appendDebugLine("join-time-initialized source=" + source + " world-time=" + mc.world.getTime()); }
 
+    public boolean saveLoginProfile(String username, String server, String password) {
+        if (username == null || username.isBlank() || server == null || server.isBlank() || password == null || password.isBlank()) return false;
+        profileStore.upsertProfile(username, server, LoginMode.LOGIN, password, newEntryDelay.get());
+        return true;
+    }
+
     public static ParsedCommand parseCredentialCommand(String rawCommand) { return AutoLoginTextRules.parseCredentialCommand(rawCommand); }
     public static boolean matchesKey(String storedUsername, String storedServer, String currentUsername, String currentServer) { return AutoLoginTextRules.matchesKey(storedUsername, storedServer, currentUsername, currentServer); }
     public static boolean isAuthRequest(String message, LoginMode mode) { return AutoLoginTextRules.isAuthRequest(message, mode); }

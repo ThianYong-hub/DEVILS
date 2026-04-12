@@ -61,28 +61,39 @@ public final class AutoLoginProfileStore {
     }
 
     public AutoLoginProfile findMatchingProfile(String username, String server) {
-        for (AutoLoginProfile profile : profiles) {
-            if (!profile.enabled.get()) continue;
-            if (AutoLoginTextRules.matchesKey(profile.username.get(), profile.server.get(), username, server)) return profile;
-        }
-        return null;
+        return findProfile(username, server, true);
     }
 
     public void upsertProfile(String username, String server, AutoLogin.ParsedCommand parsed, int defaultDelay) {
-        AutoLoginProfile existing = findMatchingProfile(username, server);
+        if (parsed == null) return;
+        upsertProfile(username, server, parsed.mode(), parsed.password(), defaultDelay);
+    }
+
+    public void upsertProfile(String username, String server, AutoLogin.LoginMode mode, String password, int defaultDelay) {
+        if (mode == null) return;
+
+        String normalizedUsername = username == null ? "" : username.trim();
+        String normalizedServer = server == null ? "" : server.trim();
+        String normalizedPassword = password == null ? "" : password.trim();
+        if (normalizedUsername.isBlank() || normalizedServer.isBlank() || normalizedPassword.isBlank()) return;
+
+        AutoLoginProfile existing = findProfile(normalizedUsername, normalizedServer, false);
         if (existing == null) {
             AutoLoginProfile profile = new AutoLoginProfile();
             profile.enabled.set(true);
-            profile.username.set(username);
-            profile.server.set(server);
-            profile.mode.set(parsed.mode());
-            profile.password.set(parsed.password());
+            profile.username.set(normalizedUsername);
+            profile.server.set(normalizedServer);
+            profile.mode.set(mode);
+            profile.password.set(normalizedPassword);
             profile.delay.set(defaultDelay);
             profiles.add(profile);
             return;
         }
-        existing.mode.set(parsed.mode());
-        existing.password.set(parsed.password());
+
+        existing.username.set(normalizedUsername);
+        existing.server.set(normalizedServer);
+        existing.mode.set(mode);
+        existing.password.set(normalizedPassword);
         existing.enabled.set(true);
     }
 
@@ -184,6 +195,14 @@ public final class AutoLoginProfileStore {
 
     private static String profileIdentityKey(SyncProfileData data) {
         return AutoLoginTextRules.normalizeKey(data.username()) + "|" + AutoLoginTextRules.normalizeServerKey(data.server());
+    }
+
+    private AutoLoginProfile findProfile(String username, String server, boolean enabledOnly) {
+        for (AutoLoginProfile profile : profiles) {
+            if (enabledOnly && !profile.enabled.get()) continue;
+            if (AutoLoginTextRules.matchesKey(profile.username.get(), profile.server.get(), username, server)) return profile;
+        }
+        return null;
     }
 }
 

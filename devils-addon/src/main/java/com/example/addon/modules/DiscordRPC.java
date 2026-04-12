@@ -16,6 +16,8 @@ import meteordevelopment.orbit.EventHandler;
 
 public class DiscordRPC extends Module {
     private static final long APP_ID = 1475814462278860810L;
+    private static final int PRESENCE_REFRESH_TICKS = 100;
+    private static final int FORCE_RECONNECT_TICKS = 600;
     private static final String VERSION = FabricLoader.getInstance()
         .getModContainer("devils-addon")
         .map(c -> c.getMetadata().getVersion().getFriendlyString())
@@ -23,7 +25,9 @@ public class DiscordRPC extends Module {
 
     private final RichPresence rpc = new RichPresence();
     private int tickCounter;
+    private int reconnectCounter;
     private boolean lastWasInMainMenu;
+    private boolean restoreMeteorPresenceOnDeactivate;
 
     public DiscordRPC() {
         super(AddonTemplate.CATEGORY, "discord-rpc", "Shows Devils Addon branding in Discord status.");
@@ -35,14 +39,17 @@ public class DiscordRPC extends Module {
         rpc.setLargeImage("devils", "v." + VERSION);
         rpc.setStart(System.currentTimeMillis() / 1000L);
         tickCounter = 0;
+        reconnectCounter = 0;
         lastWasInMainMenu = true;
+        restoreMeteorPresenceOnDeactivate = false;
 
-        tryConnect();
+        forceReconnect();
     }
 
     @Override
     public void onDeactivate() {
         DiscordIPC.stop();
+        restoreMeteorPresenceIfNeeded();
     }
 
     @EventHandler
@@ -51,7 +58,7 @@ public class DiscordRPC extends Module {
     }
 
     private void onGameJoinedSafe(GameJoinedEvent event) {
-        if (!DiscordIPC.isConnected()) tryConnect();
+        if (!DiscordIPC.isConnected()) forceReconnect();
         else updatePresence();
     }
 
@@ -62,7 +69,7 @@ public class DiscordRPC extends Module {
 
     private void onGameLeftSafe(GameLeftEvent event) {
         lastWasInMainMenu = false;
-        if (!DiscordIPC.isConnected()) tryConnect();
+        if (!DiscordIPC.isConnected()) forceReconnect();
         else updatePresence();
     }
 
@@ -73,7 +80,7 @@ public class DiscordRPC extends Module {
 
     private void onOpenScreenSafe(OpenScreenEvent event) {
         if (!DiscordIPC.isConnected()) {
-            tryConnect();
+            forceReconnect();
             return;
         }
         if (mc.player == null) {
@@ -89,24 +96,59 @@ public class DiscordRPC extends Module {
 
     private void onTickSafe(TickEvent.Post event) {
         tickCounter++;
-        if (tickCounter >= 100) {
+        reconnectCounter++;
+
+        if (ensureMeteorPresenceDisabled()) {
             tickCounter = 0;
-            if (!DiscordIPC.isConnected()) tryConnect();
+            reconnectCounter = 0;
+            forceReconnect();
+            return;
+        }
+
+        if (reconnectCounter >= FORCE_RECONNECT_TICKS) {
+            reconnectCounter = 0;
+            forceReconnect();
+            return;
+        }
+
+        if (tickCounter >= PRESENCE_REFRESH_TICKS) {
+            tickCounter = 0;
+            if (!DiscordIPC.isConnected()) forceReconnect();
             else updatePresence();
         }
     }
 
-    private void tryConnect() {
-        // Disable Meteor's built-in DiscordPresence if active (only one IPC connection allowed)
+    private boolean ensureMeteorPresenceDisabled() {
         DiscordPresence meteorPresence = Modules.get().get(DiscordPresence.class);
         if (meteorPresence != null && meteorPresence.isActive()) {
+            restoreMeteorPresenceOnDeactivate = true;
+            meteorPresence.toggle();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void restoreMeteorPresenceIfNeeded() {
+        if (!restoreMeteorPresenceOnDeactivate) return;
+
+        DiscordPresence meteorPresence = Modules.get().get(DiscordPresence.class);
+        if (meteorPresence != null && !meteorPresence.isActive()) {
             meteorPresence.toggle();
         }
+        restoreMeteorPresenceOnDeactivate = false;
+    }
+
+    private void forceReconnect() {
+        ensureMeteorPresenceDisabled();
+        DiscordIPC.stop();
 
         DiscordIPC.start(APP_ID, () -> {
             lastWasInMainMenu = false;
             updatePresence();
         });
+
+        updatePresence();
     }
 
     private void updatePresence() {

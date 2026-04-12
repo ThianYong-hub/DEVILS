@@ -1,6 +1,7 @@
 package com.example.addon;
 
 import com.example.addon.config.AddonModulesConfig;
+import com.example.addon.commands.SessionCommand;
 import com.example.addon.modules.AntiWasp;
 import com.example.addon.modules.AutoAnvilRename;
 import com.example.addon.modules.AutoCraft;
@@ -14,6 +15,7 @@ import com.example.addon.modules.DiscordRPC;
 import com.example.addon.modules.JoinWatcher;
 import com.example.addon.modules.LavaBucket;
 import com.example.addon.modules.MaceSpoof;
+import com.example.addon.modules.NukerPlus;
 import com.example.addon.modules.Ping;
 import com.example.addon.modules.SpearSpoof;
 import com.example.addon.modules.SyncHub;
@@ -100,6 +102,7 @@ public class AddonTemplate extends MeteorAddon {
         modules.add(new HighwayBuilder());
         modules.add(new MaceSpoof());
         modules.add(new SpearSpoof());
+        modules.add(new NukerPlus());
         modules.add(new ChestTrackerModule());
         modules.add(new StashMover());
     }
@@ -107,6 +110,7 @@ public class AddonTemplate extends MeteorAddon {
     private void registerCommands() {
         Commands.add(new CommandExample());
         Commands.add(new AutoAnvilRenameCommand());
+        Commands.add(new SessionCommand());
         Commands.add(new StashMoverCommand());
     }
 

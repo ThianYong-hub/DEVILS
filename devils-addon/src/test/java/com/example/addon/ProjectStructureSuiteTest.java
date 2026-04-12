@@ -46,6 +46,7 @@ class ProjectStructureSuiteTest {
         assertTrue(source.contains("modules.add(new StashMover());"));
         assertTrue(source.contains("Commands.add(new CommandExample());"));
         assertTrue(source.contains("Commands.add(new AutoAnvilRenameCommand());"));
+        assertTrue(source.contains("Commands.add(new SessionCommand());"));
         assertTrue(source.contains("Commands.add(new StashMoverCommand());"));
         assertTrue(source.contains("Hud.get().register(HudExample.INFO);"));
         assertFalse(source.contains("modules.add(new GamesModule());"));
@@ -68,6 +69,7 @@ class ProjectStructureSuiteTest {
             mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverCommand.java"),
             mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverOwnPearlTracker.java"),
             mainJava("com", "example", "addon", "modules", "stashmover", "StashMoverSlotPolicy.java"),
+            mainJava("com", "example", "addon", "commands", "SessionCommand.java"),
             mainJava("com", "example", "addon", "modules", "autologin", "AutoLoginSyncController.java"),
             mainJava("com", "example", "addon", "modules", "autologin", "AutoLoginSyncDiagnostics.java"),
             mainJava("com", "example", "addon", "modules", "highwaybuilder", "HighwayBuilderTypes.java"),
