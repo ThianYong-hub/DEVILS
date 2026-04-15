@@ -4,7 +4,7 @@
 
 ## ڈاؤن لوڈ
 
-- موجودہ بلڈ (`v0.0.44`): [jar ڈاؤن لوڈ کریں](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.49/devils-addon-0.0.49.jar)
+- موجودہ بلڈ (`v0.0.50`): [jar ڈاؤن لوڈ کریں](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.50/devils-addon-0.0.50.jar)
 - تازہ ترین ریلیز: [کھولیں](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - تمام ریلیزز: [کھولیں](https://github.com/ThianYong-hub/DEVILS/releases)
 
