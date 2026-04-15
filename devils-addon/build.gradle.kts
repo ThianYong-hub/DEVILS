@@ -379,6 +379,22 @@ tasks {
 
     val verifySourceNativeBuildBasis by registering {
         doLast {
+            val requiredPatchPaths = listOf(
+                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/api/base/ResultHolder.java"),
+                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/gps/Coordinate.java"),
+                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/toasts/CustomToast.java")
+            )
+            requiredPatchPaths.forEach { path ->
+                check(path.exists()) {
+                    "Missing source-native patch input: ${path.absolutePath}"
+                }
+            }
+
+            if (!sourceNativeBuildRoot.isDirectory) {
+                logger.lifecycle("Source-native build tree not present; relying on remapped dependency jars and tracked patches.")
+                return@doLast
+            }
+
             val requiredPaths = listOf(
                 sourceNativeBuildRoot.resolve("chesttracker-port-embedded/red/jackf/chesttracker/impl/ChestTracker.java"),
                 sourceNativeBuildRoot.resolve("where-is-it-port/red/jackf/whereisit/WhereIsIt.java"),
@@ -388,9 +404,6 @@ tasks {
                 sourceNativeBuildRoot.resolve("xaeroplus-fabric/xaeroplus/fabric/XaeroPlusFabric.java"),
                 sourceNativeBuildRoot.resolve("yet-another-config-lib/dev/isxander/yacl3/platform/PlatformEntrypoint.java"),
                 sourceNativeBuildRoot.resolve("searchables-fabric/searchables.mixins.json"),
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/api/base/ResultHolder.java"),
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/gps/Coordinate.java"),
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/toasts/CustomToast.java"),
                 sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/xaero/common/server/mods/SupportServerMods.java"),
                 sourceNativeBuildRoot.resolve("xaerolib-fabric/xaero/lib/client/compat/amecs/AmecsCompatibility.java")
             )
@@ -409,19 +422,19 @@ tasks {
             rootProject.file("Souce 1.21.11/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
             sourceNativeBuildRoot.resolve("chesttracker-port-embedded/LICENSE_devils-addon-chesttracker"),
             sourceNativeBuildRoot.resolve("jackfredlib/LICENSE_jackfredlib")
-        ) ?: error("Missing ChestTracker/JackFredLib license source")
-        val whereIsItLicense = sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null")
-        val xaeroHudNotice = sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud")
+        )
+        val whereIsItLicense = firstExisting(sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null"))
+        val xaeroHudNotice = firstExisting(sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud"))
         val xaeroPlusLicense = firstExisting(
             rootProject.file("Souce 1.21.11/Source Github/XaeroPlus-2.30.9/LICENSE"),
             sourceNativeBuildRoot.resolve("xaeroplus-fabric/LICENSE")
         )
-        val sqliteLicense = sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE")
+        val sqliteLicense = firstExisting(sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE"))
         val soundlibsLgpl = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/LGPL-2.1.txt")
         val soundlibsJorbis = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/jorbis-COPYING.LIB")
         val soundlibsVorbisSpi = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/vorbisspi-LICENSE.txt")
 
-        inputs.files(
+        inputs.files(listOfNotNull(
             chestTrackerLicense,
             whereIsItLicense,
             xaeroHudNotice,
@@ -430,7 +443,7 @@ tasks {
             soundlibsLgpl,
             soundlibsJorbis,
             soundlibsVorbisSpi
-        )
+        ))
         outputs.file(generatedThirdPartyNoticeFile)
 
         doLast {
@@ -438,6 +451,8 @@ tasks {
             outputFile.parentFile.mkdirs()
 
             fun read(file: File): String = file.readText(StandardCharsets.UTF_8).trimEnd()
+            fun readOrNotice(file: File?, title: String, body: String): String =
+                file?.readText(StandardCharsets.UTF_8)?.trimEnd() ?: "$title\n\n$body".trimEnd()
             fun section(title: String, body: String): String = buildString {
                 appendLine("===== $title =====")
                 appendLine(body.trimEnd())
@@ -472,7 +487,7 @@ tasks {
                 - Souce 1.21.11/Source Native Build/xaeros-world-map-fabric/fabric.mod.json
 
                 Bundled notice text:
-                ${read(xaeroHudNotice)}
+                ${readOrNotice(xaeroHudNotice, "Xaero notice unavailable in clean checkout", "The source-native Xaero notice file was not present; upstream metadata marks the bundled Xaero components as All Rights Reserved.")}
             """.trimIndent()
 
             outputFile.writeText(
@@ -482,8 +497,8 @@ tasks {
                     appendLine("This build intentionally keeps a single root LICENSE for Devils-Addon and consolidates third-party notice material here.")
                     appendLine("Source-native incorporated components remain subject to their upstream license terms.")
                     appendLine()
-                    append(section("ChestTracker, JackFredLib, WhereIsIt family - LGPL-3.0", read(chestTrackerLicense)))
-                    append(section("WhereIsIt bundled license text as found in local source basis", read(whereIsItLicense)))
+                    append(section("ChestTracker, JackFredLib, WhereIsIt family - LGPL notice", readOrNotice(chestTrackerLicense, "LGPL notice unavailable in clean checkout", "The source-native ChestTracker/JackFredLib license file was not present; upstream metadata identifies the JackFred/ChestTracker/WhereIsIt family as LGPL licensed.")))
+                    append(section("WhereIsIt bundled license text as found in local source basis", readOrNotice(whereIsItLicense, "WhereIsIt license unavailable in clean checkout", "The source-native WhereIsIt license file was not present in this checkout.")))
                     append(section("Searchables - metadata notice", searchablesMitNotice))
                     append(section("YetAnotherConfigLib - metadata notice", yaclLgplNotice))
                     append(section("Xaero family notice", xaeroNotice))
@@ -505,7 +520,7 @@ tasks {
                             )
                         )
                     }
-                    append(section("sqlite-jdbc payload inside source-native XaeroPlus tree - Apache-2.0", read(sqliteLicense)))
+                    append(section("sqlite-jdbc payload inside source-native XaeroPlus tree - Apache-2.0", readOrNotice(sqliteLicense, "sqlite-jdbc license unavailable in clean checkout", "The source-native sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
                     append(section("Soundlibs - LGPL-2.1", read(soundlibsLgpl)))
                     append(section("Soundlibs - jorbis notice", read(soundlibsJorbis)))
                     append(section("Soundlibs - vorbisspi notice", read(soundlibsVorbisSpi)))
