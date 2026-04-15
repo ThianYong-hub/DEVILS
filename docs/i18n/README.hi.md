@@ -4,7 +4,7 @@
 
 ## डाउनलोड
 
-- वर्तमान बिल्ड (`v0.0.50`): [jar डाउनलोड करें](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.50/devils-addon-0.0.50.jar)
+- वर्तमान बिल्ड (`v0.0.51`): [jar डाउनलोड करें](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.51/devils-addon-0.0.51.jar)
 - नवीनतम रिलीज़ पेज: [खोलें](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - सभी रिलीज़: [खोलें](https://github.com/ThianYong-hub/DEVILS/releases)
 
