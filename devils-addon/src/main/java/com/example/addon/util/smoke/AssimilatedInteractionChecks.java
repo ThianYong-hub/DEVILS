@@ -1,6 +1,7 @@
 package com.example.addon.util.smoke;
 
 import com.example.addon.shared.sync.SyncJsonUtils;
+import com.example.addon.modules.NukerPlus;
 import com.example.addon.modules.chesttracker.ChestTrackerBridge;
 import com.example.addon.modules.chesttracker.ChestTrackerSettingsManager;
 import com.example.addon.util.xaerosync.XaeroWaypointManagedWaypoints;
@@ -29,6 +30,7 @@ import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
 import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.Click;
@@ -827,6 +829,81 @@ public final class AssimilatedInteractionChecks {
                         });
                 } catch (Exception ignored) {
                 }
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static SmokeCheckResult nukerPlusAccelerationModuleFlow() {
+        NukerPlus module = null;
+        Setting<NukerPlus.MiningAccelerationMode> accelerationMode = null;
+        Setting<Double> damage = null;
+        Setting<Boolean> grimBypass = null;
+        Setting<Boolean> debugAcceleration = null;
+        boolean originalEnabled = false;
+        NukerPlus.MiningAccelerationMode originalMode = null;
+        Double originalDamage = null;
+        Boolean originalGrimBypass = null;
+        Boolean originalDebugAcceleration = null;
+        try {
+            module = Modules.get().get(NukerPlus.class);
+            if (module == null) return SmokeCheckResult.fail("nukerplus-accel", "module not registered");
+
+            accelerationMode = (Setting<NukerPlus.MiningAccelerationMode>) getFieldValue(NukerPlus.class, module, "accelerationMode");
+            damage = (Setting<Double>) getFieldValue(NukerPlus.class, module, "damage");
+            grimBypass = (Setting<Boolean>) getFieldValue(NukerPlus.class, module, "grimBypass");
+            debugAcceleration = (Setting<Boolean>) getFieldValue(NukerPlus.class, module, "debugAcceleration");
+
+            originalEnabled = module.isActive();
+            originalMode = accelerationMode.get();
+            originalDamage = damage.get();
+            originalGrimBypass = grimBypass.get();
+            originalDebugAcceleration = debugAcceleration.get();
+
+            if (originalEnabled) module.toggle();
+
+            accelerationMode.set(NukerPlus.MiningAccelerationMode.SpeedMineDamage);
+            damage.set(0.63);
+            debugAcceleration.set(true);
+            module.toggle();
+            boolean damageToggleRoundTrip = module.isActive();
+            module.toggle();
+
+            accelerationMode.set(NukerPlus.MiningAccelerationMode.Insta);
+            grimBypass.set(true);
+            module.toggle();
+            boolean instaToggleRoundTrip = module.isActive();
+            module.toggle();
+
+            boolean cleanDeactivate = !module.isActive();
+            boolean settingRoundTrip = accelerationMode.get() == NukerPlus.MiningAccelerationMode.Insta
+                && Math.abs(damage.get() - 0.63) < 1.0E-6
+                && grimBypass.get()
+                && debugAcceleration.get();
+
+            if (!damageToggleRoundTrip) return SmokeCheckResult.fail("nukerplus-accel", "SpeedMineDamage mode did not toggle active");
+            if (!instaToggleRoundTrip) return SmokeCheckResult.fail("nukerplus-accel", "Insta mode did not toggle active");
+            if (!cleanDeactivate) return SmokeCheckResult.fail("nukerplus-accel", "module stayed active after toggle round trip");
+            if (!settingRoundTrip) return SmokeCheckResult.fail("nukerplus-accel", "new acceleration settings did not retain updated values");
+
+            return SmokeCheckResult.pass(
+                "nukerplus-accel",
+                "registered=true damage=0.63 grimBypass=true debugAcceleration=true damageToggle=" + damageToggleRoundTrip + " instaToggle=" + instaToggleRoundTrip
+            );
+        } catch (Throwable t) {
+            return SmokeCheckResult.fail("nukerplus-accel", t.getClass().getSimpleName() + ": " + t.getMessage());
+        } finally {
+            try {
+                if (module != null && module.isActive()) module.toggle();
+            } catch (Throwable ignored) {
+            }
+            try {
+                if (accelerationMode != null && originalMode != null) accelerationMode.set(originalMode);
+                if (damage != null && originalDamage != null) damage.set(originalDamage);
+                if (grimBypass != null && originalGrimBypass != null) grimBypass.set(originalGrimBypass);
+                if (debugAcceleration != null && originalDebugAcceleration != null) debugAcceleration.set(originalDebugAcceleration);
+                if (module != null && originalEnabled && !module.isActive()) module.toggle();
+            } catch (Throwable ignored) {
             }
         }
     }

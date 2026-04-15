@@ -27,6 +27,7 @@ import com.example.addon.modules.stashmover.StashMover;
 import com.example.addon.settings.TrackerPlayersSetting;
 import com.example.addon.util.CrashGuard;
 import com.example.addon.util.smoke.AssimilatedQualitySmoke;
+import com.example.addon.util.smoke.NukerPlusDamageTimeRuntimeValidation;
 import com.example.addon.util.smoke.StashMoverTargetedRuntimeValidation;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -63,6 +64,7 @@ public class AddonTemplate extends MeteorAddon {
         LOG.info("Initializing Devils Addon");
         CrashGuard.installLogFilters();
         AssimilatedQualitySmoke.install();
+        NukerPlusDamageTimeRuntimeValidation.install();
         StashMoverTargetedRuntimeValidation.install();
         AddonModulesConfig.init();
         CrashGuard.logXaeroState();

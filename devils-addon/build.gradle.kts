@@ -38,6 +38,7 @@ val minecraftVersion = properties["minecraft_version"] as String
 val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
 val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
 val xaeroPlusVersion = properties["xaeroplus_version"] as String
+val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
 val sourceNativeBuildRoot = rootProject.file("Souce 1.21.11/Source Native Build")
 val sourceNativeModuleDirs = listOf(
     "chesttracker-port-embedded",
@@ -50,6 +51,22 @@ val sourceNativeModuleDirs = listOf(
     "yet-another-config-lib"
 ).map { sourceNativeBuildRoot.resolve(it) }
 val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
+val sourceNativeBinaryJars = fileTree(remappedModCacheRoot) {
+    include(
+        "**/chesttracker-port-embedded-*.jar",
+        "**/Searchables-fabric-*.jar",
+        "**/where-is-it-port-*.jar",
+        "**/xaerolib-fabric-*.jar",
+        "**/xaeros-minimap-*.jar",
+        "**/xaeros-world-map-*.jar",
+        "**/xaeroplus-*.jar",
+        "**/yet-another-config-lib-*.jar"
+    )
+    exclude("**/*-sources.jar")
+}
+val sourceNativeNestedJars = fileTree(sourceNativeBuildRoot) {
+    include("**/META-INF/jars/*.jar")
+}
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
 val bundledRuntimeLibs by configurations.creating {
@@ -82,7 +99,7 @@ val relocatedMixinConfigs = setOf(
 val sourceNativeJavaDirs = listOf(
     file("src/main/thirdparty-audio/java"),
     sourceNativePatchJavaDir
-) + sourceNativeModuleDirs
+)
 val sourceNativeResourceDirs = listOf(
     file("src/main/thirdparty-audio/resources")
 ) + sourceNativeModuleDirs
@@ -133,12 +150,28 @@ val sharedMainOutput = project(":devils-shared")
     .getByType(SourceSetContainer::class.java)
     .named("main")
     .map { it.output }
+val sourceNativeClassOutputDir = layout.buildDirectory.dir("generated/source-native-classes/main")
+val extractSourceNativeRuntimeClasses by tasks.registering(Sync::class) {
+    into(sourceNativeClassOutputDir)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    includeEmptyDirs = false
+
+    from({
+        (sourceNativeBinaryJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
+            zipTree(dependencyArtifact).matching {
+                include("**/*.class")
+                exclude("module-info.class")
+            }
+        }
+    })
+}
 
 sourceSets.named("main") {
     sourceNativeJavaDirs.forEach { java.srcDir(it) }
     java.exclude(*sourceNativeJavaExcludes)
 
     resources.setSrcDirs(listOf("src/main/resources"))
+    output.dir(mapOf("builtBy" to extractSourceNativeRuntimeClasses), sourceNativeClassOutputDir)
 }
 
 java {
@@ -171,6 +204,14 @@ loom {
             runDir("run-stashmover-targeted")
             vmArg("-Ddevils.stashmover.targeted.runtime=true")
             vmArg("-Ddevils.stashmover.targeted.runtime.path=${rootProject.file("codex log/stashmover-targeted-runtime.log").absolutePath}")
+        }
+        create("nukerPlusDamageTimeRuntime") {
+            client()
+            ideConfigGenerated(false)
+            configName = "NukerPlus Damage-Time Runtime"
+            runDir("run-nukerplus-damage-time")
+            vmArg("-Ddevils.nukerplus.damage.runtime=true")
+            vmArg("-Ddevils.nukerplus.damage.runtime.dir=${rootProject.file("codex log").absolutePath}")
         }
     }
 }
@@ -310,6 +351,9 @@ dependencies {
     implementation("org.quiltmc.parsers:gson:0.2.1")
     add(bundledRuntimeLibs.name, "org.quiltmc.parsers:gson:0.2.1")
     compileOnly("com.google.code.findbugs:jsr305:3.0.2")
+    compileOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
+    testCompileOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
+    testRuntimeOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
 
     productionRuntimeMods("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
     productionRuntimeMods("net.fabricmc.fabric-api:fabric-api:${properties["fabric_api_version"] as String}")
@@ -359,10 +403,19 @@ tasks {
     }
 
     val generateThirdPartyNotices by registering {
-        val chestTrackerLicense = rootProject.file("Souce 1.21.11/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE")
+        fun firstExisting(vararg candidates: File): File? = candidates.firstOrNull { it.isFile }
+
+        val chestTrackerLicense = firstExisting(
+            rootProject.file("Souce 1.21.11/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
+            sourceNativeBuildRoot.resolve("chesttracker-port-embedded/LICENSE_devils-addon-chesttracker"),
+            sourceNativeBuildRoot.resolve("jackfredlib/LICENSE_jackfredlib")
+        ) ?: error("Missing ChestTracker/JackFredLib license source")
         val whereIsItLicense = sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null")
         val xaeroHudNotice = sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud")
-        val xaeroPlusLicense = rootProject.file("Souce 1.21.11/Source Github/XaeroPlus-2.30.9/LICENSE")
+        val xaeroPlusLicense = firstExisting(
+            rootProject.file("Souce 1.21.11/Source Github/XaeroPlus-2.30.9/LICENSE"),
+            sourceNativeBuildRoot.resolve("xaeroplus-fabric/LICENSE")
+        )
         val sqliteLicense = sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE")
         val soundlibsLgpl = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/LGPL-2.1.txt")
         val soundlibsJorbis = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/jorbis-COPYING.LIB")
@@ -434,7 +487,24 @@ tasks {
                     append(section("Searchables - metadata notice", searchablesMitNotice))
                     append(section("YetAnotherConfigLib - metadata notice", yaclLgplNotice))
                     append(section("Xaero family notice", xaeroNotice))
-                    append(section("XaeroPlus - MIT", read(xaeroPlusLicense)))
+                    if (xaeroPlusLicense != null) {
+                        append(section("XaeroPlus - MIT", read(xaeroPlusLicense)))
+                    } else {
+                        append(
+                            section(
+                                "XaeroPlus - metadata notice",
+                                """
+                                XaeroPlus is declared as MIT-licensed in the local source metadata used for this build.
+
+                                Metadata path:
+                                - Souce 1.21.11/Source Native Build/xaeroplus-fabric/fabric.mod.json
+
+                                The local source snapshot used for this build does not include a separate standalone upstream LICENSE file,
+                                so this consolidated notice keeps the declared license identifier and source path.
+                                """.trimIndent()
+                            )
+                        )
+                    }
                     append(section("sqlite-jdbc payload inside source-native XaeroPlus tree - Apache-2.0", read(sqliteLicense)))
                     append(section("Soundlibs - LGPL-2.1", read(soundlibsLgpl)))
                     append(section("Soundlibs - jorbis notice", read(soundlibsJorbis)))
@@ -485,6 +555,10 @@ tasks {
         dependsOn(verifySourceNativeBuildBasis)
     }
 
+    named("classes") {
+        dependsOn(extractSourceNativeRuntimeClasses)
+    }
+
     jar {
         inputs.property("archivesName", project.base.archivesName.get())
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -510,6 +584,15 @@ tasks {
                         "COPYING*",
                         "module-info.class"
                     )
+                }
+            }
+        })
+
+        from({
+            (sourceNativeBinaryJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
+                zipTree(dependencyArtifact).matching {
+                    include("**/*.class")
+                    exclude("module-info.class")
                 }
             }
         })
@@ -627,6 +710,29 @@ tasks {
         }
     }
 
+    val validateNukerPlusDamageTimeRuntime by registering {
+        val smokeReport = rootProject.file("codex log/nukerplus-damage-time-smoke.md")
+        val benchmarkReport = rootProject.file("codex log/nukerplus-damage-time-benchmark.md")
+        val mechanicsReport = rootProject.file("codex log/nukerplus-damage-time-mechanics.md")
+
+        doLast {
+            check(smokeReport.isFile) {
+                "NukerPlus damage smoke report was not produced at ${smokeReport.absolutePath}"
+            }
+            check(benchmarkReport.isFile) {
+                "NukerPlus damage benchmark report was not produced at ${benchmarkReport.absolutePath}"
+            }
+            check(mechanicsReport.isFile) {
+                "NukerPlus damage mechanics report was not produced at ${mechanicsReport.absolutePath}"
+            }
+
+            val smokeLines = smokeReport.readLines(StandardCharsets.UTF_8)
+            check(smokeLines.any { it.startsWith("RESULT PASS") }) {
+                "NukerPlus damage runtime smoke did not report PASS. See ${smokeReport.absolutePath}"
+            }
+        }
+    }
+
     named("runAssimilatedClientSmoke") {
         doFirst {
             val smokeRunDir = layout.projectDirectory.dir("run-assimilated-smoke").asFile
@@ -661,6 +767,24 @@ tasks {
             }
         }
         finalizedBy(validateStashMoverTargetedRuntime)
+    }
+
+    named("runNukerPlusDamageTimeRuntime") {
+        doFirst {
+            val smokeRunDir = layout.projectDirectory.dir("run-nukerplus-damage-time").asFile
+            val staleEvidencePaths = listOf(
+                smokeRunDir.resolve("saves"),
+                smokeRunDir.resolve("config"),
+                smokeRunDir.resolve("devils-addon"),
+                smokeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
+        }
+        finalizedBy(validateNukerPlusDamageTimeRuntime)
     }
 
     java {

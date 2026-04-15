@@ -1,7 +1,9 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.mixin.ClientPlayerInteractionManagerInvoker;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.events.entity.player.BlockBreakingCooldownEvent;
 import meteordevelopment.meteorclient.events.meteor.KeyEvent;
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
@@ -18,10 +20,13 @@ import meteordevelopment.meteorclient.settings.KeybindSetting;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
+import meteordevelopment.meteorclient.systems.modules.Modules;
+import meteordevelopment.meteorclient.systems.modules.player.SpeedMine;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.misc.Keybind;
 import meteordevelopment.meteorclient.utils.misc.Names;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
+import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.meteorclient.utils.player.PlayerUtils;
 import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.render.RenderUtils;
@@ -31,6 +36,8 @@ import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.orbit.EventPriority;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.util.Hand;
@@ -39,22 +46,31 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public class NukerPlus extends Module {
     private static final double CUBE_VERTICAL_SNAP = 0.125D;
+    private static final double DAMAGE_MIN = 0.60D;
+    private static final double DAMAGE_DEFAULT = 0.60D;
+    private static final double DAMAGE_MAX = 1.00D;
+    private static final float DAMAGE_FINISH_PROGRESS_EPSILON = 1.0E-4f;
+    private static final float INSTA_CHAIN_MINING_DELTA = 0.5f;
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
+    private final SettingGroup sgAcceleration = settings.createGroup("Acceleration");
     private final SettingGroup sgWhitelist = settings.createGroup("Whitelist");
     private final SettingGroup sgRender = settings.createGroup("Render");
+    private final SettingGroup sgDiagnostics = settings.createGroup("Acceleration Diagnostics");
 
     private final Setting<Shape> shape = sgGeneral.add(new EnumSetting.Builder<Shape>()
         .name("shape")
@@ -151,7 +167,7 @@ public class NukerPlus extends Module {
 
     private final Setting<Integer> maxBlocksPerTick = sgGeneral.add(new IntSetting.Builder()
         .name("max-blocks-per-tick")
-        .description("Maximum blocks to try to break per tick. Useful when insta mining.")
+        .description("Maximum blocks to try to break per tick. Also caps SpeedMineDamage charged burst finishes.")
         .defaultValue(1)
         .min(1)
         .build()
@@ -161,13 +177,6 @@ public class NukerPlus extends Module {
         .name("sort-mode")
         .description("The blocks you want to mine first.")
         .defaultValue(SortMode.Closest)
-        .build()
-    );
-
-    private final Setting<Boolean> packetMine = sgGeneral.add(new BoolSetting.Builder()
-        .name("packet-mine")
-        .description("Attempt to instamine everything at once.")
-        .defaultValue(false)
         .build()
     );
 
@@ -196,6 +205,39 @@ public class NukerPlus extends Module {
         .name("baritone-area")
         .description("Only mine blocks inside the current Baritone #sel selection area.")
         .defaultValue(false)
+        .build()
+    );
+
+    private final Setting<MiningAccelerationMode> accelerationMode = sgAcceleration.add(new EnumSetting.Builder<MiningAccelerationMode>()
+        .name("mining-acceleration-mode")
+        .description("Controls whether NukerPlus uses baseline mining, damage-based SpeedMine timing, or direct instant packet mining.")
+        .defaultValue(MiningAccelerationMode.Off)
+        .build()
+    );
+
+    private final Setting<Double> damage = sgAcceleration.add(new DoubleSetting.Builder()
+        .name("damage")
+        .description("Mio-style starting block damage. 0.6 starts at 60% progress and mines the remaining 40%. Higher = faster.")
+        .defaultValue(DAMAGE_DEFAULT)
+        .range(DAMAGE_MIN, DAMAGE_MAX)
+        .sliderRange(DAMAGE_MIN, DAMAGE_MAX)
+        .visible(this::usesSpeedMineDamageAcceleration)
+        .build()
+    );
+
+    private final Setting<Boolean> speedMineAutoSwap = sgAcceleration.add(new BoolSetting.Builder()
+        .name("speedmine-auto-swap")
+        .description("Uses the fastest hotbar tool for SpeedMineDamage, matching Mio AutoSwap behavior.")
+        .defaultValue(true)
+        .visible(this::usesSpeedMineDamageAcceleration)
+        .build()
+    );
+
+    private final Setting<Boolean> grimBypass = sgAcceleration.add(new BoolSetting.Builder()
+        .name("grim-bypass")
+        .description("Sends an additional abort packet after the instant stop packet.")
+        .defaultValue(false)
+        .visible(this::usesInstaAcceleration)
         .build()
     );
 
@@ -293,6 +335,14 @@ public class NukerPlus extends Module {
         .build()
     );
 
+    private final Setting<Boolean> debugAcceleration = sgDiagnostics.add(new BoolSetting.Builder()
+        .name("debug-acceleration")
+        .description("Print concise acceleration state changes, damage timing, and insta decisions to chat.")
+        .defaultValue(false)
+        .visible(() -> accelerationMode.get() != MiningAccelerationMode.Off)
+        .build()
+    );
+
     private final List<BlockPos> blocks = new ArrayList<>();
     private final Set<BlockPos> interacted = new ObjectOpenHashSet<>();
 
@@ -307,8 +357,18 @@ public class NukerPlus extends Module {
     private int maxh;
     private int maxv;
     private final BaritoneSelectionBridge baritoneSelectionBridge = new BaritoneSelectionBridge();
+    private final DamageBreakState damageBreakState = new DamageBreakState();
     private boolean warnedBaritoneUnavailable;
     private boolean warnedBaritoneSelectionMissing;
+    private boolean warnedExternalSpeedMineConflict;
+    private String lastAccelerationSuppressionReason;
+    private String lastAccelerationDebugMessage;
+    private long lastAccelerationDebugTick = Long.MIN_VALUE;
+    private MiningAccelerationMode lastAccelerationMode = MiningAccelerationMode.Off;
+    private long damageForcedFinishCount;
+    private long damageRetryCount;
+    private long damageBurstChainTick = Long.MIN_VALUE;
+    private int damageSwapBackSlot = -1;
 
     public NukerPlus() {
         super(AddonTemplate.CATEGORY, "nuker-plus", "Breaks blocks around you with stable Cube bounds.");
@@ -323,6 +383,29 @@ public class NukerPlus extends Module {
         interacted.clear();
         warnedBaritoneUnavailable = false;
         warnedBaritoneSelectionMissing = false;
+        warnedExternalSpeedMineConflict = false;
+        lastAccelerationSuppressionReason = null;
+        lastAccelerationDebugMessage = null;
+        lastAccelerationDebugTick = Long.MIN_VALUE;
+        lastAccelerationMode = accelerationMode.get();
+        damageForcedFinishCount = 0L;
+        damageRetryCount = 0L;
+        damageBurstChainTick = Long.MIN_VALUE;
+        damageSwapBackSlot = -1;
+        damageBreakState.clear();
+    }
+
+    @Override
+    public void onDeactivate() {
+        blocks.clear();
+        interacted.clear();
+        warnedExternalSpeedMineConflict = false;
+        lastAccelerationSuppressionReason = null;
+        lastAccelerationDebugMessage = null;
+        lastAccelerationDebugTick = Long.MIN_VALUE;
+        damageBurstChainTick = Long.MIN_VALUE;
+        restoreDamageAutoSwap();
+        resetDamageBreakState("module-disabled");
     }
 
     @EventHandler
@@ -350,7 +433,29 @@ public class NukerPlus extends Module {
 
     @EventHandler
     private void onTickPre(TickEvent.Pre event) {
-        if (mc.player == null || mc.world == null) return;
+        if (mc.player == null || mc.world == null) {
+            resetDamageBreakState("world-unavailable");
+            lastAccelerationSuppressionReason = null;
+            return;
+        }
+
+        if (!mc.player.isAlive()) {
+            resetDamageBreakState("player-dead");
+            lastAccelerationSuppressionReason = null;
+            return;
+        }
+
+        if (lastAccelerationMode != accelerationMode.get()) {
+            resetDamageBreakState("mode-switch");
+            lastAccelerationMode = accelerationMode.get();
+        }
+
+        String accelerationSuppressionReason = resolveAccelerationSuppressionReason();
+        publishAccelerationSuppressionState(accelerationSuppressionReason);
+
+        if (accelerationSuppressionReason != null || !usesSpeedMineDamageAcceleration()) {
+            resetDamageBreakState(accelerationSuppressionReason != null ? accelerationSuppressionReason : "damage-mode-inactive");
+        }
 
         if (timer > 0) {
             timer--;
@@ -429,40 +534,8 @@ public class NukerPlus extends Module {
                 ) * (sortMode.get() == SortMode.Closest ? 1 : -1)));
             }
 
-            if (blocks.isEmpty()) {
-                interacted.clear();
-                if (noBlockTimer++ >= delay.get()) firstBlock = true;
-                return;
-            } else {
-                noBlockTimer = 0;
-            }
+            handleBreakCandidates(accelerationSuppressionReason);
 
-            if (!firstBlock && !lastBlockPos.equals(blocks.getFirst())) {
-                timer = delay.get();
-                firstBlock = false;
-                lastBlockPos.set(blocks.getFirst());
-                if (timer > 0) return;
-            }
-
-            int count = 0;
-            for (BlockPos block : blocks) {
-                if (count >= maxBlocksPerTick.get()) break;
-
-                boolean canInstaMine = BlockUtils.canInstaBreak(block);
-
-                if (rotate.get()) Rotations.rotate(Rotations.getYaw(block), Rotations.getPitch(block), () -> breakBlock(block));
-                else breakBlock(block);
-
-                if (enableRenderBreaking.get()) {
-                    RenderUtils.renderTickingBlock(block, sideColor.get(), lineColor.get(), shapeModeBreak.get(), 0, 8, true, false);
-                }
-
-                lastBlockPos.set(block);
-                count++;
-                if (!canInstaMine && !packetMine.get()) break;
-            }
-
-            firstBlock = false;
             blocks.clear();
         });
     }
@@ -530,24 +603,72 @@ public class NukerPlus extends Module {
         warnedBaritoneSelectionMissing = false;
     }
 
-    private void breakBlock(BlockPos blockPos) {
+    private void handleBreakCandidates(String accelerationSuppressionReason) {
+        if (blocks.isEmpty()) {
+            resetDamageBreakState("no-targets");
+            interacted.clear();
+            if (noBlockTimer++ >= delay.get()) firstBlock = true;
+            return;
+        }
+
+        noBlockTimer = 0;
+
+        if (!firstBlock && !lastBlockPos.equals(blocks.getFirst())) {
+            timer = delay.get();
+            firstBlock = false;
+            lastBlockPos.set(blocks.getFirst());
+            if (timer > 0) return;
+        }
+
+        int count = 0;
+        for (BlockPos block : blocks) {
+            if (count >= maxBlocksPerTick.get()) break;
+
+            BreakAttemptResult[] breakResult = { BreakAttemptResult.stop() };
+            Runnable breakAction = () -> breakResult[0] = dispatchBreakAttempt(block, accelerationSuppressionReason);
+            if (rotate.get()) Rotations.rotate(Rotations.getYaw(block), Rotations.getPitch(block), breakAction);
+            else breakAction.run();
+
+            if (enableRenderBreaking.get()) {
+                RenderUtils.renderTickingBlock(block, sideColor.get(), lineColor.get(), shapeModeBreak.get(), 0, 8, true, false);
+            }
+
+            lastBlockPos.set(block);
+            count++;
+            if (!breakResult[0].continueLoop()) break;
+        }
+
+        firstBlock = false;
+    }
+
+    private BreakAttemptResult dispatchBreakAttempt(BlockPos blockPos, String accelerationSuppressionReason) {
+        if (accelerationSuppressionReason == null) {
+            if (usesInstaAcceleration()) {
+                float blockBreakingDelta = resolveBlockBreakingDelta(blockPos);
+                return performInstaBreak(blockPos, blockBreakingDelta);
+            }
+
+            if (usesSpeedMineDamageAcceleration()) {
+                prepareSpeedMineDamageTool(blockPos);
+                float blockBreakingDelta = resolveBlockBreakingDelta(blockPos);
+                if (isInstaChainEligible(blockBreakingDelta)) return performInstaBreak(blockPos, blockBreakingDelta, false);
+                return performSpeedMineDamageBreak(blockPos, blockBreakingDelta);
+            }
+        }
+
+        resetDamageBreakState("baseline-path");
+        performLegacyBreak(blockPos);
+        return BreakAttemptResult.legacy(blockPos);
+    }
+
+    private void performLegacyBreak(BlockPos blockPos) {
         if (interact.get()) {
             BlockUtils.interact(new BlockHitResult(blockPos.toCenterPos(), BlockUtils.getDirection(blockPos), blockPos, true), Hand.MAIN_HAND, swing.get());
             interacted.add(blockPos);
-        } else if (packetMine.get()) {
-            mc.getNetworkHandler().sendPacket(
-                new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos))
-            );
-
-            if (swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
-            else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
-
-            mc.getNetworkHandler().sendPacket(
-                new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, blockPos, BlockUtils.getDirection(blockPos))
-            );
-        } else {
-            BlockUtils.breakBlock(blockPos, swing.get());
+            return;
         }
+
+        BlockUtils.breakBlock(blockPos, swing.get());
     }
 
     private boolean isOutOfRange(BlockPos blockPos) {
@@ -590,8 +711,471 @@ public class NukerPlus extends Module {
         event.cooldown = 0;
     }
 
+    @EventHandler
+    private void onGameLeft(GameLeftEvent event) {
+        resetDamageBreakState("game-left");
+        lastAccelerationSuppressionReason = null;
+    }
+
     static int resolveCubeBaseY(double playerY) {
         return (int) Math.floor(playerY + CUBE_VERTICAL_SNAP);
+    }
+
+    static boolean isInstaChainEligible(float blockBreakingDelta) {
+        return blockBreakingDelta > INSTA_CHAIN_MINING_DELTA;
+    }
+
+    private float resolveBlockBreakingDelta(BlockPos blockPos) {
+        if (mc.player == null || mc.world == null || blockPos == null) return 0.0f;
+        BlockState blockState = mc.world.getBlockState(blockPos);
+        return blockState.calcBlockBreakingDelta(mc.player, mc.world, blockPos);
+    }
+
+    private BreakAttemptResult performInstaBreak(BlockPos blockPos, float blockBreakingDelta) {
+        return performInstaBreak(blockPos, blockBreakingDelta, true);
+    }
+
+    private BreakAttemptResult performInstaBreak(BlockPos blockPos, float blockBreakingDelta, boolean resetDamageState) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.getNetworkHandler() == null) {
+            resetDamageBreakState("insta-fallback");
+            performLegacyBreak(blockPos);
+            return BreakAttemptResult.legacy(blockPos);
+        }
+
+        if (resetDamageState) resetDamageBreakState("insta-priority");
+        Direction direction = BlockUtils.getDirection(blockPos);
+        ((ClientPlayerInteractionManagerInvoker) mc.interactionManager).devilsAddon$sendSequencedPacket(
+            mc.world,
+            sequence -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, blockPos, direction, sequence)
+        );
+
+        swingBreakingHand();
+
+        ((ClientPlayerInteractionManagerInvoker) mc.interactionManager).devilsAddon$sendSequencedPacket(
+            mc.world,
+            sequence -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, blockPos, direction, sequence)
+        );
+
+        if (grimBypass.get()) {
+            mc.getNetworkHandler().sendPacket(new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.ABORT_DESTROY_BLOCK, blockPos.up(), direction));
+        }
+
+        boolean continueLoop = isInstaChainEligible(blockBreakingDelta);
+        debugAcceleration("insta packet " + blockPos + " delta=" + formatDelta(blockBreakingDelta) + (continueLoop ? " chain" : " single") + (grimBypass.get() ? " grim-bypass" : ""));
+        if (!resetDamageState) {
+            damageBreakState.clear();
+            restoreDamageAutoSwap();
+        }
+        return BreakAttemptResult.insta(continueLoop);
+    }
+
+    private BreakAttemptResult performSpeedMineDamageBreak(BlockPos blockPos, float blockBreakingDelta) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.getNetworkHandler() == null) {
+            resetDamageBreakState("damage-fallback");
+            performLegacyBreak(blockPos);
+            return BreakAttemptResult.legacy(blockPos);
+        }
+
+        BlockState blockState = mc.world.getBlockState(blockPos);
+        if (blockState.isAir()) {
+            resetDamageBreakState("target-air");
+            return BreakAttemptResult.stop();
+        }
+
+        if (!Float.isFinite(blockBreakingDelta) || blockBreakingDelta <= 0.0f) {
+            resetDamageBreakState("delta-unusable");
+            performLegacyBreak(blockPos);
+            return BreakAttemptResult.stop();
+        }
+
+        if (canUseDamageBurstChain()) {
+            return performChargedSpeedMineDamageBreak(blockPos, blockState, blockBreakingDelta);
+        }
+
+        Direction direction = damageBreakState.matches(blockPos) && damageBreakState.direction != null
+            ? damageBreakState.direction
+            : BlockUtils.getDirection(blockPos);
+        ItemStack toolSnapshot = mc.player.getMainHandStack().copy();
+        int vanillaBreakTicks = calculateVanillaBreakTicks(blockBreakingDelta);
+        int targetBreakTicks = calculateTargetBreakTicks(vanillaBreakTicks, damage.get(), blockBreakingDelta);
+
+        if (damageBreakState.requiresNewCycle(blockPos, blockState, toolSnapshot)) {
+            if (damageBreakState.isTracking()) resetDamageBreakState("target-switch");
+            damageBreakState.start(blockPos.toImmutable(), blockState, direction, toolSnapshot, mc.world.getTime(), vanillaBreakTicks, targetBreakTicks, blockBreakingDelta);
+        } else {
+            damageBreakState.refresh(blockState, direction, toolSnapshot, mc.world.getTime(), vanillaBreakTicks, targetBreakTicks, blockBreakingDelta);
+        }
+
+        ClientPlayerInteractionManagerInvoker interactionManager = (ClientPlayerInteractionManagerInvoker) mc.interactionManager;
+        boolean currentlyBreaking = interactionManager.devilsAddon$isCurrentlyBreaking(blockPos);
+
+        if (damageBreakState.forcedFinishAttempted && !currentlyBreaking) {
+            damageRetryCount++;
+            debugAcceleration("damage rebreak " + blockPos + " retry=" + damageRetryCount + " damage=" + formatDamageMultiplier(damage.get()));
+            resetDamageBreakState("forced-finish-persisted");
+            damageBreakState.start(blockPos.toImmutable(), blockState, direction, toolSnapshot, mc.world.getTime(), vanillaBreakTicks, targetBreakTicks, blockBreakingDelta);
+        }
+
+        if (!currentlyBreaking) {
+            boolean started = mc.interactionManager.attackBlock(blockPos, direction);
+            swingBreakingHand();
+            seedSpeedMineDamageProgress(interactionManager);
+            if (!started) {
+                resetDamageBreakState("attack-failed");
+                return BreakAttemptResult.stop();
+            }
+
+            debugAcceleration(
+                "damage start " + blockPos
+                    + " delta=" + formatDelta(blockBreakingDelta)
+                    + " vanilla=" + damageBreakState.vanillaBreakTicks
+                    + " target=" + damageBreakState.targetBreakTicks
+                    + " damage=" + formatDamageMultiplier(damage.get())
+            );
+            if (damageBreakState.targetBreakTicks <= 1) {
+                damageBreakState.elapsedBreakTicks = 1;
+                return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
+            }
+            return BreakAttemptResult.stop();
+        }
+
+        damageBreakState.elapsedBreakTicks = damageBreakState.computeElapsedTicks(mc.world.getTime());
+        seedSpeedMineDamageProgress(interactionManager);
+
+        if (damageBreakState.elapsedBreakTicks >= damageBreakState.targetBreakTicks) {
+            return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
+        }
+
+        boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
+        swingBreakingHand();
+        seedSpeedMineDamageProgress(interactionManager);
+
+        if (!progressed) {
+            damageRetryCount++;
+            resetDamageBreakState("progress-lost");
+        }
+
+        return BreakAttemptResult.stop();
+    }
+
+    private BreakAttemptResult performChargedSpeedMineDamageBreak(BlockPos blockPos, BlockState blockState, float blockBreakingDelta) {
+        Direction direction = BlockUtils.getDirection(blockPos);
+        ItemStack toolSnapshot = mc.player.getMainHandStack().copy();
+        int vanillaBreakTicks = calculateVanillaBreakTicks(blockBreakingDelta);
+        int targetBreakTicks = calculateTargetBreakTicks(vanillaBreakTicks, damage.get(), blockBreakingDelta);
+
+        damageBreakState.start(blockPos.toImmutable(), blockState, direction, toolSnapshot, mc.world.getTime(), vanillaBreakTicks, targetBreakTicks, blockBreakingDelta);
+        damageBreakState.elapsedBreakTicks = targetBreakTicks;
+
+        ClientPlayerInteractionManagerInvoker interactionManager = (ClientPlayerInteractionManagerInvoker) mc.interactionManager;
+        boolean started = mc.interactionManager.attackBlock(blockPos, direction);
+        swingBreakingHand();
+        seedSpeedMineDamageProgress(interactionManager);
+        if (!started) {
+            resetDamageBreakState("charged-attack-failed");
+            return BreakAttemptResult.stop();
+        }
+
+        debugAcceleration(
+            "damage charged " + blockPos
+                + " delta=" + formatDelta(blockBreakingDelta)
+                + " vanilla=" + damageBreakState.vanillaBreakTicks
+                + " target=" + damageBreakState.targetBreakTicks
+                + " damage=" + formatDamageMultiplier(damage.get())
+        );
+        return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
+    }
+
+    private BreakAttemptResult finishSpeedMineDamageBreak(BlockPos blockPos, Direction direction, float blockBreakingDelta, ClientPlayerInteractionManagerInvoker interactionManager) {
+        float finishReadyProgress = MathHelper.clamp(1.0f - blockBreakingDelta + DAMAGE_FINISH_PROGRESS_EPSILON, 0.0f, 1.0f);
+        interactionManager.devilsAddon$setCurrentBreakingProgress(Math.max(damageBreakState.lastProgress, finishReadyProgress));
+
+        boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
+        swingBreakingHand();
+
+        damageBreakState.forcedFinishAttempted = true;
+        damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
+        damageForcedFinishCount++;
+        debugAcceleration(
+            "damage finish " + blockPos
+                + " elapsed=" + damageBreakState.elapsedBreakTicks + "/" + damageBreakState.targetBreakTicks
+                + " vanilla=" + damageBreakState.vanillaBreakTicks
+                + " progress=" + formatDelta(damageBreakState.lastProgress)
+                + " forced=" + damageForcedFinishCount
+        );
+
+        if (!progressed) {
+            damageRetryCount++;
+            resetDamageBreakState("finish-progress-lost");
+            return BreakAttemptResult.stop();
+        }
+
+        armDamageBurstChain();
+        damageBreakState.clear();
+        restoreDamageAutoSwap();
+        return BreakAttemptResult.keepGoing();
+    }
+
+    private void seedSpeedMineDamageProgress(ClientPlayerInteractionManagerInvoker interactionManager) {
+        float currentProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
+        float seedProgress = damageSeedProgress(damage.get());
+        if (currentProgress < seedProgress) {
+            interactionManager.devilsAddon$setCurrentBreakingProgress(seedProgress);
+            damageBreakState.lastProgress = seedProgress;
+        } else {
+            damageBreakState.lastProgress = currentProgress;
+        }
+    }
+
+    private boolean canUseDamageBurstChain() {
+        return mc.world != null
+            && maxBlocksPerTick.get() > 1
+            && damage.get() < DAMAGE_MAX
+            && damageBurstChainTick == mc.world.getTime();
+    }
+
+    private void armDamageBurstChain() {
+        if (mc.world == null || maxBlocksPerTick.get() <= 1 || damage.get() >= DAMAGE_MAX) return;
+        damageBurstChainTick = mc.world.getTime();
+    }
+
+    private boolean usesSpeedMineDamageAcceleration() {
+        return accelerationMode.get() == MiningAccelerationMode.SpeedMineDamage;
+    }
+
+    private boolean usesInstaAcceleration() {
+        return accelerationMode.get() == MiningAccelerationMode.Insta;
+    }
+
+    private String resolveAccelerationSuppressionReason() {
+        if (accelerationMode.get() == MiningAccelerationMode.Off) return null;
+        if (interact.get()) return "interact-mode";
+        return isMeteorSpeedMineActive() ? "meteor-speedmine" : null;
+    }
+
+    private boolean isMeteorSpeedMineActive() {
+        try {
+            SpeedMine speedMine = Modules.get().get(SpeedMine.class);
+            return speedMine != null && speedMine.isActive();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void publishAccelerationSuppressionState(String reason) {
+        if ((reason == null && lastAccelerationSuppressionReason == null) || (reason != null && reason.equals(lastAccelerationSuppressionReason))) return;
+        lastAccelerationSuppressionReason = reason;
+
+        if ("meteor-speedmine".equals(reason) && !warnedExternalSpeedMineConflict) {
+            warning("NukerPlus acceleration is paused while Meteor SpeedMine is active.");
+            warnedExternalSpeedMineConflict = true;
+        } else if (!"meteor-speedmine".equals(reason)) {
+            warnedExternalSpeedMineConflict = false;
+        }
+
+        if (accelerationMode.get() == MiningAccelerationMode.Off) return;
+        if (reason == null) debugAcceleration("acceleration active " + accelerationMode.get().name());
+        else debugAcceleration("acceleration suppressed " + reason);
+    }
+
+    private void resetDamageBreakState(String reason) {
+        if (!damageBreakState.isTracking()) {
+            damageBreakState.clear();
+            restoreDamageAutoSwap();
+            return;
+        }
+
+        if (mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) {
+            try {
+                mc.interactionManager.cancelBlockBreaking();
+            } catch (Throwable ignored) {
+            }
+        }
+
+        String summary = damageBreakState.summary();
+        damageBreakState.clear();
+        restoreDamageAutoSwap();
+
+        if (reason != null && !reason.isBlank()) {
+            debugAcceleration("damage reset " + reason + " " + summary);
+        }
+    }
+
+    private void prepareSpeedMineDamageTool(BlockPos blockPos) {
+        if (!speedMineAutoSwap.get() || mc.player == null || mc.world == null || blockPos == null) return;
+
+        BlockState state = mc.world.getBlockState(blockPos);
+        if (state.isAir()) return;
+
+        int selectedSlot = mc.player.getInventory().getSelectedSlot();
+        int bestSlot = selectedSlot;
+        float bestDelta = resolveBlockBreakingDeltaWithSlot(state, blockPos, selectedSlot);
+
+        for (int slot = 0; slot < 9; slot++) {
+            ItemStack stack = mc.player.getInventory().getStack(slot);
+            if (stack.isEmpty()) continue;
+
+            float candidateDelta = resolveBlockBreakingDeltaWithSlot(state, blockPos, slot);
+            if (candidateDelta > bestDelta + 1.0E-6f) {
+                bestDelta = candidateDelta;
+                bestSlot = slot;
+            }
+        }
+
+        if (bestSlot == selectedSlot) return;
+        if (damageSwapBackSlot < 0) damageSwapBackSlot = selectedSlot;
+        if (InvUtils.swap(bestSlot, false)) {
+            debugAcceleration("damage autoswap slot=" + selectedSlot + "->" + bestSlot + " delta=" + formatDelta(bestDelta));
+        }
+    }
+
+    private float resolveBlockBreakingDeltaWithSlot(BlockState state, BlockPos blockPos, int slot) {
+        if (mc.player == null || mc.world == null || state == null || blockPos == null) return 0.0f;
+
+        int previousSlot = mc.player.getInventory().getSelectedSlot();
+        try {
+            mc.player.getInventory().setSelectedSlot(slot);
+            return state.calcBlockBreakingDelta(mc.player, mc.world, blockPos);
+        } finally {
+            mc.player.getInventory().setSelectedSlot(previousSlot);
+        }
+    }
+
+    private void restoreDamageAutoSwap() {
+        if (damageSwapBackSlot < 0 || mc.player == null) {
+            damageSwapBackSlot = -1;
+            return;
+        }
+
+        int restoreSlot = damageSwapBackSlot;
+        damageSwapBackSlot = -1;
+        if (mc.player.getInventory().getSelectedSlot() != restoreSlot) {
+            InvUtils.swap(restoreSlot, false);
+            debugAcceleration("damage autoswap restore slot=" + restoreSlot);
+        }
+    }
+
+    private void swingBreakingHand() {
+        if (mc.player == null || mc.getNetworkHandler() == null) return;
+        if (swing.get()) mc.player.swingHand(Hand.MAIN_HAND);
+        else mc.getNetworkHandler().sendPacket(new HandSwingC2SPacket(Hand.MAIN_HAND));
+    }
+
+    private void debugAcceleration(String message) {
+        if (!debugAcceleration.get() || mc == null || mc.world == null || message == null || message.isBlank()) return;
+
+        long tick = mc.world.getTime();
+        if (message.equals(lastAccelerationDebugMessage) && tick == lastAccelerationDebugTick) return;
+
+        lastAccelerationDebugMessage = message;
+        lastAccelerationDebugTick = tick;
+        info("[NukerAccel] " + message);
+    }
+
+    private static String formatDelta(float blockBreakingDelta) {
+        return String.format(Locale.US, "%.3f", blockBreakingDelta);
+    }
+
+    private static String formatDamageMultiplier(double damageMultiplier) {
+        return String.format(Locale.US, "%.2f", damageMultiplier);
+    }
+
+    public static int calculateVanillaBreakTicks(float blockBreakingDelta) {
+        if (!Float.isFinite(blockBreakingDelta) || blockBreakingDelta <= 0.0f) return 0;
+        return Math.max(1, (int) Math.ceil(1.0D / blockBreakingDelta));
+    }
+
+    public static int calculateTargetBreakTicks(int vanillaBreakTicks, double damageMultiplier) {
+        if (vanillaBreakTicks <= 0) return 0;
+        double remainingProgress = remainingBreakProgress(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(vanillaBreakTicks * remainingProgress);
+        return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
+    }
+
+    public static int calculateTargetBreakTicks(int vanillaBreakTicks, double damageMultiplier, float blockBreakingDelta) {
+        if (vanillaBreakTicks <= 0) return 0;
+        if (!Float.isFinite(blockBreakingDelta) || blockBreakingDelta <= 0.0f) {
+            return calculateTargetBreakTicks(vanillaBreakTicks, damageMultiplier);
+        }
+
+        double remainingProgress = remainingBreakProgress(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(remainingProgress / blockBreakingDelta);
+        return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
+    }
+
+    private static float damageSeedProgress(double damageMultiplier) {
+        double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
+        return (float) MathHelper.clamp(clampedDamage, 0.0D, 1.0D - DAMAGE_FINISH_PROGRESS_EPSILON);
+    }
+
+    private static double remainingBreakProgress(double damageMultiplier) {
+        double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
+        return MathHelper.clamp(1.0D - clampedDamage, 0.0D, 1.0D);
+    }
+
+    private static int ceilProgressTicks(double progressTicks) {
+        return (int) Math.ceil(Math.max(0.0D, progressTicks) - 1.0E-9D);
+    }
+
+    public long debugDamageForcedFinishCount() {
+        return damageForcedFinishCount;
+    }
+
+    public long debugDamageRetryCount() {
+        return damageRetryCount;
+    }
+
+    public String debugDamageStateSummary() {
+        return damageBreakState.summary();
+    }
+
+    public int debugCurrentVanillaBreakTicks() {
+        return damageBreakState.vanillaBreakTicks;
+    }
+
+    public int debugCurrentTargetBreakTicks() {
+        return damageBreakState.targetBreakTicks;
+    }
+
+    public float debugCurrentBreakDelta() {
+        return damageBreakState.lastDelta;
+    }
+
+    public void debugConfigureDamageHarness(MiningAccelerationMode accelerationMode, double damageMultiplier, Block targetBlock) {
+        debugConfigureDamageHarness(accelerationMode, damageMultiplier, targetBlock, 1);
+    }
+
+    public void debugConfigureDamageHarness(MiningAccelerationMode accelerationMode, double damageMultiplier, Block targetBlock, int maxBlocksPerTick) {
+        this.accelerationMode.set(accelerationMode);
+        this.damage.set(MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX));
+        this.debugAcceleration.set(false);
+        this.shape.set(Shape.Sphere);
+        this.range.set(8.0);
+        this.wallsRange.set(8.0);
+        this.mode.set(Mode.All);
+        this.delay.set(0);
+        this.maxBlocksPerTick.set(Math.max(1, maxBlocksPerTick));
+        this.sortMode.set(SortMode.Closest);
+        this.suitableTools.set(false);
+        this.interact.set(false);
+        this.rotate.set(false);
+        this.baritoneArea.set(false);
+        this.speedMineAutoSwap.set(true);
+        this.grimBypass.set(false);
+        this.listMode.set(ListMode.Whitelist);
+        whitelist.get().clear();
+        blacklist.get().clear();
+        if (targetBlock != null) whitelist.get().add(targetBlock);
+        resetDamageBreakState("harness-config");
+    }
+
+    public void debugResetDamageHarnessState() {
+        resetDamageBreakState("harness-reset");
+        blocks.clear();
+        interacted.clear();
+        firstBlock = true;
+        timer = 0;
+        noBlockTimer = 0;
     }
 
     private static final class BaritoneSelectionBridge {
@@ -739,6 +1323,115 @@ public class NukerPlus extends Module {
         Cube,
         UniformCube,
         Sphere
+    }
+
+    public enum MiningAccelerationMode {
+        Off,
+        SpeedMineDamage,
+        Insta
+    }
+
+    private static final class DamageBreakState {
+        private BlockPos targetPos;
+        private BlockState targetState;
+        private Direction direction;
+        private ItemStack toolSnapshot = ItemStack.EMPTY;
+        private long breakStartTick = Long.MIN_VALUE;
+        private int elapsedBreakTicks;
+        private int vanillaBreakTicks;
+        private int targetBreakTicks;
+        private float lastProgress;
+        private float lastDelta;
+        private boolean forcedFinishAttempted;
+
+        private boolean isTracking() {
+            return targetPos != null && targetState != null;
+        }
+
+        private boolean matches(BlockPos blockPos) {
+            return isTracking() && targetPos.equals(blockPos);
+        }
+
+        private boolean requiresNewCycle(BlockPos blockPos, BlockState blockState, ItemStack stack) {
+            if (!isTracking()) return true;
+            if (!targetPos.equals(blockPos)) return true;
+            if (!targetState.equals(blockState)) return true;
+            return !ItemStack.areItemsAndComponentsEqual(toolSnapshot, stack);
+        }
+
+        private void start(BlockPos blockPos, BlockState blockState, Direction direction, ItemStack toolSnapshot, long breakStartTick, int vanillaBreakTicks, int targetBreakTicks, float lastDelta) {
+            this.targetPos = blockPos;
+            this.targetState = blockState;
+            this.direction = direction;
+            this.toolSnapshot = toolSnapshot.copy();
+            this.breakStartTick = breakStartTick;
+            this.elapsedBreakTicks = 0;
+            this.vanillaBreakTicks = vanillaBreakTicks;
+            this.targetBreakTicks = targetBreakTicks;
+            this.lastProgress = 0.0f;
+            this.lastDelta = lastDelta;
+            this.forcedFinishAttempted = false;
+        }
+
+        private void refresh(BlockState blockState, Direction direction, ItemStack toolSnapshot, long worldTick, int vanillaBreakTicks, int targetBreakTicks, float lastDelta) {
+            this.targetState = blockState;
+            this.direction = direction;
+            this.toolSnapshot = toolSnapshot.copy();
+            this.elapsedBreakTicks = computeElapsedTicks(worldTick);
+            this.vanillaBreakTicks = vanillaBreakTicks;
+            this.targetBreakTicks = targetBreakTicks;
+            this.lastDelta = lastDelta;
+        }
+
+        private int computeElapsedTicks(long worldTick) {
+            if (breakStartTick == Long.MIN_VALUE) return 0;
+            long elapsed = worldTick - breakStartTick;
+            if (elapsed <= 0L) return 0;
+            return elapsed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) elapsed;
+        }
+
+        private void clear() {
+            targetPos = null;
+            targetState = null;
+            direction = null;
+            toolSnapshot = ItemStack.EMPTY;
+            breakStartTick = Long.MIN_VALUE;
+            elapsedBreakTicks = 0;
+            vanillaBreakTicks = 0;
+            targetBreakTicks = 0;
+            lastProgress = 0.0f;
+            lastDelta = 0.0f;
+            forcedFinishAttempted = false;
+        }
+
+        private String summary() {
+            if (!isTracking()) return "idle";
+            return "target=" + targetPos
+                + " elapsed=" + elapsedBreakTicks
+                + " targetTicks=" + targetBreakTicks
+                + " vanillaTicks=" + vanillaBreakTicks
+                + " progress=" + formatDelta(lastProgress)
+                + " delta=" + formatDelta(lastDelta)
+                + " forced=" + forcedFinishAttempted;
+        }
+    }
+
+    private record BreakAttemptResult(boolean continueLoop) {
+        private static BreakAttemptResult legacy(BlockPos blockPos) {
+            return new BreakAttemptResult(BlockUtils.canInstaBreak(blockPos));
+        }
+
+        private static BreakAttemptResult insta(boolean continueLoop) {
+            return new BreakAttemptResult(continueLoop);
+        }
+
+        private static BreakAttemptResult keepGoing() {
+            return new BreakAttemptResult(true);
+        }
+
+        private static BreakAttemptResult stop() {
+            return new BreakAttemptResult(false);
+        }
     }
 
     public static int chebyshevDist(int x1, int y1, int z1, int x2, int y2, int z2) {

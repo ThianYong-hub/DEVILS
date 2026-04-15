@@ -14,12 +14,15 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.client.RunArgs;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.ClientConnection;
+import net.minecraft.client.network.SequencedPacketCreator;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import org.spongepowered.asm.mixin.gen.Accessor;
 import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -31,8 +34,20 @@ import org.spongepowered.asm.mixin.Pseudo;
 
 @Mixin(ClientPlayerInteractionManager.class)
 public interface ClientPlayerInteractionManagerInvoker {
+    @Accessor("currentBreakingProgress")
+    float devilsAddon$getCurrentBreakingProgress();
+
+    @Accessor("currentBreakingProgress")
+    void devilsAddon$setCurrentBreakingProgress(float progress);
+
+    @Accessor("currentBreakingPos")
+    BlockPos devilsAddon$getCurrentBreakingPos();
+
     @Invoker("isCurrentlyBreaking")
     boolean devilsAddon$isCurrentlyBreaking(BlockPos pos);
+
+    @Invoker("sendSequencedPacket")
+    void devilsAddon$sendSequencedPacket(ClientWorld world, SequencedPacketCreator packetCreator);
 }
 
 /**

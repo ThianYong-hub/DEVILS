@@ -192,6 +192,13 @@ class ProjectConfigSuiteTest {
         assertTrue(index.contains("runtime-smoke.log"));
         assertTrue(index.contains("stashmover-live-repro.log"));
         assertTrue(index.contains("stashmover-targeted-runtime.log"));
+        assertTrue(index.contains("nukerplus-damage-time-build.log"));
+        assertTrue(index.contains("nukerplus-damage-time-audit.md"));
+        assertTrue(index.contains("nukerplus-damage-time-mechanics.md"));
+        assertTrue(index.contains("nukerplus-damage-time-benchmark.md"));
+        assertTrue(index.contains("nukerplus-damage-time-smoke.md"));
+        assertTrue(index.contains("nukerplus-damage-time-files.md"));
+        assertTrue(index.contains("nukerplus-damage-time-final-report.md"));
         assertTrue(index.contains("ARTIFACT_INDEX.md"));
         assertTrue(index.contains("overwrite"));
         assertTrue(index.contains("No version suffixes"));
@@ -237,16 +244,29 @@ class ProjectConfigSuiteTest {
             "runtime-smoke.log",
             "stashmover-live-repro.log",
             "stashmover-targeted-runtime.log",
-            "STASHMOVER_ARTIFACT_INSPECTION_NOTE.md"
+            "STASHMOVER_ARTIFACT_INSPECTION_NOTE.md",
+            "nukerplus-accel-build.log",
+            "nukerplus-accel-audit.md",
+            "nukerplus-accel-smoke.md",
+            "nukerplus-accel-runtime.md",
+            "nukerplus-accel-files.md",
+            "nukerplus-accel-final-report.md",
+            "nukerplus-damage-time-build.log",
+            "nukerplus-damage-time-audit.md",
+            "nukerplus-damage-time-mechanics.md",
+            "nukerplus-damage-time-benchmark.md",
+            "nukerplus-damage-time-smoke.md",
+            "nukerplus-damage-time-files.md",
+            "nukerplus-damage-time-final-report.md"
         );
 
-        assertTrue(files.size() <= 26, "codex log must stay small and canonical: " + files);
+        assertTrue(files.size() <= 32, "codex log must stay small and canonical: " + files);
         for (String file : files) {
             assertTrue(allowed.contains(file), "Unexpected file in codex log: " + file);
         }
         assertFalse(
-            files.stream().anyMatch(name -> name.endsWith(".log") && !Set.of("STASHMOVER_BUILD.log", "runtime-smoke.log", "stashmover-live-repro.log", "stashmover-targeted-runtime.log").contains(name)),
-            "Only canonical StashMover raw logs may remain in codex log: " + files
+            files.stream().anyMatch(name -> name.endsWith(".log") && !Set.of("STASHMOVER_BUILD.log", "runtime-smoke.log", "stashmover-live-repro.log", "stashmover-targeted-runtime.log", "nukerplus-accel-build.log", "nukerplus-damage-time-build.log").contains(name)),
+            "Only canonical raw logs may remain in codex log: " + files
         );
         assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when codex log contains artifacts.");
     }

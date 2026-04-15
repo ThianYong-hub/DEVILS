@@ -97,6 +97,8 @@ public final class AddonModulesConfig {
         }
         if (tag == null) return;
 
+        boolean migrated = migrateModuleTags(tag);
+
         Map<String, NbtCompound> tagsByName = new HashMap<>();
         NbtList modulesTag = tag.getListOrEmpty(ROOT_MODULES_KEY);
         for (NbtElement moduleTagI : modulesTag) {
@@ -117,6 +119,12 @@ public final class AddonModulesConfig {
 
         if (applied > 0) {
             AddonTemplate.LOG.info("[Devils] Loaded {} module configs from {}.", applied, CONFIG_FILE);
+        }
+
+        if (migrated) {
+            synchronized (IO_LOCK) {
+                writeJsonTag(CONFIG_FILE, tag);
+            }
         }
     }
 
@@ -175,6 +183,48 @@ public final class AddonModulesConfig {
         }
 
         return null;
+    }
+
+    private static boolean migrateModuleTags(NbtCompound rootTag) {
+        if (rootTag == null) return false;
+
+        boolean migrated = false;
+        NbtList modulesTag = rootTag.getListOrEmpty(ROOT_MODULES_KEY);
+        for (NbtElement moduleTagI : modulesTag) {
+            if (!(moduleTagI instanceof NbtCompound moduleTag)) continue;
+            String moduleName = moduleTag.getString(MODULE_NAME_KEY, "");
+            if ("nuker-plus".equals(moduleName) && migrateNukerPlusAccelerationMode(moduleTag)) migrated = true;
+        }
+
+        return migrated;
+    }
+
+    private static boolean migrateNukerPlusAccelerationMode(NbtCompound moduleTag) {
+        if (moduleTag == null) return false;
+
+        var settingsOpt = moduleTag.getCompound("settings");
+        if (settingsOpt.isEmpty()) return false;
+
+        NbtList groups = settingsOpt.get().getListOrEmpty("groups");
+        boolean migrated = false;
+        for (NbtElement groupTagI : groups) {
+            if (!(groupTagI instanceof NbtCompound groupTag)) continue;
+
+            NbtList settings = groupTag.getListOrEmpty("settings");
+            for (NbtElement settingTagI : settings) {
+                if (!(settingTagI instanceof NbtCompound settingTag)) continue;
+                String settingName = settingTag.getString("name", "");
+                if (!"mining-acceleration-mode".equals(settingName)) continue;
+
+                String value = settingTag.getString("value", "");
+                if (!"Haste".equals(value)) continue;
+
+                settingTag.putString("value", "SpeedMineDamage");
+                migrated = true;
+            }
+        }
+
+        return migrated;
     }
 
     private static NbtCompound readLegacyTag(Path path) {
