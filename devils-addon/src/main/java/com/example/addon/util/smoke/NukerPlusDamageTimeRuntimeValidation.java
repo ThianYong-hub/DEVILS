@@ -675,7 +675,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static String buildMechanicsReport() {
         StringBuilder out = new StringBuilder();
         out.append("# NukerPlus Damage-Time Mechanics Validation\n\n");
-        out.append("Confirmed Mio-style formula: `targetBreakTicks = ceil((1 - damage) / delta)`, clamped to `[1, vanillaBreakTicks]`, where `vanillaBreakTicks = ceil(1 / delta)`. Runtime also seeds the client break progress to the configured `damage` value before forcing finish.\n\n");
+        out.append("Confirmed Mio-style threshold formula: `targetBreakTicks = ceil(damage / delta)`, clamped to `[1, vanillaBreakTicks]`, where `vanillaBreakTicks = ceil(1 / delta)`. Runtime forces the vanilla interaction manager to finish when `currentProgress + delta >= damage`, so lower damage finishes earlier.\n\n");
 
         benchmarkRecords.stream()
             .filter(record -> record.benchmarkCase.mode == NukerPlus.MiningAccelerationMode.SpeedMineDamage)
@@ -816,6 +816,26 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             "SMOKE-09 NON-INSTA BLOCKS",
             nonInstaPass,
             "off=" + summarizeRecord(offStone) + " insta=" + summarizeRecord(instaStone) + " damage60=" + summarizeRecord(damageStone)
+        ));
+
+        BenchmarkRecord damage70 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.70);
+        BenchmarkRecord damage80 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.80);
+        BenchmarkRecord damage90 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.90);
+        BenchmarkRecord damage100 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 1.00);
+        boolean monotonicPass = damageStone != null && damage70 != null && damage80 != null && damage90 != null && damage100 != null
+            && damageStone.targetBreakTicks <= damage70.targetBreakTicks
+            && damage70.targetBreakTicks <= damage80.targetBreakTicks
+            && damage80.targetBreakTicks <= damage90.targetBreakTicks
+            && damage90.targetBreakTicks <= damage100.targetBreakTicks
+            && damageStone.averageTicksToBreak() <= damage100.averageTicksToBreak();
+        assertions.add(new SmokeAssertion(
+            "SMOKE-12 DAMAGE MONOTONIC",
+            monotonicPass,
+            "damage60=" + summarizeRecord(damageStone)
+                + " damage70=" + summarizeRecord(damage70)
+                + " damage80=" + summarizeRecord(damage80)
+                + " damage90=" + summarizeRecord(damage90)
+                + " damage100=" + summarizeRecord(damage100)
         ));
 
         return assertions;

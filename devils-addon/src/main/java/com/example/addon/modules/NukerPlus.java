@@ -217,7 +217,7 @@ public class NukerPlus extends Module {
 
     private final Setting<Double> damage = sgAcceleration.add(new DoubleSetting.Builder()
         .name("damage")
-        .description("Mio-style starting block damage. 0.6 starts at 60% progress and mines the remaining 40%. Higher = faster.")
+        .description("Mio-style break damage threshold. Lower = faster; 0.6 forces finish around 60% block damage, 1.0 is vanilla-like.")
         .defaultValue(DAMAGE_DEFAULT)
         .range(DAMAGE_MIN, DAMAGE_MAX)
         .sliderRange(DAMAGE_MIN, DAMAGE_MAX)
@@ -369,6 +369,8 @@ public class NukerPlus extends Module {
     private long damageRetryCount;
     private long damageBurstChainTick = Long.MIN_VALUE;
     private int damageSwapBackSlot = -1;
+    private long damageToolSyncTick = Long.MIN_VALUE;
+    private int damageToolSyncSlot = -1;
 
     public NukerPlus() {
         super(AddonTemplate.CATEGORY, "nuker-plus", "Breaks blocks around you with stable Cube bounds.");
@@ -392,6 +394,8 @@ public class NukerPlus extends Module {
         damageRetryCount = 0L;
         damageBurstChainTick = Long.MIN_VALUE;
         damageSwapBackSlot = -1;
+        damageToolSyncTick = Long.MIN_VALUE;
+        damageToolSyncSlot = -1;
         damageBreakState.clear();
     }
 
@@ -404,6 +408,8 @@ public class NukerPlus extends Module {
         lastAccelerationDebugMessage = null;
         lastAccelerationDebugTick = Long.MIN_VALUE;
         damageBurstChainTick = Long.MIN_VALUE;
+        damageToolSyncTick = Long.MIN_VALUE;
+        damageToolSyncSlot = -1;
         restoreDamageAutoSwap();
         resetDamageBreakState("module-disabled");
     }
@@ -808,6 +814,7 @@ public class NukerPlus extends Module {
 
         ClientPlayerInteractionManagerInvoker interactionManager = (ClientPlayerInteractionManagerInvoker) mc.interactionManager;
         boolean currentlyBreaking = interactionManager.devilsAddon$isCurrentlyBreaking(blockPos);
+        damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
 
         if (damageBreakState.forcedFinishAttempted && !currentlyBreaking) {
             damageRetryCount++;
@@ -819,7 +826,7 @@ public class NukerPlus extends Module {
         if (!currentlyBreaking) {
             boolean started = mc.interactionManager.attackBlock(blockPos, direction);
             swingBreakingHand();
-            seedSpeedMineDamageProgress(interactionManager);
+            damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
             if (!started) {
                 resetDamageBreakState("attack-failed");
                 return BreakAttemptResult.stop();
@@ -830,7 +837,7 @@ public class NukerPlus extends Module {
                     + " delta=" + formatDelta(blockBreakingDelta)
                     + " vanilla=" + damageBreakState.vanillaBreakTicks
                     + " target=" + damageBreakState.targetBreakTicks
-                    + " damage=" + formatDamageMultiplier(damage.get())
+                    + " threshold=" + formatDamageMultiplier(damage.get())
             );
             if (damageBreakState.targetBreakTicks <= 1) {
                 damageBreakState.elapsedBreakTicks = 1;
@@ -840,15 +847,15 @@ public class NukerPlus extends Module {
         }
 
         damageBreakState.elapsedBreakTicks = damageBreakState.computeElapsedTicks(mc.world.getTime());
-        seedSpeedMineDamageProgress(interactionManager);
+        damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
 
-        if (damageBreakState.elapsedBreakTicks >= damageBreakState.targetBreakTicks) {
+        if (isSpeedMineDamageFinishReady(interactionManager, blockBreakingDelta) || damageBreakState.elapsedBreakTicks >= damageBreakState.targetBreakTicks) {
             return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
         }
 
         boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
         swingBreakingHand();
-        seedSpeedMineDamageProgress(interactionManager);
+        damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
 
         if (!progressed) {
             damageRetryCount++;
@@ -870,7 +877,7 @@ public class NukerPlus extends Module {
         ClientPlayerInteractionManagerInvoker interactionManager = (ClientPlayerInteractionManagerInvoker) mc.interactionManager;
         boolean started = mc.interactionManager.attackBlock(blockPos, direction);
         swingBreakingHand();
-        seedSpeedMineDamageProgress(interactionManager);
+        damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
         if (!started) {
             resetDamageBreakState("charged-attack-failed");
             return BreakAttemptResult.stop();
@@ -881,14 +888,13 @@ public class NukerPlus extends Module {
                 + " delta=" + formatDelta(blockBreakingDelta)
                 + " vanilla=" + damageBreakState.vanillaBreakTicks
                 + " target=" + damageBreakState.targetBreakTicks
-                + " damage=" + formatDamageMultiplier(damage.get())
+                + " threshold=" + formatDamageMultiplier(damage.get())
         );
         return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
     }
 
     private BreakAttemptResult finishSpeedMineDamageBreak(BlockPos blockPos, Direction direction, float blockBreakingDelta, ClientPlayerInteractionManagerInvoker interactionManager) {
-        float finishReadyProgress = MathHelper.clamp(1.0f - blockBreakingDelta + DAMAGE_FINISH_PROGRESS_EPSILON, 0.0f, 1.0f);
-        interactionManager.devilsAddon$setCurrentBreakingProgress(Math.max(damageBreakState.lastProgress, finishReadyProgress));
+        interactionManager.devilsAddon$setCurrentBreakingProgress(1.0f);
 
         boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
         swingBreakingHand();
@@ -901,6 +907,7 @@ public class NukerPlus extends Module {
                 + " elapsed=" + damageBreakState.elapsedBreakTicks + "/" + damageBreakState.targetBreakTicks
                 + " vanilla=" + damageBreakState.vanillaBreakTicks
                 + " progress=" + formatDelta(damageBreakState.lastProgress)
+                + " threshold=" + formatDamageMultiplier(damage.get())
                 + " forced=" + damageForcedFinishCount
         );
 
@@ -916,15 +923,12 @@ public class NukerPlus extends Module {
         return BreakAttemptResult.keepGoing();
     }
 
-    private void seedSpeedMineDamageProgress(ClientPlayerInteractionManagerInvoker interactionManager) {
+    private boolean isSpeedMineDamageFinishReady(ClientPlayerInteractionManagerInvoker interactionManager, float blockBreakingDelta) {
+        if (interactionManager == null || !Float.isFinite(blockBreakingDelta) || blockBreakingDelta <= 0.0f) return false;
         float currentProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
-        float seedProgress = damageSeedProgress(damage.get());
-        if (currentProgress < seedProgress) {
-            interactionManager.devilsAddon$setCurrentBreakingProgress(seedProgress);
-            damageBreakState.lastProgress = seedProgress;
-        } else {
-            damageBreakState.lastProgress = currentProgress;
-        }
+        damageBreakState.lastProgress = currentProgress;
+        return currentProgress > 0.0f
+            && currentProgress + blockBreakingDelta + DAMAGE_FINISH_PROGRESS_EPSILON >= damageFinishThreshold(damage.get());
     }
 
     private boolean canUseDamageBurstChain() {
@@ -1022,9 +1026,14 @@ public class NukerPlus extends Module {
             }
         }
 
-        if (bestSlot == selectedSlot) return;
+        if (bestSlot == selectedSlot) {
+            syncSelectedDamageToolSlot(bestSlot, "held-best");
+            return;
+        }
+
         if (damageSwapBackSlot < 0) damageSwapBackSlot = selectedSlot;
         if (InvUtils.swap(bestSlot, false)) {
+            markSelectedDamageToolSynced(bestSlot);
             debugAcceleration("damage autoswap slot=" + selectedSlot + "->" + bestSlot + " delta=" + formatDelta(bestDelta));
         }
     }
@@ -1053,6 +1062,20 @@ public class NukerPlus extends Module {
             InvUtils.swap(restoreSlot, false);
             debugAcceleration("damage autoswap restore slot=" + restoreSlot);
         }
+    }
+
+    private void syncSelectedDamageToolSlot(int slot, String reason) {
+        if (mc.world == null || slot < 0 || slot > 8) return;
+        if (damageToolSyncTick == mc.world.getTime() && damageToolSyncSlot == slot) return;
+        if (InvUtils.swap(slot, false)) {
+            markSelectedDamageToolSynced(slot);
+            debugAcceleration("damage autoswap sync slot=" + slot + " reason=" + reason);
+        }
+    }
+
+    private void markSelectedDamageToolSynced(int slot) {
+        damageToolSyncTick = mc.world == null ? Long.MIN_VALUE : mc.world.getTime();
+        damageToolSyncSlot = slot;
     }
 
     private void swingBreakingHand() {
@@ -1087,8 +1110,8 @@ public class NukerPlus extends Module {
 
     public static int calculateTargetBreakTicks(int vanillaBreakTicks, double damageMultiplier) {
         if (vanillaBreakTicks <= 0) return 0;
-        double remainingProgress = remainingBreakProgress(damageMultiplier);
-        int targetBreakTicks = ceilProgressTicks(vanillaBreakTicks * remainingProgress);
+        double finishThreshold = damageFinishThreshold(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(vanillaBreakTicks * finishThreshold);
         return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
     }
 
@@ -1098,19 +1121,14 @@ public class NukerPlus extends Module {
             return calculateTargetBreakTicks(vanillaBreakTicks, damageMultiplier);
         }
 
-        double remainingProgress = remainingBreakProgress(damageMultiplier);
-        int targetBreakTicks = ceilProgressTicks(remainingProgress / blockBreakingDelta);
+        double finishThreshold = damageFinishThreshold(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(finishThreshold / blockBreakingDelta);
         return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
     }
 
-    private static float damageSeedProgress(double damageMultiplier) {
+    private static double damageFinishThreshold(double damageMultiplier) {
         double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
-        return (float) MathHelper.clamp(clampedDamage, 0.0D, 1.0D - DAMAGE_FINISH_PROGRESS_EPSILON);
-    }
-
-    private static double remainingBreakProgress(double damageMultiplier) {
-        double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
-        return MathHelper.clamp(1.0D - clampedDamage, 0.0D, 1.0D);
+        return MathHelper.clamp(clampedDamage, DAMAGE_FINISH_PROGRESS_EPSILON, 1.0D);
     }
 
     private static int ceilProgressTicks(double progressTicks) {

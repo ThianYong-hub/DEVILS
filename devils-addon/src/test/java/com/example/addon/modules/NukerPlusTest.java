@@ -35,28 +35,28 @@ class NukerPlusTest {
     }
 
     @Test
-    void targetBreakTicksUseMioRemainingProgress() {
-        assertEquals(1, NukerPlus.calculateTargetBreakTicks(100, 1.00));
-        assertEquals(10, NukerPlus.calculateTargetBreakTicks(100, 0.90));
-        assertEquals(20, NukerPlus.calculateTargetBreakTicks(100, 0.80));
-        assertEquals(30, NukerPlus.calculateTargetBreakTicks(100, 0.70));
-        assertEquals(40, NukerPlus.calculateTargetBreakTicks(100, 0.60));
+    void targetBreakTicksUseMioDamageThreshold() {
+        assertEquals(100, NukerPlus.calculateTargetBreakTicks(100, 1.00));
+        assertEquals(90, NukerPlus.calculateTargetBreakTicks(100, 0.90));
+        assertEquals(80, NukerPlus.calculateTargetBreakTicks(100, 0.80));
+        assertEquals(70, NukerPlus.calculateTargetBreakTicks(100, 0.70));
+        assertEquals(60, NukerPlus.calculateTargetBreakTicks(100, 0.60));
     }
 
     @Test
     void targetBreakTicksClampIntoValidRange() {
         assertEquals(0, NukerPlus.calculateTargetBreakTicks(0, 0.70));
         assertEquals(1, NukerPlus.calculateTargetBreakTicks(1, 0.60));
-        assertEquals(4, NukerPlus.calculateTargetBreakTicks(10, 0.10));
-        assertEquals(1, NukerPlus.calculateTargetBreakTicks(10, 5.0));
+        assertEquals(6, NukerPlus.calculateTargetBreakTicks(10, 0.10));
+        assertEquals(10, NukerPlus.calculateTargetBreakTicks(10, 5.0));
     }
 
     @Test
     void targetBreakTicksUseContinuousDeltaWhenAvailable() {
-        assertEquals(1, NukerPlus.calculateTargetBreakTicks(8, 1.00, 0.13f));
-        assertEquals(1, NukerPlus.calculateTargetBreakTicks(8, 0.90, 0.13f));
-        assertEquals(2, NukerPlus.calculateTargetBreakTicks(8, 0.80, 0.13f));
-        assertEquals(4, NukerPlus.calculateTargetBreakTicks(8, 0.60, 0.13f));
+        assertEquals(8, NukerPlus.calculateTargetBreakTicks(8, 1.00, 0.13f));
+        assertEquals(7, NukerPlus.calculateTargetBreakTicks(8, 0.90, 0.13f));
+        assertEquals(7, NukerPlus.calculateTargetBreakTicks(8, 0.80, 0.13f));
+        assertEquals(5, NukerPlus.calculateTargetBreakTicks(8, 0.60, 0.13f));
         assertEquals(1, NukerPlus.calculateTargetBreakTicks(2, 0.60, 0.80f));
     }
 }
