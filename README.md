@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.51`): `build/libs/devils-addon-0.0.46.jar`
+- Current addon build (`0.0.52`): `build/libs/devils-addon-0.0.46.jar`
 - Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
@@ -27,7 +27,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.51` |
+| Addon Version | `0.0.52` |
 | Game Version | `0.0.4` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -361,7 +361,7 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.51`)
+## Release Notes (`v0.0.52`)
 
 - bumped addon artifact version from `0.0.45` to `0.0.46`
 - fixed the broken packaged runtime by bundling the required non-mod runtime libraries into the final addon jar
