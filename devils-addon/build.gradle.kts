@@ -38,6 +38,15 @@ val minecraftVersion = properties["minecraft_version"] as String
 val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
 val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
 val xaeroPlusVersion = properties["xaeroplus_version"] as String
+val sourceNativeModDependencies = listOf(
+    "maven.modrinth:chest-tracker-port:2.8.1+1.21.11",
+    "maven.modrinth:where-is-it-port:2.7.3+1.21.11",
+    "com.blamejared.searchables:Searchables-fabric-$minecraftVersion:1.0.2",
+    "dev.isxander:yet-another-config-lib:3.8.1+1.21.11-fabric",
+    "maven.modrinth:xaeros-minimap:$xaeroMinimapVersion",
+    "maven.modrinth:xaeros-world-map:$xaeroWorldMapVersion",
+    "maven.modrinth:xaeroplus:$xaeroPlusVersion"
+)
 val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
 val sourceNativeBuildRoot = rootProject.file("Souce 1.21.11/Source Native Build")
 val sourceNativeModuleDirs = listOf(
@@ -54,6 +63,8 @@ val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
 val sourceNativeBinaryJars = fileTree(remappedModCacheRoot) {
     include(
         "**/chesttracker-port-embedded-*.jar",
+        "**/chest-tracker-port-*.jar",
+        "**/chesttracker-*.jar",
         "**/Searchables-fabric-*.jar",
         "**/where-is-it-port-*.jar",
         "**/xaerolib-fabric-*.jar",
@@ -67,6 +78,7 @@ val sourceNativeBinaryJars = fileTree(remappedModCacheRoot) {
 val sourceNativeNestedJars = fileTree(sourceNativeBuildRoot) {
     include("**/META-INF/jars/*.jar")
 }
+val sourceNativeVendorJars = files(rootProject.file("tools/xaerolib-fabric-1.21.11-1.1.0.jar"))
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
 val bundledRuntimeLibs by configurations.creating {
@@ -157,7 +169,7 @@ val extractSourceNativeRuntimeClasses by tasks.registering(Sync::class) {
     includeEmptyDirs = false
 
     from({
-        (sourceNativeBinaryJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
+        (sourceNativeBinaryJars.files + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
             zipTree(dependencyArtifact).matching {
                 include("**/*.class")
                 exclude("module-info.class")
@@ -327,6 +339,11 @@ dependencies {
     modCompileOnly("maven.modrinth:worldtools:1.2.4+1.20.1")
     modCompileOnly("maven.modrinth:immediatelyfast:1.5.2+1.20.4-fabric")
     modCompileOnly("meteordevelopment:baritone:1.21.10-SNAPSHOT")
+    sourceNativeModDependencies.forEach { dependencyNotation ->
+        modCompileOnly(dependencyNotation)
+        testCompileOnly(dependencyNotation)
+        testRuntimeOnly(dependencyNotation)
+    }
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
     add(bundledRuntimeLibs.name, "com.github.ben-manes.caffeine:caffeine:3.2.0")
     implementation("net.lenni0451:LambdaEvents:2.4.2")
@@ -351,9 +368,9 @@ dependencies {
     implementation("org.quiltmc.parsers:gson:0.2.1")
     add(bundledRuntimeLibs.name, "org.quiltmc.parsers:gson:0.2.1")
     compileOnly("com.google.code.findbugs:jsr305:3.0.2")
-    compileOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
-    testCompileOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
-    testRuntimeOnly(files(sourceNativeBinaryJars, sourceNativeNestedJars))
+    compileOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
+    testCompileOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
+    testRuntimeOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
 
     productionRuntimeMods("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
     productionRuntimeMods("net.fabricmc.fabric-api:fabric-api:${properties["fabric_api_version"] as String}")
@@ -387,6 +404,11 @@ tasks {
             requiredPatchPaths.forEach { path ->
                 check(path.exists()) {
                     "Missing source-native patch input: ${path.absolutePath}"
+                }
+            }
+            sourceNativeVendorJars.files.forEach { path ->
+                check(path.isFile) {
+                    "Missing source-native vendor jar: ${path.absolutePath}"
                 }
             }
 
@@ -604,7 +626,7 @@ tasks {
         })
 
         from({
-            (sourceNativeBinaryJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
+            (sourceNativeBinaryJars.files + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
                 zipTree(dependencyArtifact).matching {
                     include("**/*.class")
                     exclude("module-info.class")

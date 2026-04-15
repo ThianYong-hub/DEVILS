@@ -243,7 +243,7 @@ public final class AssimilatedInteractionChecks {
             int menuWidth = (int) getFieldValue(ChestTrackerScreen.class, liveScreen, "menuWidth");
             double settingsX = left + menuWidth - 68 + 7;
             double settingsY = top + 5 + 7;
-            boolean settingsClicked = liveScreen.mouseClicked(primaryClick(settingsX, settingsY), false);
+            boolean settingsClicked = clickScreen(liveScreen, settingsX, settingsY);
             if (!settingsClicked) {
                 return SmokeCheckResult.fail("chesttracker-ui-deep", "memory-bank settings button did not handle pointer click");
             }
@@ -264,7 +264,7 @@ public final class AssimilatedInteractionChecks {
                 return SmokeCheckResult.fail("chesttracker-ui-deep", "save button was not found on EditMemoryBankScreen");
             }
 
-            boolean saveClicked = editScreen.mouseClicked(primaryClick(saveButton.getX() + 1, saveButton.getY() + 1), false);
+            boolean saveClicked = clickScreen(editScreen, saveButton.getX() + 1, saveButton.getY() + 1);
             if (!saveClicked) {
                 return SmokeCheckResult.fail("chesttracker-ui-deep", "save button did not handle pointer click");
             }
@@ -453,7 +453,7 @@ public final class AssimilatedInteractionChecks {
                 1.0,
                 smokeWorld
             );
-            screen.init(client.getWindow().getScaledWidth(), client.getWindow().getScaledHeight());
+            initScreen(client, screen);
 
             TextFieldWidget nameTextField = (TextFieldWidget) getFieldValue(GuiAddWaypoint.class, screen, "nameTextField");
             TextFieldWidget xTextField = (TextFieldWidget) getFieldValue(GuiAddWaypoint.class, screen, "xTextField");
@@ -576,7 +576,7 @@ public final class AssimilatedInteractionChecks {
                 1.0,
                 smokeWorld
             );
-            screen.init(client.getWindow().getScaledWidth(), client.getWindow().getScaledHeight());
+            initScreen(client, screen);
             GuiAddWaypoint editScreen = screen;
 
             TextFieldWidget nameTextField = (TextFieldWidget) getFieldValue(GuiAddWaypoint.class, editScreen, "nameTextField");
@@ -597,7 +597,7 @@ public final class AssimilatedInteractionChecks {
                 return SmokeCheckResult.fail("xaero-waypoint-ui-deep", "confirm button did not activate for waypoint edit");
             }
 
-            boolean confirmClicked = editScreen.mouseClicked(primaryClick(confirmButton.getX() + 1, confirmButton.getY() + 1), false);
+            boolean confirmClicked = clickScreen(editScreen, confirmButton.getX() + 1, confirmButton.getY() + 1);
             if (!confirmClicked) {
                 return SmokeCheckResult.fail("xaero-waypoint-ui-deep", "confirm button did not handle pointer click");
             }
@@ -991,6 +991,37 @@ public final class AssimilatedInteractionChecks {
 
     private static Click primaryClick(double x, double y) {
         return new Click(x, y, new MouseInput(0, 0));
+    }
+
+    private static boolean clickScreen(Screen screen, double x, double y) throws ReflectiveOperationException {
+        try {
+            Method pointerClick = screen.getClass().getMethod("mouseClicked", Click.class, boolean.class);
+            Object result = pointerClick.invoke(screen, primaryClick(x, y), false);
+            return result instanceof Boolean clicked && clicked;
+        } catch (NoSuchMethodException ignored) {
+            Method legacyClick = screen.getClass().getMethod("mouseClicked", double.class, double.class, int.class);
+            Object result = legacyClick.invoke(screen, x, y, 0);
+            return result instanceof Boolean clicked && clicked;
+        }
+    }
+
+    private static void initScreen(MinecraftClient client, Screen screen) throws ReflectiveOperationException {
+        int width = client.getWindow().getScaledWidth();
+        int height = client.getWindow().getScaledHeight();
+        try {
+            Method init = screen.getClass().getMethod("init", int.class, int.class);
+            init.invoke(screen, width, height);
+            return;
+        } catch (NoSuchMethodException ignored) {
+        }
+
+        client.setScreen(screen);
+        if (client.currentScreen == screen) {
+            return;
+        }
+
+        Method intermediaryInit = screen.getClass().getMethod("method_25426");
+        intermediaryInit.invoke(screen);
     }
 
     private static void ensureWhereIsItSyntheticListener() {
