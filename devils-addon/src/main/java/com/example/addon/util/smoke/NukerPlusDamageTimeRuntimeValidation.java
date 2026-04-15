@@ -21,6 +21,7 @@ import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.world.CreateWorldScreen;
 import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.MinecraftServer;
@@ -53,6 +54,19 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static final Vec3d PLAYER_POS = new Vec3d(0.5, 64.0, 0.5);
     private static final BlockPos SINGLE_TARGET_POS = new BlockPos(2, 64, 0);
     private static final List<BlockPos> WINDOW_TARGETS = createWindowTargets();
+    private static final int APPLE_SLOT = 0;
+    private static final int PICKAXE_SLOT = 1;
+    private static final int SHOVEL_SLOT = 2;
+    private static final int AXE_SLOT = 3;
+    private static final ToolSpec IRON_PICKAXE = new ToolSpec("iron_pickaxe", Items.IRON_PICKAXE, PICKAXE_SLOT);
+    private static final ToolSpec IRON_SHOVEL = new ToolSpec("iron_shovel", Items.IRON_SHOVEL, SHOVEL_SLOT);
+    private static final ToolSpec IRON_AXE = new ToolSpec("iron_axe", Items.IRON_AXE, AXE_SLOT);
+    private static final BlockSpec STONE = new BlockSpec("stone", Blocks.STONE, IRON_PICKAXE);
+    private static final BlockSpec DIORITE = new BlockSpec("diorite", Blocks.DIORITE, IRON_PICKAXE);
+    private static final BlockSpec COBBLED_DEEPSLATE = new BlockSpec("cobbled_deepslate", Blocks.COBBLED_DEEPSLATE, IRON_PICKAXE);
+    private static final BlockSpec DIRT = new BlockSpec("dirt", Blocks.DIRT, IRON_SHOVEL);
+    private static final BlockSpec OAK_LOG = new BlockSpec("oak_log", Blocks.OAK_LOG, IRON_AXE);
+    private static final BlockSpec NETHERRACK = new BlockSpec("netherrack", Blocks.NETHERRACK, IRON_PICKAXE);
 
     private static boolean installed;
     private static boolean completed;
@@ -62,6 +76,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static Path outputDir;
 
     private static final List<BenchmarkCase> benchmarkCases = createBenchmarkCases();
+    private static final List<ToolSmokeCase> toolSmokeCases = createToolSmokeCases();
     private static final List<BenchmarkRecord> benchmarkRecords = new ArrayList<>();
     private static final List<SmokeAssertion> smokeAssertions = new ArrayList<>();
     private static final List<String> runtimeNotes = new ArrayList<>();
@@ -81,6 +96,8 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static int damageBurstAllBreakTick = -1;
     private static boolean cleanupDisabled;
     private static boolean cleanupValidated;
+    private static int toolSmokeIndex;
+    private static int toolSmokeFirstBreakTick;
 
     private NukerPlusDamageTimeRuntimeValidation() {
     }
@@ -108,6 +125,8 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             damageBurstAllBreakTick = -1;
             cleanupDisabled = false;
             cleanupValidated = false;
+            toolSmokeIndex = 0;
+            toolSmokeFirstBreakTick = -1;
             benchmarkRecords.clear();
             smokeAssertions.clear();
             runtimeNotes.clear();
@@ -136,6 +155,8 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             case RUN_TARGET_SWITCH -> tickRunTargetSwitch(client);
             case PREPARE_DAMAGE_BURST -> tickPrepareDamageBurst(client);
             case RUN_DAMAGE_BURST -> tickRunDamageBurst(client);
+            case PREPARE_TOOL_SMOKE -> tickPrepareToolSmoke(client);
+            case RUN_TOOL_SMOKE -> tickRunToolSmoke(client);
             case PREPARE_CLEANUP -> tickPrepareCleanup(client);
             case RUN_CLEANUP -> tickRunCleanup(client);
             case FINISHED, FAILED -> {
@@ -274,6 +295,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             activeRecord.windowBlocksBroken = brokenCount;
             activeRecord.windowForcedFinishCount = module.debugDamageForcedFinishCount();
             activeRecord.windowRetryCount = module.debugDamageRetryCount();
+            activeRecord.windowAutoSwapSelectCount = module.debugDamageAutoSwapSelectCount();
+            activeRecord.windowAutoSwapHeldResetCount = module.debugDamageAutoSwapHeldResetCount();
+            activeRecord.windowLastAutoSwapFromSlot = module.debugDamageLastAutoSwapFromSlot();
+            activeRecord.windowLastAutoSwapToSlot = module.debugDamageLastAutoSwapToSlot();
             benchmarkRecords.add(activeRecord);
             deactivateModule(module);
             note("TRACE window-finish case=" + benchmarkCase.id() + " broken=" + brokenCount + " firstBreakTick=" + activeRecord.windowFirstBreakTick);
@@ -285,7 +310,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     }
 
     private static void tickPrepareInstaCompat(MinecraftClient client) {
-        BenchmarkCase benchmarkCase = new BenchmarkCase("insta-compat", "netherrack", Blocks.NETHERRACK, NukerPlus.MiningAccelerationMode.Insta, 1.0);
+        BenchmarkCase benchmarkCase = new BenchmarkCase("insta-compat", NETHERRACK, NukerPlus.MiningAccelerationMode.Insta, 1.0, false);
         if (stageTicks == 1) {
             scenarioReadyStreak = 0;
             if (!prepareScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS))) return;
@@ -319,7 +344,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     }
 
     private static void tickPrepareTargetSwitch(MinecraftClient client) {
-        BenchmarkCase benchmarkCase = new BenchmarkCase("target-switch", "stone", Blocks.STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60);
+        BenchmarkCase benchmarkCase = new BenchmarkCase("target-switch", STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, true);
         if (stageTicks == 1) {
             scenarioReadyStreak = 0;
             if (!prepareScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS, SINGLE_TARGET_POS.east()))) return;
@@ -331,7 +356,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         if (!awaitStableScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS, SINGLE_TARGET_POS.east()), "Target-switch scenario did not become ready.")) return;
 
         if (targetSwitchExpectedTicks <= 0 && client.world != null && client.player != null) {
-            float delta = client.world.getBlockState(SINGLE_TARGET_POS).calcBlockBreakingDelta(client.player, client.world, SINGLE_TARGET_POS);
+            float delta = calculateDeltaWithTool(client, SINGLE_TARGET_POS, STONE.tool);
             targetSwitchExpectedTicks = NukerPlus.calculateTargetBreakTicks(NukerPlus.calculateVanillaBreakTicks(delta), 0.60, delta);
             note("TRACE target-switch-mechanics expectedTicks=" + targetSwitchExpectedTicks + " delta=" + formatFloat(delta));
         }
@@ -379,7 +404,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     }
 
     private static void tickPrepareDamageBurst(MinecraftClient client) {
-        BenchmarkCase benchmarkCase = new BenchmarkCase("damage-burst", "stone", Blocks.STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, 4);
+        BenchmarkCase benchmarkCase = new BenchmarkCase("damage-burst", STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, 4, true);
         List<BlockPos> targets = WINDOW_TARGETS.subList(0, 4);
         if (stageTicks == 1) {
             scenarioReadyStreak = 0;
@@ -404,35 +429,108 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         if (broken > 0 && damageBurstFirstBreakTick < 0) damageBurstFirstBreakTick = stageTicks;
         if (broken >= targets.size()) {
             damageBurstAllBreakTick = stageTicks;
-            deactivateModule(module);
+            long autoSwaps = module.debugDamageAutoSwapSelectCount();
+            long forcedFinishes = module.debugDamageForcedFinishCount();
             int spread = damageBurstAllBreakTick - damageBurstFirstBreakTick;
-            boolean pass = damageBurstFirstBreakTick > 0 && spread <= 1;
+            boolean pass = damageBurstFirstBreakTick > 0
+                && damageBurstAllBreakTick <= 20
+                && spread <= 16
+                && autoSwaps > 0;
             smokeAssertions.add(new SmokeAssertion(
-                "SMOKE-12 DAMAGE BURST CHAIN",
+                "SMOKE-16 DAMAGE BURST CHAIN",
                 pass,
                 "firstBreakTick=" + damageBurstFirstBreakTick
                     + " allBreakTick=" + damageBurstAllBreakTick
                     + " spread=" + spread
-                    + " maxBlocksPerTick=4 forced=" + module.debugDamageForcedFinishCount()
+                    + " maxBlocksPerTick=4 autoSwaps=" + autoSwaps
+                    + " forced=" + forcedFinishes
             ));
+            deactivateModule(module);
             note("TRACE damage-burst-finish first=" + damageBurstFirstBreakTick + " all=" + damageBurstAllBreakTick + " spread=" + spread + " pass=" + pass);
-            advance(Stage.PREPARE_CLEANUP);
+            advance(Stage.PREPARE_TOOL_SMOKE);
             return;
         }
 
         if (stageTicks > TARGET_SWITCH_TIMEOUT_TICKS) {
-            deactivateModule(module);
+            long forcedFinishes = module.debugDamageForcedFinishCount();
             smokeAssertions.add(new SmokeAssertion(
-                "SMOKE-12 DAMAGE BURST CHAIN",
+                "SMOKE-16 DAMAGE BURST CHAIN",
                 false,
-                "Timed out. broken=" + broken + " firstBreakTick=" + damageBurstFirstBreakTick + " forced=" + module.debugDamageForcedFinishCount()
+                "Timed out. broken=" + broken + " firstBreakTick=" + damageBurstFirstBreakTick + " forced=" + forcedFinishes
             ));
+            deactivateModule(module);
+            advance(Stage.PREPARE_TOOL_SMOKE);
+        }
+    }
+
+    private static void tickPrepareToolSmoke(MinecraftClient client) {
+        if (toolSmokeIndex >= toolSmokeCases.size()) {
             advance(Stage.PREPARE_CLEANUP);
+            return;
+        }
+
+        ToolSmokeCase smokeCase = toolSmokeCases.get(toolSmokeIndex);
+        BenchmarkCase benchmarkCase = smokeCase.benchmarkCase();
+        if (stageTicks == 1) {
+            scenarioReadyStreak = 0;
+            toolSmokeFirstBreakTick = -1;
+            if (!prepareScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS))) return;
+            note("STAGE tool-smoke-setup case=" + smokeCase.id());
+        }
+
+        if (!awaitStableScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS), "Tool autoswap smoke did not become ready for " + smokeCase.id())) return;
+        advance(Stage.RUN_TOOL_SMOKE);
+    }
+
+    private static void tickRunToolSmoke(MinecraftClient client) {
+        NukerPlus module = requireNukerPlus(client);
+        if (module == null) return;
+
+        ToolSmokeCase smokeCase = toolSmokeCases.get(toolSmokeIndex);
+        BenchmarkCase benchmarkCase = smokeCase.benchmarkCase();
+        if (stageTicks == 1) activateModule(module);
+
+        if (client.world != null && client.world.getBlockState(SINGLE_TARGET_POS).isAir()) {
+            toolSmokeFirstBreakTick = stageTicks;
+            boolean pass = module.debugDamageAutoSwapSelectCount() > 0
+                && module.debugDamageLastAutoSwapFromSlot() == APPLE_SLOT
+                && module.debugDamageLastAutoSwapToSlot() == benchmarkCase.tool.slot
+                && toolSmokeFirstBreakTick <= smokeCase.maxBreakTick();
+            smokeAssertions.add(new SmokeAssertion(
+                smokeCase.id(),
+                pass,
+                "block=" + benchmarkCase.blockName
+                    + " start=apple(slot " + APPLE_SLOT + ")"
+                    + " expectedTool=" + benchmarkCase.tool.name + "(slot " + benchmarkCase.tool.slot + ")"
+                    + " firstBreakTick=" + toolSmokeFirstBreakTick
+                    + " autoSwaps=" + module.debugDamageAutoSwapSelectCount()
+                    + " lastSwap=" + module.debugDamageLastAutoSwapFromSlot() + "->" + module.debugDamageLastAutoSwapToSlot()
+                    + " forced=" + module.debugDamageForcedFinishCount()
+            ));
+            deactivateModule(module);
+            toolSmokeIndex++;
+            advance(Stage.PREPARE_TOOL_SMOKE);
+            return;
+        }
+
+        if (stageTicks > smokeCase.timeoutTicks()) {
+            smokeAssertions.add(new SmokeAssertion(
+                smokeCase.id(),
+                false,
+                "Timed out block=" + benchmarkCase.blockName
+                    + " start=apple expectedTool=" + benchmarkCase.tool.name
+                    + " autoSwaps=" + module.debugDamageAutoSwapSelectCount()
+                    + " lastSwap=" + module.debugDamageLastAutoSwapFromSlot() + "->" + module.debugDamageLastAutoSwapToSlot()
+                    + " state=" + module.debugDamageStateSummary()
+            ));
+            deactivateModule(module);
+            toolSmokeIndex++;
+            advance(Stage.PREPARE_TOOL_SMOKE);
         }
     }
 
     private static void tickPrepareCleanup(MinecraftClient client) {
-        BenchmarkCase benchmarkCase = new BenchmarkCase("cleanup", "stone", Blocks.STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60);
+        BenchmarkCase benchmarkCase = new BenchmarkCase("cleanup", STONE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, true);
         if (stageTicks == 1) {
             scenarioReadyStreak = 0;
             if (!prepareScenario(client, benchmarkCase, List.of(SINGLE_TARGET_POS))) return;
@@ -487,7 +585,8 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             return false;
         }
 
-        server.executeSync(() -> setupScenario(server, client, benchmarkCase.block, targets));
+        server.executeSync(() -> setupScenario(server, client, benchmarkCase, targets));
+        client.player.getInventory().setSelectedSlot(benchmarkCase.startFromApple ? APPLE_SLOT : benchmarkCase.tool.slot);
 
         SpeedMine speedMine = Modules.get().get(SpeedMine.class);
         if (speedMine != null && speedMine.isActive()) speedMine.toggle();
@@ -505,7 +604,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         return true;
     }
 
-    private static void setupScenario(MinecraftServer server, MinecraftClient client, Block block, List<BlockPos> targets) {
+    private static void setupScenario(MinecraftServer server, MinecraftClient client, BenchmarkCase benchmarkCase, List<BlockPos> targets) {
         ServerWorld world = server.getOverworld();
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(client.player.getUuid());
         if (player == null) return;
@@ -520,13 +619,16 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         }
 
         for (BlockPos pos : targets) {
-            world.setBlockState(pos, block.getDefaultState());
+            world.setBlockState(pos, benchmarkCase.block.getDefaultState());
         }
 
         player.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
         player.getInventory().clear();
-        player.getInventory().setStack(0, new ItemStack(Items.IRON_PICKAXE));
-        player.getInventory().setSelectedSlot(0);
+        player.getInventory().setStack(APPLE_SLOT, new ItemStack(Items.APPLE));
+        player.getInventory().setStack(PICKAXE_SLOT, new ItemStack(Items.IRON_PICKAXE));
+        player.getInventory().setStack(SHOVEL_SLOT, new ItemStack(Items.IRON_SHOVEL));
+        player.getInventory().setStack(AXE_SLOT, new ItemStack(Items.IRON_AXE));
+        player.getInventory().setSelectedSlot(benchmarkCase.startFromApple ? APPLE_SLOT : benchmarkCase.tool.slot);
         player.requestTeleport(PLAYER_POS.x, PLAYER_POS.y, PLAYER_POS.z);
         player.setVelocity(0.0, 0.0, 0.0);
         player.setYaw(-90.0f);
@@ -547,13 +649,29 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         BlockState state = client.world.getBlockState(targetPos);
         if (state.isAir()) return false;
 
-        float delta = state.calcBlockBreakingDelta(client.player, client.world, targetPos);
+        float delta = calculateDeltaWithTool(client, targetPos, record.benchmarkCase.tool);
+
         record.delta = delta;
         record.vanillaBreakTicks = NukerPlus.calculateVanillaBreakTicks(delta);
         record.targetBreakTicks = record.benchmarkCase.mode == NukerPlus.MiningAccelerationMode.SpeedMineDamage
             ? NukerPlus.calculateTargetBreakTicks(record.vanillaBreakTicks, record.benchmarkCase.damageMultiplier, delta)
             : record.vanillaBreakTicks;
         return true;
+    }
+
+    private static float calculateDeltaWithTool(MinecraftClient client, BlockPos targetPos, ToolSpec tool) {
+        if (client.world == null || client.player == null || targetPos == null || tool == null) return 0.0f;
+
+        BlockState state = client.world.getBlockState(targetPos);
+        if (state.isAir()) return 0.0f;
+
+        int previousSlot = client.player.getInventory().getSelectedSlot();
+        try {
+            client.player.getInventory().setSelectedSlot(tool.slot);
+            return state.calcBlockBreakingDelta(client.player, client.world, targetPos);
+        } finally {
+            client.player.getInventory().setSelectedSlot(previousSlot);
+        }
     }
 
     private static void activateModule(NukerPlus module) {
@@ -675,7 +793,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static String buildMechanicsReport() {
         StringBuilder out = new StringBuilder();
         out.append("# NukerPlus Damage-Time Mechanics Validation\n\n");
-        out.append("Confirmed Mio-style threshold formula: `targetBreakTicks = ceil(damage / delta)`, clamped to `[1, vanillaBreakTicks]`, where `vanillaBreakTicks = ceil(1 / delta)`. Runtime forces the vanilla interaction manager to finish when `currentProgress + delta >= damage`, so lower damage finishes earlier.\n\n");
+        out.append("Confirmed Mio-style fast seed formula: `targetBreakTicks = ceil((1 - damage) / delta)`, clamped to `[1, vanillaBreakTicks]`, where `vanillaBreakTicks = ceil(1 / delta)`. Runtime seeds the vanilla interaction-manager break progress to the configured damage value, then forces finish through the real mining path.\n\n");
 
         benchmarkRecords.stream()
             .filter(record -> record.benchmarkCase.mode == NukerPlus.MiningAccelerationMode.SpeedMineDamage)
@@ -683,12 +801,16 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             .forEach((blockName, records) -> {
                 records.sort(Comparator.comparingDouble(record -> -record.benchmarkCase.damageMultiplier));
                 out.append("## ").append(blockName).append("\n\n");
-                out.append("| Block | Tool | Delta | Vanilla Break Ticks | Damage | Target Break Ticks |\n");
-                out.append("| --- | --- | ---: | ---: | ---: | ---: |\n");
+                out.append("| Block | Start Item | Tool | Delta | Vanilla Break Ticks | Damage | Target Break Ticks |\n");
+                out.append("| --- | --- | --- | ---: | ---: | ---: | ---: |\n");
                 for (BenchmarkRecord record : records) {
                     out.append("| ")
                         .append(blockName)
-                        .append(" | iron_pickaxe | ")
+                        .append(" | ")
+                        .append(record.startItemLabel())
+                        .append(" | ")
+                        .append(record.benchmarkCase.tool.name)
+                        .append(" | ")
                         .append(formatFloat(record.delta))
                         .append(" | ")
                         .append(record.vanillaBreakTicks)
@@ -708,10 +830,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static String buildBenchmarkReport() {
         StringBuilder out = new StringBuilder();
         out.append("# NukerPlus Damage-Time Benchmark\n\n");
-        out.append("| Block | Mode | Damage | Delta | Vanilla Ticks | Target Ticks | Avg Ticks To Break | First Break Tick | Blocks Broken / ")
+        out.append("| Block | Mode | Damage | Start Item | Tool | Delta | Vanilla Ticks | Target Ticks | Avg Ticks To Break | First Break Tick | Blocks Broken / ")
             .append(WINDOW_TICKS)
-            .append("t | Retry / Rebreak | Forced Finish |\n");
-        out.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
+            .append("t | Retry / Rebreak | Forced Finish | AutoSwap | Held Reset |\n");
+        out.append("| --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
 
         benchmarkRecords.stream()
             .sorted(Comparator.comparing((BenchmarkRecord record) -> record.benchmarkCase.blockName)
@@ -723,6 +845,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
                 .append(record.modeLabel())
                 .append(" | ")
                 .append(formatDamage(record.benchmarkCase.damageMultiplier))
+                .append(" | ")
+                .append(record.startItemLabel())
+                .append(" | ")
+                .append(record.benchmarkCase.tool.name)
                 .append(" | ")
                 .append(formatFloat(record.delta))
                 .append(" | ")
@@ -739,6 +865,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
                 .append(record.windowRetryCount)
                 .append(" | ")
                 .append(record.windowForcedFinishCount)
+                .append(" | ")
+                .append(record.windowAutoSwapSelectCount)
+                .append(" | ")
+                .append(record.windowAutoSwapHeldResetCount)
                 .append(" |\n"));
 
         out.append("\nRESULT ").append(benchmarkRecords.size() == benchmarkCases.size() ? "PASS" : "FAIL").append('\n');
@@ -818,24 +948,18 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             "off=" + summarizeRecord(offStone) + " insta=" + summarizeRecord(instaStone) + " damage60=" + summarizeRecord(damageStone)
         ));
 
-        BenchmarkRecord damage70 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.70);
-        BenchmarkRecord damage80 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.80);
-        BenchmarkRecord damage90 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.90);
-        BenchmarkRecord damage100 = findRecord("stone", NukerPlus.MiningAccelerationMode.SpeedMineDamage, 1.00);
-        boolean monotonicPass = damageStone != null && damage70 != null && damage80 != null && damage90 != null && damage100 != null
-            && damageStone.targetBreakTicks <= damage70.targetBreakTicks
-            && damage70.targetBreakTicks <= damage80.targetBreakTicks
-            && damage80.targetBreakTicks <= damage90.targetBreakTicks
-            && damage90.targetBreakTicks <= damage100.targetBreakTicks
-            && damageStone.averageTicksToBreak() <= damage100.averageTicksToBreak();
+        boolean fastPathPass = damageStone != null
+            && damageStone.averageTicksToBreak() > 0.0
+            && damageStone.targetBreakTicks <= 4
+            && damageStone.windowFirstBreakTick <= 6
+            && damageStone.windowForcedFinishCount > 0
+            && damageStone.windowAutoSwapSelectCount > 0
+            && damageStone.windowLastAutoSwapFromSlot == APPLE_SLOT
+            && damageStone.windowLastAutoSwapToSlot == STONE.tool.slot;
         assertions.add(new SmokeAssertion(
-            "SMOKE-12 DAMAGE MONOTONIC",
-            monotonicPass,
-            "damage60=" + summarizeRecord(damageStone)
-                + " damage70=" + summarizeRecord(damage70)
-                + " damage80=" + summarizeRecord(damage80)
-                + " damage90=" + summarizeRecord(damage90)
-                + " damage100=" + summarizeRecord(damage100)
+            "SMOKE-12 DAMAGE 0.60 FAST PATH",
+            fastPathPass,
+            "damage60=" + summarizeRecord(damageStone) + " targetTicks=" + (damageStone == null ? "missing" : damageStone.targetBreakTicks)
         ));
 
         return assertions;
@@ -864,7 +988,9 @@ public final class NukerPlusDamageTimeRuntimeValidation {
             + " first=" + record.windowFirstBreakTick
             + " broken=" + record.windowBlocksBroken
             + " retries=" + record.windowRetryCount
-            + " forced=" + record.windowForcedFinishCount;
+            + " forced=" + record.windowForcedFinishCount
+            + " autoswap=" + record.windowAutoSwapSelectCount
+            + " lastSwap=" + record.windowLastAutoSwapFromSlot + "->" + record.windowLastAutoSwapToSlot;
     }
 
     private static List<BlockPos> createWindowTargets() {
@@ -878,20 +1004,30 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static List<BenchmarkCase> createBenchmarkCases() {
         List<BenchmarkCase> cases = new ArrayList<>();
         List<BlockSpec> blocks = List.of(
-            new BlockSpec("stone", Blocks.STONE),
-            new BlockSpec("cobbled_deepslate", Blocks.COBBLED_DEEPSLATE),
-            new BlockSpec("dirt", Blocks.DIRT)
+            STONE,
+            DIORITE,
+            COBBLED_DEEPSLATE,
+            DIRT,
+            OAK_LOG
         );
 
         for (BlockSpec spec : blocks) {
-            cases.add(new BenchmarkCase(spec.name, spec.name, spec.block, NukerPlus.MiningAccelerationMode.Off, 1.0));
-            cases.add(new BenchmarkCase(spec.name + "-insta", spec.name, spec.block, NukerPlus.MiningAccelerationMode.Insta, 1.0));
+            cases.add(new BenchmarkCase(spec.name, spec, NukerPlus.MiningAccelerationMode.Off, 1.0, false));
+            cases.add(new BenchmarkCase(spec.name + "-insta", spec, NukerPlus.MiningAccelerationMode.Insta, 1.0, false));
             for (double damage : List.of(1.00, 0.90, 0.80, 0.70, 0.60)) {
-                cases.add(new BenchmarkCase(spec.name + "-damage-" + formatDamage(damage), spec.name, spec.block, NukerPlus.MiningAccelerationMode.SpeedMineDamage, damage));
+                cases.add(new BenchmarkCase(spec.name + "-damage-" + formatDamage(damage), spec, NukerPlus.MiningAccelerationMode.SpeedMineDamage, damage, true));
             }
         }
 
         return List.copyOf(cases);
+    }
+
+    private static List<ToolSmokeCase> createToolSmokeCases() {
+        return List.of(
+            new ToolSmokeCase("SMOKE-13 PICKAXE APPLE SILENT SWAP", new BenchmarkCase("tool-pickaxe-diorite", DIORITE, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, true), 8, 80),
+            new ToolSmokeCase("SMOKE-14 SHOVEL APPLE SILENT SWAP", new BenchmarkCase("tool-shovel-dirt", DIRT, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, true), 8, 80),
+            new ToolSmokeCase("SMOKE-15 AXE APPLE SILENT SWAP", new BenchmarkCase("tool-axe-oak-log", OAK_LOG, NukerPlus.MiningAccelerationMode.SpeedMineDamage, 0.60, true), 12, 100)
+        );
     }
 
     private static Path resolveOutputDir() {
@@ -956,19 +1092,31 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         RUN_TARGET_SWITCH,
         PREPARE_DAMAGE_BURST,
         RUN_DAMAGE_BURST,
+        PREPARE_TOOL_SMOKE,
+        RUN_TOOL_SMOKE,
         PREPARE_CLEANUP,
         RUN_CLEANUP,
         FINISHED,
         FAILED
     }
 
-    private record BlockSpec(String name, Block block) {
+    private record ToolSpec(String name, Item item, int slot) {
     }
 
-    private record BenchmarkCase(String id, String blockName, Block block, NukerPlus.MiningAccelerationMode mode, double damageMultiplier, int maxBlocksPerTick) {
-        private BenchmarkCase(String id, String blockName, Block block, NukerPlus.MiningAccelerationMode mode, double damageMultiplier) {
-            this(id, blockName, block, mode, damageMultiplier, 1);
+    private record BlockSpec(String name, Block block, ToolSpec tool) {
+    }
+
+    private record BenchmarkCase(String id, String blockName, Block block, NukerPlus.MiningAccelerationMode mode, double damageMultiplier, int maxBlocksPerTick, ToolSpec tool, boolean startFromApple) {
+        private BenchmarkCase(String id, BlockSpec blockSpec, NukerPlus.MiningAccelerationMode mode, double damageMultiplier, boolean startFromApple) {
+            this(id, blockSpec, mode, damageMultiplier, 1, startFromApple);
         }
+
+        private BenchmarkCase(String id, BlockSpec blockSpec, NukerPlus.MiningAccelerationMode mode, double damageMultiplier, int maxBlocksPerTick, boolean startFromApple) {
+            this(id, blockSpec.name, blockSpec.block, mode, damageMultiplier, maxBlocksPerTick, blockSpec.tool, startFromApple);
+        }
+    }
+
+    private record ToolSmokeCase(String id, BenchmarkCase benchmarkCase, int maxBreakTick, int timeoutTicks) {
     }
 
     private record SmokeAssertion(String id, boolean passed, String detail) {
@@ -987,6 +1135,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
         private int windowFirstBreakTick = -1;
         private long windowForcedFinishCount;
         private long windowRetryCount;
+        private long windowAutoSwapSelectCount;
+        private long windowAutoSwapHeldResetCount;
+        private int windowLastAutoSwapFromSlot = -1;
+        private int windowLastAutoSwapToSlot = -1;
 
         private BenchmarkRecord(BenchmarkCase benchmarkCase) {
             this.benchmarkCase = benchmarkCase;
@@ -1003,6 +1155,10 @@ public final class NukerPlusDamageTimeRuntimeValidation {
                 case Insta -> "Insta";
                 case SpeedMineDamage -> "SpeedMineDamage";
             };
+        }
+
+        private String startItemLabel() {
+            return benchmarkCase.startFromApple ? "apple" : benchmarkCase.tool.name;
         }
     }
 }

@@ -40,6 +40,7 @@ import net.minecraft.block.BlockState;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.HandSwingC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
@@ -217,7 +218,7 @@ public class NukerPlus extends Module {
 
     private final Setting<Double> damage = sgAcceleration.add(new DoubleSetting.Builder()
         .name("damage")
-        .description("Mio-style break damage threshold. Lower = faster; 0.6 forces finish around 60% block damage, 1.0 is vanilla-like.")
+        .description("Mio-style break progress seed. 0.6 starts at 60% progress and forces the remaining break through the real mining path.")
         .defaultValue(DAMAGE_DEFAULT)
         .range(DAMAGE_MIN, DAMAGE_MAX)
         .sliderRange(DAMAGE_MIN, DAMAGE_MAX)
@@ -367,6 +368,10 @@ public class NukerPlus extends Module {
     private MiningAccelerationMode lastAccelerationMode = MiningAccelerationMode.Off;
     private long damageForcedFinishCount;
     private long damageRetryCount;
+    private long damageAutoSwapSelectCount;
+    private long damageAutoSwapHeldResetCount;
+    private int damageLastAutoSwapFromSlot = -1;
+    private int damageLastAutoSwapToSlot = -1;
     private long damageBurstChainTick = Long.MIN_VALUE;
     private int damageSwapBackSlot = -1;
     private long damageToolSyncTick = Long.MIN_VALUE;
@@ -392,6 +397,10 @@ public class NukerPlus extends Module {
         lastAccelerationMode = accelerationMode.get();
         damageForcedFinishCount = 0L;
         damageRetryCount = 0L;
+        damageAutoSwapSelectCount = 0L;
+        damageAutoSwapHeldResetCount = 0L;
+        damageLastAutoSwapFromSlot = -1;
+        damageLastAutoSwapToSlot = -1;
         damageBurstChainTick = Long.MIN_VALUE;
         damageSwapBackSlot = -1;
         damageToolSyncTick = Long.MIN_VALUE;
@@ -655,10 +664,10 @@ public class NukerPlus extends Module {
             }
 
             if (usesSpeedMineDamageAcceleration()) {
-                prepareSpeedMineDamageTool(blockPos);
-                float blockBreakingDelta = resolveBlockBreakingDelta(blockPos);
+                DamageToolSelection toolSelection = prepareSpeedMineDamageTool(blockPos);
+                float blockBreakingDelta = toolSelection.blockBreakingDelta();
                 if (isInstaChainEligible(blockBreakingDelta)) return performInstaBreak(blockPos, blockBreakingDelta, false);
-                return performSpeedMineDamageBreak(blockPos, blockBreakingDelta);
+                return performSpeedMineDamageBreak(blockPos, blockBreakingDelta, toolSelection);
             }
         }
 
@@ -775,7 +784,7 @@ public class NukerPlus extends Module {
         return BreakAttemptResult.insta(continueLoop);
     }
 
-    private BreakAttemptResult performSpeedMineDamageBreak(BlockPos blockPos, float blockBreakingDelta) {
+    private BreakAttemptResult performSpeedMineDamageBreak(BlockPos blockPos, float blockBreakingDelta, DamageToolSelection toolSelection) {
         if (mc.player == null || mc.world == null || mc.interactionManager == null || mc.getNetworkHandler() == null) {
             resetDamageBreakState("damage-fallback");
             performLegacyBreak(blockPos);
@@ -795,13 +804,13 @@ public class NukerPlus extends Module {
         }
 
         if (canUseDamageBurstChain()) {
-            return performChargedSpeedMineDamageBreak(blockPos, blockState, blockBreakingDelta);
+            return performChargedSpeedMineDamageBreak(blockPos, blockState, blockBreakingDelta, toolSelection);
         }
 
         Direction direction = damageBreakState.matches(blockPos) && damageBreakState.direction != null
             ? damageBreakState.direction
             : BlockUtils.getDirection(blockPos);
-        ItemStack toolSnapshot = mc.player.getMainHandStack().copy();
+        ItemStack toolSnapshot = toolSelection.toolStackSnapshot();
         int vanillaBreakTicks = calculateVanillaBreakTicks(blockBreakingDelta);
         int targetBreakTicks = calculateTargetBreakTicks(vanillaBreakTicks, damage.get(), blockBreakingDelta);
 
@@ -826,6 +835,7 @@ public class NukerPlus extends Module {
         if (!currentlyBreaking) {
             boolean started = mc.interactionManager.attackBlock(blockPos, direction);
             swingBreakingHand();
+            seedSpeedMineDamageProgress(interactionManager);
             damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
             if (!started) {
                 resetDamageBreakState("attack-failed");
@@ -837,7 +847,7 @@ public class NukerPlus extends Module {
                     + " delta=" + formatDelta(blockBreakingDelta)
                     + " vanilla=" + damageBreakState.vanillaBreakTicks
                     + " target=" + damageBreakState.targetBreakTicks
-                    + " threshold=" + formatDamageMultiplier(damage.get())
+                    + " seed=" + formatDamageMultiplier(damage.get())
             );
             if (damageBreakState.targetBreakTicks <= 1) {
                 damageBreakState.elapsedBreakTicks = 1;
@@ -848,13 +858,15 @@ public class NukerPlus extends Module {
 
         damageBreakState.elapsedBreakTicks = damageBreakState.computeElapsedTicks(mc.world.getTime());
         damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
+        seedSpeedMineDamageProgress(interactionManager);
 
-        if (isSpeedMineDamageFinishReady(interactionManager, blockBreakingDelta) || damageBreakState.elapsedBreakTicks >= damageBreakState.targetBreakTicks) {
+        if (damageBreakState.elapsedBreakTicks >= damageBreakState.targetBreakTicks) {
             return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
         }
 
         boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
         swingBreakingHand();
+        seedSpeedMineDamageProgress(interactionManager);
         damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
 
         if (!progressed) {
@@ -865,9 +877,9 @@ public class NukerPlus extends Module {
         return BreakAttemptResult.stop();
     }
 
-    private BreakAttemptResult performChargedSpeedMineDamageBreak(BlockPos blockPos, BlockState blockState, float blockBreakingDelta) {
+    private BreakAttemptResult performChargedSpeedMineDamageBreak(BlockPos blockPos, BlockState blockState, float blockBreakingDelta, DamageToolSelection toolSelection) {
         Direction direction = BlockUtils.getDirection(blockPos);
-        ItemStack toolSnapshot = mc.player.getMainHandStack().copy();
+        ItemStack toolSnapshot = toolSelection.toolStackSnapshot();
         int vanillaBreakTicks = calculateVanillaBreakTicks(blockBreakingDelta);
         int targetBreakTicks = calculateTargetBreakTicks(vanillaBreakTicks, damage.get(), blockBreakingDelta);
 
@@ -877,6 +889,7 @@ public class NukerPlus extends Module {
         ClientPlayerInteractionManagerInvoker interactionManager = (ClientPlayerInteractionManagerInvoker) mc.interactionManager;
         boolean started = mc.interactionManager.attackBlock(blockPos, direction);
         swingBreakingHand();
+        seedSpeedMineDamageProgress(interactionManager);
         damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
         if (!started) {
             resetDamageBreakState("charged-attack-failed");
@@ -888,7 +901,7 @@ public class NukerPlus extends Module {
                 + " delta=" + formatDelta(blockBreakingDelta)
                 + " vanilla=" + damageBreakState.vanillaBreakTicks
                 + " target=" + damageBreakState.targetBreakTicks
-                + " threshold=" + formatDamageMultiplier(damage.get())
+                + " seed=" + formatDamageMultiplier(damage.get())
         );
         return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
     }
@@ -907,7 +920,7 @@ public class NukerPlus extends Module {
                 + " elapsed=" + damageBreakState.elapsedBreakTicks + "/" + damageBreakState.targetBreakTicks
                 + " vanilla=" + damageBreakState.vanillaBreakTicks
                 + " progress=" + formatDelta(damageBreakState.lastProgress)
-                + " threshold=" + formatDamageMultiplier(damage.get())
+                + " seed=" + formatDamageMultiplier(damage.get())
                 + " forced=" + damageForcedFinishCount
         );
 
@@ -923,12 +936,16 @@ public class NukerPlus extends Module {
         return BreakAttemptResult.keepGoing();
     }
 
-    private boolean isSpeedMineDamageFinishReady(ClientPlayerInteractionManagerInvoker interactionManager, float blockBreakingDelta) {
-        if (interactionManager == null || !Float.isFinite(blockBreakingDelta) || blockBreakingDelta <= 0.0f) return false;
+    private void seedSpeedMineDamageProgress(ClientPlayerInteractionManagerInvoker interactionManager) {
+        if (interactionManager == null) return;
         float currentProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
-        damageBreakState.lastProgress = currentProgress;
-        return currentProgress > 0.0f
-            && currentProgress + blockBreakingDelta + DAMAGE_FINISH_PROGRESS_EPSILON >= damageFinishThreshold(damage.get());
+        float seedProgress = damageSeedProgress(damage.get());
+        if (currentProgress < seedProgress) {
+            interactionManager.devilsAddon$setCurrentBreakingProgress(seedProgress);
+            damageBreakState.lastProgress = seedProgress;
+        } else {
+            damageBreakState.lastProgress = currentProgress;
+        }
     }
 
     private boolean canUseDamageBurstChain() {
@@ -1005,15 +1022,20 @@ public class NukerPlus extends Module {
         }
     }
 
-    private void prepareSpeedMineDamageTool(BlockPos blockPos) {
-        if (!speedMineAutoSwap.get() || mc.player == null || mc.world == null || blockPos == null) return;
+    private DamageToolSelection prepareSpeedMineDamageTool(BlockPos blockPos) {
+        if (mc.player == null || mc.world == null || blockPos == null) return DamageToolSelection.empty();
 
         BlockState state = mc.world.getBlockState(blockPos);
-        if (state.isAir()) return;
+        if (state.isAir()) return DamageToolSelection.empty();
 
         int selectedSlot = mc.player.getInventory().getSelectedSlot();
         int bestSlot = selectedSlot;
         float bestDelta = resolveBlockBreakingDeltaWithSlot(state, blockPos, selectedSlot);
+        ItemStack bestStack = mc.player.getInventory().getStack(selectedSlot).copy();
+
+        if (!speedMineAutoSwap.get()) {
+            return new DamageToolSelection(bestDelta, selectedSlot, selectedSlot, bestStack);
+        }
 
         for (int slot = 0; slot < 9; slot++) {
             ItemStack stack = mc.player.getInventory().getStack(slot);
@@ -1023,19 +1045,17 @@ public class NukerPlus extends Module {
             if (candidateDelta > bestDelta + 1.0E-6f) {
                 bestDelta = candidateDelta;
                 bestSlot = slot;
+                bestStack = stack.copy();
             }
         }
 
         if (bestSlot == selectedSlot) {
-            syncSelectedDamageToolSlot(bestSlot, "held-best");
-            return;
+            resetHeldBestDamageToolSlot(bestSlot);
+            return new DamageToolSelection(bestDelta, selectedSlot, bestSlot, bestStack);
         }
 
-        if (damageSwapBackSlot < 0) damageSwapBackSlot = selectedSlot;
-        if (InvUtils.swap(bestSlot, false)) {
-            markSelectedDamageToolSynced(bestSlot);
-            debugAcceleration("damage autoswap slot=" + selectedSlot + "->" + bestSlot + " delta=" + formatDelta(bestDelta));
-        }
+        selectDamageToolSlotSilently(selectedSlot, bestSlot, bestDelta);
+        return new DamageToolSelection(bestDelta, selectedSlot, bestSlot, bestStack);
     }
 
     private float resolveBlockBreakingDeltaWithSlot(BlockState state, BlockPos blockPos, int slot) {
@@ -1058,10 +1078,27 @@ public class NukerPlus extends Module {
 
         int restoreSlot = damageSwapBackSlot;
         damageSwapBackSlot = -1;
-        if (mc.player.getInventory().getSelectedSlot() != restoreSlot) {
+        if (mc.getNetworkHandler() != null) {
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(restoreSlot));
+            markSelectedDamageToolSynced(restoreSlot);
+            debugAcceleration("damage autoswap silent-restore slot=" + restoreSlot);
+        } else if (mc.player.getInventory().getSelectedSlot() != restoreSlot) {
             InvUtils.swap(restoreSlot, false);
             debugAcceleration("damage autoswap restore slot=" + restoreSlot);
         }
+    }
+
+    private void selectDamageToolSlotSilently(int selectedSlot, int bestSlot, float bestDelta) {
+        if (mc.world == null || mc.getNetworkHandler() == null || selectedSlot < 0 || selectedSlot > 8 || bestSlot < 0 || bestSlot > 8) return;
+        if (damageSwapBackSlot < 0) damageSwapBackSlot = selectedSlot;
+        if (damageToolSyncTick == mc.world.getTime() && damageToolSyncSlot == bestSlot) return;
+
+        mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(bestSlot));
+        markSelectedDamageToolSynced(bestSlot);
+        damageAutoSwapSelectCount++;
+        damageLastAutoSwapFromSlot = selectedSlot;
+        damageLastAutoSwapToSlot = bestSlot;
+        debugAcceleration("damage autoswap silent slot=" + selectedSlot + "->" + bestSlot + " delta=" + formatDelta(bestDelta));
     }
 
     private void syncSelectedDamageToolSlot(int slot, String reason) {
@@ -1076,6 +1113,39 @@ public class NukerPlus extends Module {
     private void markSelectedDamageToolSynced(int slot) {
         damageToolSyncTick = mc.world == null ? Long.MIN_VALUE : mc.world.getTime();
         damageToolSyncSlot = slot;
+    }
+
+    private void resetHeldBestDamageToolSlot(int bestSlot) {
+        if (mc.world == null || mc.player == null || mc.getNetworkHandler() == null || bestSlot < 0 || bestSlot > 8) return;
+        if (damageToolSyncTick == mc.world.getTime() && damageToolSyncSlot == bestSlot) return;
+
+        int resetSlot = findSwapResetSlot(bestSlot);
+        if (resetSlot >= 0) {
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(resetSlot));
+            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(bestSlot));
+            markSelectedDamageToolSynced(bestSlot);
+            damageAutoSwapHeldResetCount++;
+            damageLastAutoSwapFromSlot = resetSlot;
+            damageLastAutoSwapToSlot = bestSlot;
+            debugAcceleration("damage autoswap held-reset slot=" + bestSlot + " via=" + resetSlot);
+            return;
+        }
+
+        syncSelectedDamageToolSlot(bestSlot, "held-best");
+    }
+
+    private int findSwapResetSlot(int selectedSlot) {
+        if (mc.player == null) return -1;
+
+        for (int slot = 0; slot < 9; slot++) {
+            if (slot != selectedSlot && !mc.player.getInventory().getStack(slot).isEmpty()) return slot;
+        }
+
+        for (int slot = 0; slot < 9; slot++) {
+            if (slot != selectedSlot) return slot;
+        }
+
+        return -1;
     }
 
     private void swingBreakingHand() {
@@ -1110,8 +1180,8 @@ public class NukerPlus extends Module {
 
     public static int calculateTargetBreakTicks(int vanillaBreakTicks, double damageMultiplier) {
         if (vanillaBreakTicks <= 0) return 0;
-        double finishThreshold = damageFinishThreshold(damageMultiplier);
-        int targetBreakTicks = ceilProgressTicks(vanillaBreakTicks * finishThreshold);
+        double remainingProgress = remainingBreakProgress(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(vanillaBreakTicks * remainingProgress);
         return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
     }
 
@@ -1121,14 +1191,19 @@ public class NukerPlus extends Module {
             return calculateTargetBreakTicks(vanillaBreakTicks, damageMultiplier);
         }
 
-        double finishThreshold = damageFinishThreshold(damageMultiplier);
-        int targetBreakTicks = ceilProgressTicks(finishThreshold / blockBreakingDelta);
+        double remainingProgress = remainingBreakProgress(damageMultiplier);
+        int targetBreakTicks = ceilProgressTicks(remainingProgress / blockBreakingDelta);
         return Math.max(1, Math.min(vanillaBreakTicks, targetBreakTicks));
     }
 
-    private static double damageFinishThreshold(double damageMultiplier) {
+    private static float damageSeedProgress(double damageMultiplier) {
         double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
-        return MathHelper.clamp(clampedDamage, DAMAGE_FINISH_PROGRESS_EPSILON, 1.0D);
+        return (float) MathHelper.clamp(clampedDamage, 0.0D, 1.0D - DAMAGE_FINISH_PROGRESS_EPSILON);
+    }
+
+    private static double remainingBreakProgress(double damageMultiplier) {
+        double clampedDamage = MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX);
+        return MathHelper.clamp(1.0D - clampedDamage, 0.0D, 1.0D);
     }
 
     private static int ceilProgressTicks(double progressTicks) {
@@ -1141,6 +1216,22 @@ public class NukerPlus extends Module {
 
     public long debugDamageRetryCount() {
         return damageRetryCount;
+    }
+
+    public long debugDamageAutoSwapSelectCount() {
+        return damageAutoSwapSelectCount;
+    }
+
+    public long debugDamageAutoSwapHeldResetCount() {
+        return damageAutoSwapHeldResetCount;
+    }
+
+    public int debugDamageLastAutoSwapFromSlot() {
+        return damageLastAutoSwapFromSlot;
+    }
+
+    public int debugDamageLastAutoSwapToSlot() {
+        return damageLastAutoSwapToSlot;
     }
 
     public String debugDamageStateSummary() {
@@ -1194,6 +1285,12 @@ public class NukerPlus extends Module {
         firstBlock = true;
         timer = 0;
         noBlockTimer = 0;
+        damageForcedFinishCount = 0L;
+        damageRetryCount = 0L;
+        damageAutoSwapSelectCount = 0L;
+        damageAutoSwapHeldResetCount = 0L;
+        damageLastAutoSwapFromSlot = -1;
+        damageLastAutoSwapToSlot = -1;
     }
 
     private static final class BaritoneSelectionBridge {
@@ -1449,6 +1546,12 @@ public class NukerPlus extends Module {
 
         private static BreakAttemptResult stop() {
             return new BreakAttemptResult(false);
+        }
+    }
+
+    private record DamageToolSelection(float blockBreakingDelta, int selectedSlot, int toolSlot, ItemStack toolStackSnapshot) {
+        private static DamageToolSelection empty() {
+            return new DamageToolSelection(0.0f, -1, -1, ItemStack.EMPTY);
         }
     }
 
