@@ -89,3 +89,5 @@ hs_err_pid*.log
 replay_pid*.log
 */run-assimilated-smoke/
 */run-devils-game-smoke/
+*/run-nukerplus-damage-time/
+*/run-stashmover-targeted/

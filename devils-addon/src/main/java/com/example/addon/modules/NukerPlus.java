@@ -666,7 +666,6 @@ public class NukerPlus extends Module {
             if (usesSpeedMineDamageAcceleration()) {
                 DamageToolSelection toolSelection = prepareSpeedMineDamageTool(blockPos);
                 float blockBreakingDelta = toolSelection.blockBreakingDelta();
-                if (isInstaChainEligible(blockBreakingDelta)) return performInstaBreak(blockPos, blockBreakingDelta, false);
                 return performSpeedMineDamageBreak(blockPos, blockBreakingDelta, toolSelection);
             }
         }
@@ -853,6 +852,35 @@ public class NukerPlus extends Module {
                 damageBreakState.elapsedBreakTicks = 1;
                 return finishSpeedMineDamageBreak(blockPos, direction, blockBreakingDelta, interactionManager);
             }
+
+            boolean progressed = mc.interactionManager.updateBlockBreakingProgress(blockPos, direction);
+            swingBreakingHand();
+            damageBreakState.markInitialProgressApplied(mc.world.getTime());
+            if (!mc.world.getBlockState(blockPos).isAir()) {
+                seedSpeedMineDamageProgress(interactionManager);
+            }
+            damageBreakState.lastProgress = interactionManager.devilsAddon$getCurrentBreakingProgress();
+
+            if (!progressed) {
+                damageRetryCount++;
+                resetDamageBreakState("start-progress-lost");
+                return BreakAttemptResult.stop();
+            }
+
+            if (mc.world.getBlockState(blockPos).isAir()) {
+                debugAcceleration(
+                    "damage start-finish " + blockPos
+                        + " delta=" + formatDelta(blockBreakingDelta)
+                        + " vanilla=" + damageBreakState.vanillaBreakTicks
+                        + " target=" + damageBreakState.targetBreakTicks
+                        + " seed=" + formatDamageMultiplier(damage.get())
+                );
+                armDamageBurstChain();
+                damageBreakState.clear();
+                restoreDamageAutoSwap();
+                return BreakAttemptResult.keepGoing();
+            }
+
             return BreakAttemptResult.stop();
         }
 
@@ -1000,17 +1028,17 @@ public class NukerPlus extends Module {
     }
 
     private void resetDamageBreakState(String reason) {
-        if (!damageBreakState.isTracking()) {
-            damageBreakState.clear();
-            restoreDamageAutoSwap();
-            return;
-        }
-
         if (mc.interactionManager != null && mc.interactionManager.isBreakingBlock()) {
             try {
                 mc.interactionManager.cancelBlockBreaking();
             } catch (Throwable ignored) {
             }
+        }
+
+        if (!damageBreakState.isTracking()) {
+            damageBreakState.clear();
+            restoreDamageAutoSwap();
+            return;
         }
 
         String summary = damageBreakState.summary();
@@ -1050,7 +1078,6 @@ public class NukerPlus extends Module {
         }
 
         if (bestSlot == selectedSlot) {
-            resetHeldBestDamageToolSlot(bestSlot);
             return new DamageToolSelection(bestDelta, selectedSlot, bestSlot, bestStack);
         }
 
@@ -1101,51 +1128,9 @@ public class NukerPlus extends Module {
         debugAcceleration("damage autoswap silent slot=" + selectedSlot + "->" + bestSlot + " delta=" + formatDelta(bestDelta));
     }
 
-    private void syncSelectedDamageToolSlot(int slot, String reason) {
-        if (mc.world == null || slot < 0 || slot > 8) return;
-        if (damageToolSyncTick == mc.world.getTime() && damageToolSyncSlot == slot) return;
-        if (InvUtils.swap(slot, false)) {
-            markSelectedDamageToolSynced(slot);
-            debugAcceleration("damage autoswap sync slot=" + slot + " reason=" + reason);
-        }
-    }
-
     private void markSelectedDamageToolSynced(int slot) {
         damageToolSyncTick = mc.world == null ? Long.MIN_VALUE : mc.world.getTime();
         damageToolSyncSlot = slot;
-    }
-
-    private void resetHeldBestDamageToolSlot(int bestSlot) {
-        if (mc.world == null || mc.player == null || mc.getNetworkHandler() == null || bestSlot < 0 || bestSlot > 8) return;
-        if (damageToolSyncTick == mc.world.getTime() && damageToolSyncSlot == bestSlot) return;
-
-        int resetSlot = findSwapResetSlot(bestSlot);
-        if (resetSlot >= 0) {
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(resetSlot));
-            mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(bestSlot));
-            markSelectedDamageToolSynced(bestSlot);
-            damageAutoSwapHeldResetCount++;
-            damageLastAutoSwapFromSlot = resetSlot;
-            damageLastAutoSwapToSlot = bestSlot;
-            debugAcceleration("damage autoswap held-reset slot=" + bestSlot + " via=" + resetSlot);
-            return;
-        }
-
-        syncSelectedDamageToolSlot(bestSlot, "held-best");
-    }
-
-    private int findSwapResetSlot(int selectedSlot) {
-        if (mc.player == null) return -1;
-
-        for (int slot = 0; slot < 9; slot++) {
-            if (slot != selectedSlot && !mc.player.getInventory().getStack(slot).isEmpty()) return slot;
-        }
-
-        for (int slot = 0; slot < 9; slot++) {
-            if (slot != selectedSlot) return slot;
-        }
-
-        return -1;
     }
 
     private void swingBreakingHand() {
@@ -1255,6 +1240,10 @@ public class NukerPlus extends Module {
     }
 
     public void debugConfigureDamageHarness(MiningAccelerationMode accelerationMode, double damageMultiplier, Block targetBlock, int maxBlocksPerTick) {
+        debugConfigureDamageHarness(accelerationMode, damageMultiplier, targetBlock, maxBlocksPerTick, true);
+    }
+
+    public void debugConfigureDamageHarness(MiningAccelerationMode accelerationMode, double damageMultiplier, Block targetBlock, int maxBlocksPerTick, boolean speedMineAutoSwap) {
         this.accelerationMode.set(accelerationMode);
         this.damage.set(MathHelper.clamp(damageMultiplier, DAMAGE_MIN, DAMAGE_MAX));
         this.debugAcceleration.set(false);
@@ -1269,7 +1258,7 @@ public class NukerPlus extends Module {
         this.interact.set(false);
         this.rotate.set(false);
         this.baritoneArea.set(false);
-        this.speedMineAutoSwap.set(true);
+        this.speedMineAutoSwap.set(speedMineAutoSwap);
         this.grimBypass.set(false);
         this.listMode.set(ListMode.Whitelist);
         whitelist.get().clear();
@@ -1458,6 +1447,7 @@ public class NukerPlus extends Module {
         private float lastProgress;
         private float lastDelta;
         private boolean forcedFinishAttempted;
+        private boolean initialProgressApplied;
 
         private boolean isTracking() {
             return targetPos != null && targetState != null;
@@ -1486,6 +1476,7 @@ public class NukerPlus extends Module {
             this.lastProgress = 0.0f;
             this.lastDelta = lastDelta;
             this.forcedFinishAttempted = false;
+            this.initialProgressApplied = false;
         }
 
         private void refresh(BlockState blockState, Direction direction, ItemStack toolSnapshot, long worldTick, int vanillaBreakTicks, int targetBreakTicks, float lastDelta) {
@@ -1501,8 +1492,17 @@ public class NukerPlus extends Module {
         private int computeElapsedTicks(long worldTick) {
             if (breakStartTick == Long.MIN_VALUE) return 0;
             long elapsed = worldTick - breakStartTick;
-            if (elapsed <= 0L) return 0;
-            return elapsed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) elapsed;
+            int elapsedTicks;
+            if (elapsed <= 0L) elapsedTicks = 0;
+            else elapsedTicks = elapsed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) elapsed;
+            if (initialProgressApplied && elapsedTicks < Integer.MAX_VALUE) elapsedTicks++;
+            return elapsedTicks;
+        }
+
+        private void markInitialProgressApplied(long worldTick) {
+            if (initialProgressApplied) return;
+            initialProgressApplied = true;
+            this.elapsedBreakTicks = computeElapsedTicks(worldTick);
         }
 
         private void clear() {
@@ -1517,6 +1517,7 @@ public class NukerPlus extends Module {
             lastProgress = 0.0f;
             lastDelta = 0.0f;
             forcedFinishAttempted = false;
+            initialProgressApplied = false;
         }
 
         private String summary() {

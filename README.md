@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.52`): `build/libs/devils-addon-0.0.46.jar`
+- Current addon build (`0.0.53`): `build/libs/devils-addon-0.0.53.jar`
 - Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
@@ -27,7 +27,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.52` |
+| Addon Version | `0.0.53` |
 | Game Version | `0.0.4` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -361,12 +361,12 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.52`)
+## Release Notes (`v0.0.53`)
 
-- bumped addon artifact version from `0.0.45` to `0.0.46`
-- fixed the broken packaged runtime by bundling the required non-mod runtime libraries into the final addon jar
-- preserved the de-jarred source-native addon layout while keeping compile, test, remap, runtime smoke, and full build validation green
-- kept the cleaned final jar structure introduced in the previous pass
+- fixed the `SpeedMineDamage` regression where mining speed dropped when the correct tool was already held or `speedmine-auto-swap` was disabled
+- removed the wrong `SpeedMineDamage -> Insta` fallback and the redundant held-tool slot reset path
+- added runtime smoke coverage for `pickaxe already held` with `autoswap=true` and `autoswap=false`
+- ignored local runtime workdirs `run-nukerplus-damage-time` and `run-stashmover-targeted`
 
 ## Repository Structure
 
