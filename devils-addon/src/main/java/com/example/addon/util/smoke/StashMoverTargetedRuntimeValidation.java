@@ -48,6 +48,7 @@ public final class StashMoverTargetedRuntimeValidation {
     private static boolean installed;
     private static boolean completed;
     private static boolean worldRequested;
+    private static boolean worldCreationSubmitted;
     private static Stage stage = Stage.STARTUP_DELAY;
     private static int stageTicks;
     private static Path outputPath;
@@ -72,6 +73,7 @@ public final class StashMoverTargetedRuntimeValidation {
         ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
             completed = false;
             worldRequested = false;
+            worldCreationSubmitted = false;
             stage = Stage.STARTUP_DELAY;
             stageTicks = 0;
             previousPearlCount = 0;
@@ -126,8 +128,18 @@ public final class StashMoverTargetedRuntimeValidation {
             return;
         }
 
+        if (!worldCreationSubmitted && SmokeCreateWorldHelper.submitCreateWorldIfPresent(client)) {
+            worldCreationSubmitted = true;
+            appendLine("STAGE create-world-submitted");
+        }
+
         if (stageTicks > WORLD_LOAD_TIMEOUT_TICKS) {
-            fail(client, "Timed out while waiting for targeted runtime world load.");
+            fail(
+                client,
+                "Timed out while waiting for targeted runtime world load."
+                    + " screen=" + safeClassName(client.currentScreen)
+                    + " createSubmitted=" + worldCreationSubmitted
+            );
         }
     }
 

@@ -1,5 +1,6 @@
 package com.example.addon.modules.stashmover;
 
+import com.example.addon.util.runtime.StrictRuntimeLogger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -92,12 +93,23 @@ abstract class StashMoverInteraction extends StashMoverSupport {
 
         Vec3d hitVec = interactionPoint(pos);
         if (mc.player.getEyePos().distanceTo(hitVec) > CONTAINER_REACH) {
+            StrictRuntimeLogger.logStashMover(
+                "container-open",
+                "result=out-of-range pos=" + formatBlockPosForFeedback(pos) + " hit=" + formatVecForFeedback(hitVec)
+            );
             requestGoal(GoalKind.CONTAINER_INTERACT, freeBlockAroundChest(pos), "container-out-of-range");
             return false;
         }
 
         Direction side = closestInteractSide(pos);
         BlockHitResult hit = new BlockHitResult(hitVec, side, pos, false);
+        StrictRuntimeLogger.logStashMover(
+            "container-open",
+            "result=attempt pos=" + formatBlockPosForFeedback(pos)
+                + " hit=" + formatVecForFeedback(hitVec)
+                + " side=" + side
+                + " markAsLootSource=" + markAsLootSource
+        );
 
         Rotations.rotate(Rotations.getYaw(hitVec), Rotations.getPitch(hitVec), ACTION_ROTATION_PRIORITY, () -> {
             if (mc.player == null) return;
@@ -109,6 +121,15 @@ abstract class StashMoverInteraction extends StashMoverSupport {
 
             openedContainerTarget = pos.toImmutable();
             if (markAsLootSource) currentLootSourceChest = pos.toImmutable();
+            StrictRuntimeLogger.logStashMover(
+                "container-open",
+                "result=interact pos=" + formatBlockPosForFeedback(pos)
+                    + " accepted=" + result.isAccepted()
+                    + " handler="
+                    + (mc.player.currentScreenHandler == null
+                        ? "<null>"
+                        : mc.player.currentScreenHandler.getClass().getSimpleName() + "#" + mc.player.currentScreenHandler.syncId)
+            );
         });
 
         actionCooldownTicks = 4;
@@ -196,7 +217,13 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             }
         }
 
-        if (pearlSourceSlot == -1) return PearlTakeResult.NO_PEARL_IN_CONTAINER;
+        if (pearlSourceSlot == -1) {
+            StrictRuntimeLogger.logStashMover(
+                "pearl-chest-scan",
+                "result=no-pearl storageSlots=" + storageSlots + " sample=" + describeStorageSample(handler, storageSlots)
+            );
+            return PearlTakeResult.NO_PEARL_IN_CONTAINER;
+        }
 
         StashMoverSlotPolicy.Selection selection = StashMoverSlotPolicy.selectPearlHotbarSlot(currentHotbarStacks());
         if (selection.status() == StashMoverSlotPolicy.Status.ALREADY_PRESENT) {
@@ -220,6 +247,24 @@ abstract class StashMoverInteraction extends StashMoverSupport {
         mc.interactionManager.clickSlot(handler.syncId, pearlSourceSlot, 0, SlotActionType.PICKUP, mc.player);
         actionCooldownTicks = 2;
         return PearlTakeResult.SUCCESS;
+    }
+
+    protected String describeStorageSample(ScreenHandler handler, int storageSlots) {
+        if (handler == null || storageSlots <= 0) return "<empty>";
+        StringBuilder builder = new StringBuilder();
+        int emitted = 0;
+        for (int i = 0; i < storageSlots && emitted < 8; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (stack.isEmpty()) continue;
+            if (!builder.isEmpty()) builder.append(';');
+            builder.append(i)
+                .append('=')
+                .append(stack.getItem())
+                .append('x')
+                .append(stack.getCount());
+            emitted++;
+        }
+        return builder.isEmpty() ? "<empty>" : builder.toString();
     }
 
     protected List<ItemStack> currentHotbarStacks() {
@@ -253,6 +298,15 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             if (handler.getSlot(i).getStack().isEmpty()) return false;
         }
         return true;
+    }
+
+    protected int occupiedStorageSlots(ScreenHandler handler) {
+        int occupied = 0;
+        int storageSlots = storageSlotCount(handler);
+        for (int i = 0; i < storageSlots; i++) {
+            if (handler.getSlot(i).hasStack()) occupied++;
+        }
+        return occupied;
     }
 
     protected boolean isStorageEmpty(ScreenHandler handler) {
@@ -335,6 +389,7 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             BlockPos pos = blockEntity.getPos().toImmutable();
             if (blacklistedSourceChests.contains(pos)) continue;
             if (pos.equals(lootChest) || pos.equals(pearlChest)) continue;
+            if (isSameChestBlock(pos, lootChest) || isSameChestBlock(pos, pearlChest)) continue;
 
             BlockState state = mc.world.getBlockState(pos);
             if (!(state.getBlock() instanceof ChestBlock)) continue;
@@ -353,6 +408,11 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             }
         }
 
+        if (closest == null) {
+            closest = findClosestSourceChestFallback(lootChest, pearlChest);
+            if (closest != null) bestDistance = Vec3d.ofCenter(closest).distanceTo(mc.player.getEyePos());
+        }
+
         if (closest != null && bestDistance > CONTAINER_REACH) requestGoal(GoalKind.SOURCE_CHEST, closest, "approach-source-chest");
         return closest;
     }
@@ -368,6 +428,7 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             BlockPos pos = blockEntity.getPos();
             if (blacklistedSourceChests.contains(pos)) continue;
             if (pos.equals(lootChest) || pos.equals(pearlChest)) continue;
+            if (isSameChestBlock(pos, lootChest) || isSameChestBlock(pos, pearlChest)) continue;
 
             BlockState state = mc.world.getBlockState(pos);
             if (!(state.getBlock() instanceof ChestBlock)) continue;
@@ -379,7 +440,151 @@ abstract class StashMoverInteraction extends StashMoverSupport {
             return true;
         }
 
+        return hasRemainingEligibleSourceChestFallback(lootChest, pearlChest);
+    }
+
+    private BlockPos findClosestSourceChestFallback(BlockPos lootChest, BlockPos pearlChest) {
+        if (mc.player == null || mc.world == null) return null;
+
+        BlockPos closest = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (BlockPos pos : iterateNearbyChestCandidates()) {
+            if (!isEligibleSourceChest(pos, lootChest, pearlChest)) continue;
+
+            double distance = Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos());
+            renderedSourceChests.add(pos.toImmutable());
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                closest = pos.toImmutable();
+            }
+        }
+
+        return closest;
+    }
+
+    private boolean hasRemainingEligibleSourceChestFallback(BlockPos lootChest, BlockPos pearlChest) {
+        if (mc.player == null || mc.world == null) return false;
+
+        for (BlockPos pos : iterateNearbyChestCandidates()) {
+            if (isEligibleSourceChest(pos, lootChest, pearlChest)) return true;
+        }
+
         return false;
+    }
+
+    private Iterable<BlockPos> iterateNearbyChestCandidates() {
+        BlockPos origin = mc.player.getBlockPos();
+        int horizontalRadius = Math.min(scanDistance.get(), 8);
+        int verticalRadius = 4;
+        return BlockPos.iterateOutwards(origin, horizontalRadius, verticalRadius, horizontalRadius);
+    }
+
+    private boolean isEligibleSourceChest(BlockPos pos, BlockPos lootChest, BlockPos pearlChest) {
+        if (pos == null || mc.world == null || mc.player == null) return false;
+        if (blacklistedSourceChests.contains(pos)) return false;
+        if (pos.equals(lootChest) || pos.equals(pearlChest)) return false;
+        if (isSameChestBlock(pos, lootChest) || isSameChestBlock(pos, pearlChest)) return false;
+
+        BlockState state = mc.world.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock)) return false;
+
+        if (ignoreSingleChest.get() && state.contains(ChestBlock.CHEST_TYPE) && state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
+            return false;
+        }
+
+        double distance = Vec3d.ofCenter(pos).distanceTo(mc.player.getEyePos());
+        return distance <= scanDistance.get();
+    }
+
+    protected BlockPos findAlternativeDestinationChest(BlockPos currentLootChest, BlockPos pearlChest) {
+        if (mc.world == null || mc.player == null || currentLootChest == null) return null;
+
+        BlockPos best = null;
+        double bestScore = Double.MAX_VALUE;
+        BlockEntityIterator iterator = new BlockEntityIterator();
+        while (iterator.hasNext()) {
+            BlockEntity blockEntity = iterator.next();
+            if (!(blockEntity instanceof ChestBlockEntity)) continue;
+
+            BlockPos pos = blockEntity.getPos().toImmutable();
+            if (pos.equals(currentLootChest)) continue;
+            if (isSameChestBlock(pos, currentLootChest)) continue;
+            if (isMarkedFullDestinationChest(pos)) continue;
+            if (isSameChestBlock(pos, pearlChest)) continue;
+            if (blacklistedSourceChests.contains(pos)) continue;
+
+            BlockState state = mc.world.getBlockState(pos);
+            if (!(state.getBlock() instanceof ChestBlock)) continue;
+            double stationDistanceSq = Vec3d.ofCenter(pos).squaredDistanceTo(Vec3d.ofCenter(currentLootChest));
+            if (stationDistanceSq > 8.0 * 8.0) continue;
+
+            double playerDistanceSq = Vec3d.ofCenter(pos).squaredDistanceTo(mc.player.getEyePos());
+            double score = stationDistanceSq + playerDistanceSq * 0.25;
+            if (score < bestScore) {
+                bestScore = score;
+                best = pos;
+            }
+        }
+
+        return best;
+    }
+
+    protected void markFullDestinationChest(BlockPos pos) {
+        if (pos == null || mc.world == null) return;
+        fullDestinationChests.add(pos.toImmutable());
+
+        BlockPos connected = connectedChestHalf(pos);
+        if (connected != null) fullDestinationChests.add(connected.toImmutable());
+    }
+
+    protected boolean isMarkedFullDestinationChest(BlockPos pos) {
+        if (pos == null) return false;
+        if (fullDestinationChests.contains(pos)) return true;
+        for (BlockPos full : fullDestinationChests) {
+            if (isSameChestBlock(pos, full)) return true;
+        }
+        return false;
+    }
+
+    protected BlockPos connectedChestHalf(BlockPos pos) {
+        if (pos == null || mc.world == null) return null;
+
+        BlockState state = mc.world.getBlockState(pos);
+        if (!(state.getBlock() instanceof ChestBlock)) return null;
+        if (!state.contains(ChestBlock.CHEST_TYPE) || state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) return null;
+        ChestType expectedNeighborType = state.get(ChestBlock.CHEST_TYPE) == ChestType.LEFT ? ChestType.RIGHT : ChestType.LEFT;
+
+        for (Direction direction : Direction.Type.HORIZONTAL) {
+            BlockPos neighbor = pos.offset(direction);
+            BlockState neighborState = mc.world.getBlockState(neighbor);
+            if (!(neighborState.getBlock() instanceof ChestBlock)) continue;
+            if (!neighborState.contains(ChestBlock.CHEST_TYPE) || neighborState.get(ChestBlock.CHEST_TYPE) != expectedNeighborType) continue;
+            if (state.contains(ChestBlock.FACING)
+                && neighborState.contains(ChestBlock.FACING)
+                && neighborState.get(ChestBlock.FACING) != state.get(ChestBlock.FACING)) {
+                continue;
+            }
+
+            return neighbor.toImmutable();
+        }
+
+        return null;
+    }
+
+    protected boolean isSameChestBlock(BlockPos pos, BlockPos target) {
+        if (pos == null || target == null || mc.world == null) return false;
+        if (pos.equals(target)) return true;
+        if (pos.getManhattanDistance(target) != 1) return false;
+
+        BlockState state = mc.world.getBlockState(pos);
+        BlockState targetState = mc.world.getBlockState(target);
+        if (!(state.getBlock() instanceof ChestBlock) || !(targetState.getBlock() instanceof ChestBlock)) return false;
+        if (!state.contains(ChestBlock.CHEST_TYPE) || !targetState.contains(ChestBlock.CHEST_TYPE)) return false;
+        if (state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE || targetState.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) return false;
+        if (state.get(ChestBlock.CHEST_TYPE) == targetState.get(ChestBlock.CHEST_TYPE)) return false;
+        return !state.contains(ChestBlock.FACING)
+            || !targetState.contains(ChestBlock.FACING)
+            || state.get(ChestBlock.FACING) == targetState.get(ChestBlock.FACING);
     }
 
     protected void blacklistSourceChest(BlockPos pos) {
@@ -414,6 +619,8 @@ abstract class StashMoverInteraction extends StashMoverSupport {
         for (Direction direction : Direction.Type.HORIZONTAL) {
             BlockPos offset = pos.offset(direction);
             if (!mc.world.getBlockState(offset).isAir()) continue;
+            if (!mc.world.getFluidState(offset).isEmpty()) continue;
+            if (!mc.world.getFluidState(offset.up()).isEmpty()) continue;
             if (mc.world.getBlockState(offset.down()).isAir()) continue;
             return offset;
         }
@@ -540,6 +747,7 @@ abstract class StashMoverInteraction extends StashMoverSupport {
 
     protected void sendChatCommand(String command) {
         if (mc.player == null || mc.player.networkHandler == null || command == null || command.isBlank()) return;
+        StrictRuntimeLogger.logStashMover("chat-command", "command=" + command);
         mc.player.networkHandler.sendChatCommand(command);
     }
 
@@ -584,6 +792,8 @@ abstract class StashMoverInteraction extends StashMoverSupport {
 
     protected void debugLog(String message) {
         if (!debugLogging.get() || message == null || message.isBlank()) return;
+        StrictRuntimeLogger.logStashMover("debug", "message=" + message);
+        if (StrictRuntimeLogger.isEnabled()) return;
         info("[diag] " + message);
     }
 
@@ -595,6 +805,7 @@ abstract class StashMoverInteraction extends StashMoverSupport {
     protected void recordPearlFailure(String reason) {
         lastPearlFailureReason = reason == null || reason.isBlank() ? "unknown" : reason;
         failedPearlThrows++;
+        StrictRuntimeLogger.logStashMover("pearl-failure", "reason=" + lastPearlFailureReason + " count=" + failedPearlThrows);
         debugLog("pearl-failure=" + lastPearlFailureReason + " count=" + failedPearlThrows);
 
         if (failedPearlThrows < maxThrowFailures.get()) return;
@@ -618,8 +829,50 @@ abstract class StashMoverInteraction extends StashMoverSupport {
     protected void continueAfterPearlStage(BlockPos lootChest, String reason) {
         closeHandledScreen();
         cancelGoal("pearl-stage-complete");
+        if (loadingReturnPearlAfterDeposit) {
+            loadingReturnPearlAfterDeposit = false;
+            currentLootSourceChest = null;
+            renderedSourceChests.clear();
+            String command = returnCommand.get() == null || returnCommand.get().isBlank() ? "kill" : returnCommand.get().trim();
+            boolean lethalReturn = command.equalsIgnoreCase("kill") || command.toLowerCase(Locale.ROOT).startsWith("kill ");
+            boolean disableAfterReturn = disableAfterPartnerSeen;
+            boolean disableAfterLethalReturn = disableAfterReturn && lethalReturn;
+            StrictRuntimeLogger.logStashMover(
+                "pearl-stage-complete",
+                "lootChest=" + formatBlockPosForFeedback(lootChest)
+                    + " reason=" + reason
+                    + " next=" + (disableAfterLethalReturn
+                        ? "kill-return-then-disable-at-source"
+                        : disableAfterReturn
+                        ? "disable-after-return"
+                        : (lethalReturn ? "kill-return-to-source" : "command-return-to-source"))
+                    + " returnCommand=" + command
+            );
+            debugLog("return pearl loaded after deposit, dispatching /" + command + " for source return");
+            sendChatCommand(command);
+            if (disableAfterReturn && !lethalReturn) {
+                disableAfterPartnerSeen = false;
+                setMoverPhase(MoverPhase.LOOT, "return-command-sent");
+                actionCooldownTicks = 10;
+                toggle();
+                return;
+            }
+            if (lethalReturn) {
+                setMoverPhase(MoverPhase.LOOT, disableAfterLethalReturn ? "return-command-sent-await-death" : "return-command-sent");
+                actionCooldownTicks = 10;
+            } else {
+                setMoverPhase(MoverPhase.LOOT, "return-command-sent");
+                actionCooldownTicks = 10;
+            }
+            return;
+        }
+
         setMoverPhase(MoverPhase.WALKING_TO_CHEST, reason);
-        if (lootChest != null && mc.player != null && mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(lootChest)) > DESTINATION_CLOSE_SQ) {
+        StrictRuntimeLogger.logStashMover(
+            "pearl-stage-complete",
+            "lootChest=" + formatBlockPosForFeedback(lootChest) + " reason=" + reason
+        );
+        if (lootChest != null && mc.player != null && mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(lootChest)) > CONTAINER_REACH * CONTAINER_REACH) {
             requestGoal(GoalKind.LOOT_CHEST, freeBlockAroundChest(lootChest), "post-pearl-continuation");
         }
     }

@@ -85,6 +85,7 @@ public final class AssimilatedQualitySmoke {
         appendLine("RUNTIME screen=" + safeClassName(client.currentScreen) + " worldLoaded=" + (client.world != null));
 
         runAndRecord(results, AssimilatedInteractionChecks.chestTrackerModuleSettingsRoundTripFlow());
+        runAndRecord(results, AssimilatedInteractionChecks.nukerPlusAccelerationModuleFlow());
         runAndRecord(results, chestTrackerBackendRoundTrip());
         runAndRecord(results, AssimilatedInteractionChecks.chestTrackerGuiEditFlow(client));
         runAndRecord(results, AssimilatedInteractionChecks.chestTrackerPointerDrivenSettingsFlow(client));

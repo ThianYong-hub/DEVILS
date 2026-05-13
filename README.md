@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.53`): `build/libs/devils-addon-0.0.53.jar`
+- Current addon build (`0.0.54`): `build/libs/devils-addon-0.0.54.jar`
 - Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
@@ -27,7 +27,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.53` |
+| Addon Version | `0.0.54` |
 | Game Version | `0.0.4` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -361,12 +361,15 @@ Build only the game companion:
 ./gradlew :devils-game:build
 ```
 
-## Release Notes (`v0.0.53`)
+## Release Notes (`v0.0.54`)
 
-- fixed the `SpeedMineDamage` regression where mining speed dropped when the correct tool was already held or `speedmine-auto-swap` was disabled
-- removed the wrong `SpeedMineDamage -> Insta` fallback and the redundant held-tool slot reset path
-- added runtime smoke coverage for `pickaxe already held` with `autoswap=true` and `autoswap=false`
-- ignored local runtime workdirs `run-nukerplus-damage-time` and `run-stashmover-targeted`
+- hardened `StashMover` live pearl-cycle execution around real death/respawn stasis flow
+- fixed the live runtime harness so the loader client waits for host `20/20` completion instead of exiting on early disconnect
+- added return-pearl throw pose stabilization based on eye-height, centered position, and low horizontal velocity
+- confirmed a two-client live run in the user world: warmup plus `20/20` successful transfers
+- added strict runtime logging/harnesses for StashMover, Input, and AutoWasp validation work
+- improved AutoLogin account actions and active-account highlighting behavior
+- cleaned generated Minecraft runtime folders and expanded ignore rules for local client state
 
 ## Repository Structure
 

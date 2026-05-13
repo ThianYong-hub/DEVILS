@@ -34,9 +34,18 @@ class StashMoverSourceTest {
         assertTrue(runtime.contains("borrowedPearlChestSlot"));
         assertTrue(runtime.contains("pearlChestSwapPending"));
         assertTrue(support.contains(".name(\"source-loot-delay\")"));
+        assertTrue(support.contains(".name(\"return-command\")"));
         assertTrue(runtime.contains("readyForChestAction(sourceLootDelay.get())"));
         assertTrue(runtime.contains("requestGoal(GoalKind.WATER, water, \"wait-for-pearl-water\")"));
-        assertTrue(runtime.contains("cancelGoal(\"inventory-empty-self-kill\")"));
+        assertTrue(runtime.contains("cancelGoal(\"inventory-empty-load-return-pearl\")"));
+        assertTrue(runtime.contains("tracked-own-pearl-return-kill-ready"));
+        assertTrue(runtime.contains("lethalReturnPearlReady"));
+        assertTrue(runtime.contains("MoverPhase.AWAITING_RETURN_DEATH"));
+        assertTrue(runtime.contains("pearl-return-command-dispatched"));
+        assertTrue(runtime.contains("hasPearlChestCleanupPendingAfterThrow"));
+        assertTrue(runtime.contains("ensureThrowContextReady(\"hotbar-pearl-before-throw\")"));
+        assertTrue(runtime.contains("ensureThrowContextReady(\"throwing-pearl-before-use\")"));
+        assertTrue(runtime.contains("throw-screen-close"));
         assertTrue(runtime.contains("cancelGoal(\"player-died\")"));
         assertTrue(runtime.contains("Destination chest is full; keeping it open and waiting for free slots."));
         assertTrue(runtime.contains("waitingForDestinationSpace = true;"));
@@ -49,12 +58,14 @@ class StashMoverSourceTest {
         assertTrue(runtime.contains("cancelGoal(\"water-approach-ready-for-throw\")"));
         assertTrue(runtime.contains("isPearlTargetObstructed(pearlTarget, water, chamber)"));
         assertTrue(runtime.contains("pearl-target-obstructed"));
-        assertTrue(runtime.contains("float pitch = 90.0f;"));
+        assertTrue(runtime.contains("float pitch = (float) Rotations.getPitch(pearlTarget);"));
         assertTrue(runtime.contains("mc.player.setPitch(pitch);"));
         assertTrue(approach.contains("return Vec3d.ofCenter(water);"));
         assertTrue(approach.contains("resolveApproachGoal"));
         assertTrue(approach.contains("isAtApproachGoal"));
         assertTrue(approach.contains("isCurrentThrowPosition"));
+        assertTrue(approach.contains("isCenteredOverWater"));
+        assertTrue(approach.contains("BlockPos adjacent = resolveAdjacentApproachGoal(mc, water, target, chamber);"));
         assertTrue(interaction.contains("StashMoverPearlApproach.resolveApproachGoal"));
         assertTrue(interaction.contains("StashMoverPearlApproach.isAtApproachGoal"));
         assertTrue(interaction.contains("StashMoverPearlApproach.isCurrentThrowPosition"));
@@ -82,6 +93,15 @@ class StashMoverSourceTest {
         assertTrue(bridge.contains("cancelEverything"));
         assertFalse(runtime.contains("rusherhack-plugin.json"));
         assertFalse(runtime.contains("requestGoal(GoalKind.WATER, water, \"throwing-pearl-water\")"));
+    }
+
+    @Test
+    void liveRuntimeHarnessKeepsRealisticUserWorldLootFirstOrdering() throws IOException {
+        String harness = Files.readString(Path.of("src", "main", "java", "com", "example", "addon", "util", "smoke", "StashMoverLiveRuntimeValidation.java"));
+
+        assertTrue(harness.contains("boolean realisticBootstrapWarmup = useUserWorld() && realisticMode() && runIndex == 0 && !bootstrapWarmupCompleted;"));
+        assertTrue(harness.contains("reason=real-player-thrown-initial-pearl-required"));
+        assertTrue(harness.contains("STAGE bootstrap-throw-prepared"));
     }
 
     @Test

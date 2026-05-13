@@ -6,6 +6,7 @@ import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 import org.apache.logging.log4j.Logger;
+import org.jetbrains.annotations.Nullable;
 import red.jackf.chesttracker.impl.ChestTracker;
 import red.jackf.chesttracker.impl.config.ChestTrackerConfig;
 import red.jackf.chesttracker.impl.memory.MemoryBankAccessImpl;
@@ -84,9 +85,8 @@ public class Storage {
         backend.save(bank, registries);
     }
 
-    private static HolderLookup.@org.jetbrains.annotations.Nullable Provider resolveRegistries() {
+    private static @Nullable HolderLookup.Provider resolveRegistries() {
         Minecraft mc = Minecraft.getInstance();
-
         if (mc.level != null) {
             lastKnownRegistries = mc.level.registryAccess();
             return lastKnownRegistries;

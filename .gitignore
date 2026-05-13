@@ -87,7 +87,34 @@ SyncHub/tests/__pycache__/
 # local smoke/crash artifacts
 hs_err_pid*.log
 replay_pid*.log
+.mixin.out/
+*/.mixin.out/
+System.Management.Automation.Internal.Host.InternalHost/
 */run-assimilated-smoke/
+*/run-autowasp-runtime/
 */run-devils-game-smoke/
+*/run-input-runtime/
 */run-nukerplus-damage-time/
+*/run-stashmover-live-host/
+*/run-stashmover-live-guest/
+*/run-stashmover-strict/
 */run-stashmover-targeted/
+
+# local Minecraft client runtime state generated under the addon module
+devils-addon/chesttracker/
+devils-addon/config/
+devils-addon/data/
+devils-addon/devils-addon/
+devils-addon/downloads/
+devils-addon/logs/
+devils-addon/meteor-client/
+devils-addon/mods/
+devils-addon/options.txt
+devils-addon/resourcepacks/
+devils-addon/saves/
+devils-addon/servers.dat
+devils-addon/servers.dat_old
+devils-addon/sounds/
+devils-addon/usercache.json
+devils-addon/xaero/
+devils-addon/XaeroWaypoints_BACKUP*/

@@ -1,6 +1,7 @@
 package com.example.addon.modules;
 
 import com.example.addon.AddonTemplate;
+import com.example.addon.commands.SessionCommand;
 import com.example.addon.modules.autologin.*;
 import com.example.addon.modules.autologin.AutoLoginProfile.DebugChatPacketSnapshot;
 import com.example.addon.util.CrashGuard;
@@ -67,7 +68,7 @@ public class AutoLogin extends Module {
     @Override public void onDeactivate() { resetJoinState(); syncController.onDeactivate(); }
     @Override public NbtCompound toTag() { return profileStore.writeToTag(super.toTag()); }
     @Override public Module fromTag(NbtCompound tag) { super.fromTag(tag); profileStore.loadFromTag(tag); return this; }
-    @Override public WWidget getWidget(GuiTheme theme) { return profileStore.createWidget(theme, this::currentUsername, this::currentServerKey, () -> newEntryDelay.get()); }
+    @Override public WWidget getWidget(GuiTheme theme) { return profileStore.createWidget(theme, this::currentUsername, this::currentServerKey, () -> newEntryDelay.get(), this::loginSavedProfile); }
 
     @EventHandler private void onGameJoined(GameJoinedEvent event) { CrashGuard.run(this, "onGameJoined", () -> { resetJoinState(); joinTimeMs = System.currentTimeMillis(); startDebugSession(); }); }
     @EventHandler private void onGameLeft(GameLeftEvent event) { CrashGuard.run(this, "onGameLeft", () -> { appendDebugLine("session-end"); resetJoinState(); }); }
@@ -426,6 +427,36 @@ public class AutoLogin extends Module {
     public boolean saveLoginProfile(String username, String server, String password) {
         if (username == null || username.isBlank() || server == null || server.isBlank() || password == null || password.isBlank()) return false;
         profileStore.upsertProfile(username, server, LoginMode.LOGIN, password, newEntryDelay.get());
+        return true;
+    }
+
+    public boolean loginSavedProfile(AutoLoginProfile profile) {
+        if (profile == null) return false;
+
+        String username = profile.username.get() == null ? "" : profile.username.get().trim();
+        String server = profile.server.get() == null ? "" : profile.server.get().trim();
+
+        if (username.isBlank()) {
+            error("AutoLogin profile login failed: username is blank.");
+            return false;
+        }
+
+        if (server.isBlank()) {
+            error("AutoLogin profile login failed for %s: server is blank.", username);
+            return false;
+        }
+
+        if (!SessionCommand.switchToCrackedSession(username)) {
+            error("Failed to switch session to %s.", username);
+            return false;
+        }
+
+        if (!SessionCommand.scheduleReconnect(server)) {
+            error("Switched session to %s, but failed to queue reconnect to %s.", username, server);
+            return false;
+        }
+
+        info("Switched session to %s and queued reconnect to %s.", username, server);
         return true;
     }
 

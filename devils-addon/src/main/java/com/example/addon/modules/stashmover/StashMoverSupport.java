@@ -22,6 +22,8 @@ abstract class StashMoverSupport extends Module {
     protected static final int LOGIC_INTERVAL_TICKS = 2;
     protected static final int ACTION_ROTATION_PRIORITY = 75;
     protected static final int OWN_PEARL_SPAWN_TIMEOUT_TICKS = 8;
+    protected static final int OWN_PEARL_STASIS_MIN_TICKS = 25;
+    protected static final int OWN_PEARL_STASIS_TIMEOUT_TICKS = 120;
     protected static final int LOAD_MESSAGE_RESEND_TICKS = 40;
     protected static final int RECONNECT_NUDGE_DELAY_TICKS = 30;
     protected static final int STATIONARY_NUDGE_TICKS = 200;
@@ -104,6 +106,13 @@ abstract class StashMoverSupport extends Module {
         .name("load-message")
         .description("Whisper payload both accounts use to coordinate the pearl chamber.")
         .defaultValue("LOAD PEARL")
+        .build());
+
+    protected final Setting<String> returnCommand = sgGeneral.add(new StringSetting.Builder()
+        .name("return-command")
+        .description("Command sent after the next stasis pearl is reloaded. Use kill for legacy behavior or tp to preserve the staged pearl.")
+        .defaultValue("kill")
+        .visible(() -> mode.get() == Mode.MOVER)
         .build());
 
     protected final Setting<Boolean> censorCoords = sgGeneral.add(new BoolSetting.Builder()
@@ -204,6 +213,7 @@ abstract class StashMoverSupport extends Module {
     protected final StashMoverBaritoneBridge baritone = new StashMoverBaritoneBridge();
     protected final StashMoverOwnPearlTracker ownPearlTracker = new StashMoverOwnPearlTracker();
     protected final Set<BlockPos> blacklistedSourceChests = new LinkedHashSet<>();
+    protected final Set<BlockPos> fullDestinationChests = new LinkedHashSet<>();
     protected final Set<BlockPos> renderedSourceChests = new LinkedHashSet<>();
 
     protected MoverPhase moverPhase = MoverPhase.LOOT;
@@ -214,10 +224,14 @@ abstract class StashMoverSupport extends Module {
     protected int borrowedPearlChestSlot = -1;
     protected boolean pearlChestSwapPending;
     protected boolean loadAckReceived;
+    protected boolean loaderAckPending;
+    protected boolean loadingReturnPearlAfterDeposit;
+    protected String lastLoaderLoadRequestMessage = "";
     protected boolean echestBufferFilled;
     protected boolean disableAfterPartnerSeen;
     protected boolean waitingForDestinationSpace;
     protected boolean reconnectNudgeAfterJoin;
+    protected boolean localThrowSnapEnabled = true;
     protected int actionCooldownTicks;
     protected int chestActionCooldownTicks;
     protected int logicPulseTicks;
@@ -225,6 +239,7 @@ abstract class StashMoverSupport extends Module {
     protected int reconnectNudgeTicks;
     protected int resendLoadMessageTicks;
     protected int stationaryTicks;
+    protected int ownPearlStasisTicks;
     protected float movedStacks;
     protected long lastPacketReceivedAtMs;
     protected GoalKind activeGoalKind = GoalKind.NONE;
@@ -239,18 +254,26 @@ abstract class StashMoverSupport extends Module {
     protected float lastPearlThrowPitch;
     protected int failedPearlThrows;
     protected int stallRecoveryCount;
+    protected int pearlChestNoPearlRetries;
+    protected boolean trackedPearlReadyOnRemoval;
     protected long lastProgressAtMs = System.currentTimeMillis();
+    protected boolean sneakRecoveryInjected;
+    protected boolean prevSneakRecoveryState;
 
     protected StashMoverSupport() {
         super(AddonTemplate.CATEGORY, "stash-mover", "Moves stash contents with pearl stasis coordination and container automation.");
     }
 
     protected void resetRuntime(boolean resetReconnectState) {
+        releaseSneakRecovery();
         moverPhase = MoverPhase.LOOT;
         loaderPhase = LoaderPhase.WAITING;
         currentLootSourceChest = null;
         openedContainerTarget = null;
         loadAckReceived = false;
+        loaderAckPending = false;
+        loadingReturnPearlAfterDeposit = false;
+        lastLoaderLoadRequestMessage = "";
         echestBufferFilled = false;
         disableAfterPartnerSeen = false;
         waitingForDestinationSpace = false;
@@ -261,6 +284,8 @@ abstract class StashMoverSupport extends Module {
         reconnectNudgeTicks = 0;
         resendLoadMessageTicks = 0;
         stationaryTicks = 0;
+        ownPearlStasisTicks = 0;
+        pearlChestNoPearlRetries = 0;
         movedStacks = 0.0f;
         lastPacketReceivedAtMs = System.currentTimeMillis();
         lastProgressAtMs = System.currentTimeMillis();
@@ -268,6 +293,7 @@ abstract class StashMoverSupport extends Module {
         clearPearlChestBorrowState();
         cancelGoal("runtime-reset");
         resetDiagnostics();
+        fullDestinationChests.clear();
         renderedSourceChests.clear();
         if (resetReconnectState) reconnectNudgeAfterJoin = false;
     }
@@ -291,6 +317,22 @@ abstract class StashMoverSupport extends Module {
         lastPearlThrowPitch = 0.0f;
         failedPearlThrows = 0;
         stallRecoveryCount = 0;
+        trackedPearlReadyOnRemoval = false;
+    }
+
+    protected void holdSneakRecovery() {
+        if (mc.options == null) return;
+        if (!sneakRecoveryInjected) {
+            prevSneakRecoveryState = mc.options.sneakKey.isPressed();
+            sneakRecoveryInjected = true;
+        }
+        mc.options.sneakKey.setPressed(true);
+    }
+
+    protected void releaseSneakRecovery() {
+        if (mc.options == null || !sneakRecoveryInjected) return;
+        mc.options.sneakKey.setPressed(prevSneakRecoveryState);
+        sneakRecoveryInjected = false;
     }
 
     protected BlockPos pearlChestPos() {
@@ -339,6 +381,7 @@ abstract class StashMoverSupport extends Module {
             + " water=" + formatValue(waterPos())
             + " pearltarget=" + formatValue(pearlTargetPos())
             + " chamber=" + formatValue(chamberLookPos())
+            + " returnCommand=" + returnCommand.get()
             + " mode=" + mode.get();
     }
 
@@ -350,11 +393,18 @@ abstract class StashMoverSupport extends Module {
             + " goal=" + activeGoalKind
             + " goalPos=" + formatValue(activeGoalPos)
             + " goalReason=" + lastGoalReason
+            + " openedContainer=" + formatValue(openedContainerTarget)
+            + " lootSource=" + formatValue(currentLootSourceChest)
+            + " handler=" + (mc.player == null || mc.player.currentScreenHandler == null
+                ? "<null>"
+                : mc.player.currentScreenHandler.getClass().getSimpleName() + "#" + mc.player.currentScreenHandler.syncId)
             + " trackerAwaiting=" + ownPearlTracker.isAwaitingSpawn()
             + " trackerEntity=" + ownPearlTracker.trackedEntityId()
+            + " pearlStasisTicks=" + ownPearlStasisTicks
             + " lastPearlTarget=" + formatValue(lastPearlTarget)
             + " lastPearlYaw=" + String.format(Locale.ROOT, "%.2f", lastPearlThrowYaw)
             + " lastPearlPitch=" + String.format(Locale.ROOT, "%.2f", lastPearlThrowPitch)
+            + " localThrowSnap=" + localThrowSnapEnabled
             + " pearlFailure=" + lastPearlFailureReason
             + " pearlBorrowHotbar=" + borrowedPearlHotbarSlot
             + " pearlBorrowChest=" + borrowedPearlChestSlot
@@ -427,6 +477,7 @@ abstract class StashMoverSupport extends Module {
         WAIT_FOR_PEARL,
         WALKING_TO_CHEST,
         THROWING_PEARL,
+        AWAITING_RETURN_DEATH,
         PUT_BACK_PEARLS,
         ECHEST_LOOT,
         ECHEST_FILL

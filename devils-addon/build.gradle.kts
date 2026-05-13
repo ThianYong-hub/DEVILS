@@ -32,6 +32,18 @@ val gameVersionFromProperty = (findProperty("game_version_override") as String?)
 val resolvedGameVersion = gameVersionFromEnv
     ?: gameVersionFromProperty
     ?: (properties["game_version"] as String)
+val stashMoverLiveUserWorld = (findProperty("stashMoverLiveUserWorld") as String?)
+    ?.trim()
+    ?.equals("true", ignoreCase = true)
+    ?: false
+val stashMoverLiveRealistic = (findProperty("stashMoverLiveRealistic") as String?)
+    ?.trim()
+    ?.equals("true", ignoreCase = true)
+    ?: false
+val stashMoverLiveWorldName = (findProperty("stashMoverLiveWorldName") as String?)
+    ?.trim()
+    ?.takeIf { it.isNotEmpty() }
+    ?: "Новый мир"
 val gameArchivesBaseName = properties["game_archives_base_name"] as String
 
 val minecraftVersion = properties["minecraft_version"] as String
@@ -216,6 +228,65 @@ loom {
             runDir("run-stashmover-targeted")
             vmArg("-Ddevils.stashmover.targeted.runtime=true")
             vmArg("-Ddevils.stashmover.targeted.runtime.path=${rootProject.file("codex log/stashmover-targeted-runtime.log").absolutePath}")
+        }
+        create("inputRuntimeValidation") {
+            client()
+            ideConfigGenerated(false)
+            configName = "Input Runtime Validation"
+            runDir("run-input-runtime")
+            vmArg("-Ddevils.strict.runtime.logging=true")
+            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
+            vmArg("-Ddevils.input.runtime=true")
+        }
+        create("autoWaspRuntimeValidation") {
+            client()
+            ideConfigGenerated(false)
+            configName = "AutoWasp Runtime Validation"
+            runDir("run-autowasp-runtime")
+            vmArg("-Ddevils.strict.runtime.logging=true")
+            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
+            vmArg("-Ddevils.autowasp.runtime=true")
+        }
+        create("stashMoverStrictRuntime") {
+            client()
+            ideConfigGenerated(false)
+            configName = "StashMover Strict Runtime"
+            runDir("run-stashmover-strict")
+            vmArg("-Ddevils.strict.runtime.logging=true")
+            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
+            vmArg("-Ddevils.stashmover.strict.runtime=true")
+        }
+        create("stashMoverLiveHostRuntime") {
+            client()
+            ideConfigGenerated(false)
+            configName = "StashMover Live Host Runtime"
+            runDir("run-stashmover-live-host")
+            vmArg("-Ddevils.strict.runtime.logging=true")
+            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
+            vmArg("-Ddevils.strict.runtime.actor=host")
+            vmArg("-Ddevils.stashmover.live.runtime=true")
+            vmArg("-Ddevils.stashmover.live.role=host")
+            if (stashMoverLiveRealistic) vmArg("-Ddevils.stashmover.live.realistic=true")
+            if (stashMoverLiveUserWorld) {
+                vmArg("-Ddevils.stashmover.live.userWorld=true")
+                vmArg("-Ddevils.stashmover.live.worldName=$stashMoverLiveWorldName")
+            }
+        }
+        create("stashMoverLiveGuestRuntime") {
+            client()
+            ideConfigGenerated(false)
+            configName = "StashMover Live Guest Runtime"
+            runDir("run-stashmover-live-guest")
+            vmArg("-Ddevils.strict.runtime.logging=true")
+            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
+            vmArg("-Ddevils.strict.runtime.actor=guest")
+            vmArg("-Ddevils.stashmover.live.runtime=true")
+            vmArg("-Ddevils.stashmover.live.role=guest")
+            if (stashMoverLiveRealistic) vmArg("-Ddevils.stashmover.live.realistic=true")
+            if (stashMoverLiveUserWorld) {
+                vmArg("-Ddevils.stashmover.live.userWorld=true")
+                vmArg("-Ddevils.stashmover.live.worldName=$stashMoverLiveWorldName")
+            }
         }
         create("nukerPlusDamageTimeRuntime") {
             client()
@@ -747,6 +818,74 @@ tasks {
         }
     }
 
+    val cleanStrictRuntimeEvidence by registering {
+        val runtimeArtifacts = listOf(
+            rootProject.file("codex log/runtime-main.log"),
+            rootProject.file("codex log/input-runtime.log"),
+            rootProject.file("codex log/autowasp-runtime.log"),
+            rootProject.file("codex log/stashmover-runtime.log"),
+            rootProject.file("codex log/FINAL_RUNTIME_REPORT.md")
+        )
+
+        doLast {
+            runtimeArtifacts.forEach { artifact ->
+                if (artifact.isFile) artifact.delete()
+            }
+        }
+    }
+
+    val validateInputRuntime by registering {
+        val inputRuntimeLog = rootProject.file("codex log/input-runtime.log")
+
+        doLast {
+            check(inputRuntimeLog.isFile) {
+                "Input runtime log was not produced at ${inputRuntimeLog.absolutePath}"
+            }
+
+            val lines = inputRuntimeLog.readLines(StandardCharsets.UTF_8)
+            check(lines.any { it.contains("RESULT PASS") }) {
+                "Input runtime validation did not report PASS. See ${inputRuntimeLog.absolutePath}"
+            }
+        }
+    }
+
+    val validateAutoWaspRuntime by registering {
+        val autoWaspRuntimeLog = rootProject.file("codex log/autowasp-runtime.log")
+
+        doLast {
+            check(autoWaspRuntimeLog.isFile) {
+                "AutoWasp runtime log was not produced at ${autoWaspRuntimeLog.absolutePath}"
+            }
+
+            val lines = autoWaspRuntimeLog.readLines(StandardCharsets.UTF_8)
+            check(lines.any { it.contains("RESULT PASS") }) {
+                "AutoWasp runtime validation did not report PASS. See ${autoWaspRuntimeLog.absolutePath}"
+            }
+        }
+    }
+
+    val validateStashMoverStrictRuntime by registering {
+        val stashMoverRuntimeLog = rootProject.file("codex log/stashmover-runtime.log")
+
+        doLast {
+            check(stashMoverRuntimeLog.isFile) {
+                "StashMover strict runtime log was not produced at ${stashMoverRuntimeLog.absolutePath}"
+            }
+
+            val lines = stashMoverRuntimeLog.readLines(StandardCharsets.UTF_8)
+            check(lines.any { it.contains("RESULT PASS runs=5") }) {
+                "StashMover strict runtime validation did not report 5 successful runs. See ${stashMoverRuntimeLog.absolutePath}"
+            }
+        }
+    }
+
+    val strictRuntimeValidation by registering {
+        dependsOn(cleanStrictRuntimeEvidence)
+        dependsOn("runInputRuntimeValidation")
+        dependsOn("runAutoWaspRuntimeValidation")
+        dependsOn("runStashMoverStrictRuntime")
+    }
+
     val validateNukerPlusDamageTimeRuntime by registering {
         val smokeReport = rootProject.file("codex log/nukerplus-damage-time-smoke.md")
         val benchmarkReport = rootProject.file("codex log/nukerplus-damage-time-benchmark.md")
@@ -804,6 +943,61 @@ tasks {
             }
         }
         finalizedBy(validateStashMoverTargetedRuntime)
+    }
+
+    named("runInputRuntimeValidation") {
+        doFirst {
+            val runtimeRunDir = layout.projectDirectory.dir("run-input-runtime").asFile
+            val staleEvidencePaths = listOf(
+                runtimeRunDir.resolve("config"),
+                runtimeRunDir.resolve("devils-addon"),
+                runtimeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
+        }
+        finalizedBy(validateInputRuntime)
+    }
+
+    named("runAutoWaspRuntimeValidation") {
+        doFirst {
+            val runtimeRunDir = layout.projectDirectory.dir("run-autowasp-runtime").asFile
+            val staleEvidencePaths = listOf(
+                runtimeRunDir.resolve("saves"),
+                runtimeRunDir.resolve("config"),
+                runtimeRunDir.resolve("devils-addon"),
+                runtimeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
+        }
+        mustRunAfter("runInputRuntimeValidation")
+        finalizedBy(validateAutoWaspRuntime)
+    }
+
+    named("runStashMoverStrictRuntime") {
+        doFirst {
+            val runtimeRunDir = layout.projectDirectory.dir("run-stashmover-strict").asFile
+            val staleEvidencePaths = listOf(
+                runtimeRunDir.resolve("saves"),
+                runtimeRunDir.resolve("config"),
+                runtimeRunDir.resolve("devils-addon"),
+                runtimeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
+        }
+        mustRunAfter("runAutoWaspRuntimeValidation")
+        finalizedBy(validateStashMoverStrictRuntime)
     }
 
     named("runNukerPlusDamageTimeRuntime") {

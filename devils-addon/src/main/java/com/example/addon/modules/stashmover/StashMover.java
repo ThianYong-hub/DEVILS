@@ -1,8 +1,8 @@
 package com.example.addon.modules.stashmover;
 
+import com.example.addon.util.runtime.StrictRuntimeLogger;
 import com.example.addon.util.CrashGuard;
 import java.util.Locale;
-import java.util.UUID;
 import meteordevelopment.meteorclient.events.entity.EntityAddedEvent;
 import meteordevelopment.meteorclient.events.entity.EntityRemovedEvent;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
@@ -33,6 +33,7 @@ public class StashMover extends StashMoverRuntime {
 
     @Override
     public void onDeactivate() {
+        releaseSneakRecovery();
         closeHandledScreen();
         cancelGoal("module-deactivated");
         ownPearlTracker.reset();
@@ -87,26 +88,40 @@ public class StashMover extends StashMoverRuntime {
     private void onReceiveMessageSafe(ReceiveMessageEvent event) {
         String message = event.getMessage() == null ? "" : event.getMessage().getString();
         if (message.isBlank()) return;
+        handleReceivedChatMessage(message);
+    }
 
+    private void handleReceivedChatMessage(String message) {
+        if (message == null || message.isBlank()) return;
+        if (isOwnDiagnosticChatMessage(message)) return;
+        StrictRuntimeLogger.logStashMover("chat-receive", "message=" + message);
         if (mode.get() == Mode.LOADER) {
             if (isLoadRequestFromPartner(message)) {
+                if (message.equals(lastLoaderLoadRequestMessage) && loaderPhase == LoaderPhase.LOAD_PEARL) return;
+                lastLoaderLoadRequestMessage = message;
+                StrictRuntimeLogger.logStashMover("loader-request", "partner=" + partnerName.get() + " message=" + message);
                 debugLog("loader received partner load request: " + message);
-                String ackA = UUID.randomUUID().toString().substring(0, 4);
-                String ackB = UUID.randomUUID().toString().substring(0, 4);
-                sendChatCommand("msg " + partnerName.get() + " " + ackA + " RECEIVED MESSAGE " + ackB);
                 loaderPhase = LoaderPhase.LOAD_PEARL;
+                loaderAckPending = true;
                 actionCooldownTicks = 10;
             }
             return;
         }
 
         if (isAckMessageFromPartner(message)) {
+            StrictRuntimeLogger.logStashMover("loader-ack", "partner=" + partnerName.get() + " message=" + message);
             debugLog("mover received partner ack: " + message);
             loadAckReceived = true;
-            if (moverPhase == MoverPhase.SEND_LOAD_PEARL_MSG && isPartnerLoadedNearby()) {
+            if (moverPhase == MoverPhase.SEND_LOAD_PEARL_MSG) {
                 enterWaitForPearlPhase();
             }
         }
+    }
+
+    private static boolean isOwnDiagnosticChatMessage(String message) {
+        String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
+        return normalized.contains("[stash mover] [diag]")
+            || (normalized.contains("[meteor]") && normalized.contains("[stash mover]"));
     }
 
     @EventHandler
@@ -121,9 +136,14 @@ public class StashMover extends StashMoverRuntime {
         if (entity instanceof EnderPearlEntity pearl) {
             if (ownPearlTracker.onPearlAdded(entity.getId(), pearl.getOwner() == mc.player)
                 == StashMoverOwnPearlTracker.CaptureOutcome.TRACKED) {
+                StrictRuntimeLogger.logStashMover(
+                    "pearl-spawn",
+                    "entityId=" + entity.getId() + " pos=" + formatVecForFeedback(entity.getEntityPos()) + " owned=true"
+                );
+                trackedPearlReadyOnRemoval = false;
                 clearPearlFailureState();
                 cancelGoal("tracked-own-pearl-spawn");
-                setMoverPhase(MoverPhase.PUT_BACK_PEARLS, "tracked-own-pearl-spawn");
+                ownPearlStasisTicks = 0;
                 actionCooldownTicks = 1;
                 return;
             }
@@ -144,11 +164,22 @@ public class StashMover extends StashMoverRuntime {
 
     private void onEntityRemovedSafe(EntityRemovedEvent event) {
         if (mc.player == null || mc.player.isDead()) return;
+        if (event.entity instanceof EnderPearlEntity) {
+            StrictRuntimeLogger.logStashMover(
+                "pearl-remove",
+                "entityId=" + event.entity.getId() + " pos=" + formatVecForFeedback(event.entity.getEntityPos()) + " phase=" + moverPhase
+            );
+        }
 
         if (ownPearlTracker.onEntityRemoved(event.entity.getId()) == StashMoverOwnPearlTracker.RemovalOutcome.TRACKED_REMOVED
             && shouldResetOnTrackedPearlRemoval()) {
+            if (event.entity instanceof EnderPearlEntity pearl && shouldTreatTrackedPearlRemovalAsReady(pearl)) {
+                acceptTrackedPearlRemovalAsReady(pearl);
+                return;
+            }
             cancelGoal("tracked-pearl-removed");
             if (isChestLikeHandler(mc.player.currentScreenHandler)) closeHandledScreen();
+            trackedPearlReadyOnRemoval = false;
             recordPearlFailure("tracked-pearl-removed-during-throw");
             setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "tracked-pearl-removed");
             actionCooldownTicks = 0;
@@ -288,15 +319,60 @@ public class StashMover extends StashMoverRuntime {
     }
 
     public void debugConfigureForHarness(BlockPos pearlChest, BlockPos lootChest, BlockPos water, Vec3d chamber, Vec3d pearlTarget) {
-        if (pearlChest != null) pearlChestSetting.set(StashMoverConfigCodec.encodeBlockPos(pearlChest));
-        if (lootChest != null) lootChestSetting.set(StashMoverConfigCodec.encodeBlockPos(lootChest));
-        if (water != null) waterSetting.set(StashMoverConfigCodec.encodeBlockPos(water));
-        if (chamber != null) chamberSetting.set(StashMoverConfigCodec.encodeVec3d(chamber));
-        if (pearlTarget != null) pearlTargetSetting.set(StashMoverConfigCodec.encodeVec3d(pearlTarget));
+        pearlChestSetting.set(pearlChest == null ? "" : StashMoverConfigCodec.encodeBlockPos(pearlChest));
+        lootChestSetting.set(lootChest == null ? "" : StashMoverConfigCodec.encodeBlockPos(lootChest));
+        waterSetting.set(water == null ? "" : StashMoverConfigCodec.encodeBlockPos(water));
+        chamberSetting.set(chamber == null ? "" : StashMoverConfigCodec.encodeVec3d(chamber));
+        pearlTargetSetting.set(pearlTarget == null ? "" : StashMoverConfigCodec.encodeVec3d(pearlTarget));
     }
 
     public void debugEnableLoggingForHarness(boolean enabled) {
         debugLogging.set(enabled);
+    }
+
+    public void debugConfigureForStrictRuntime(
+        Mode runtimeMode,
+        String runtimePartner,
+        boolean ignoreSingles,
+        boolean useEnderChest,
+        BlockPos pearlChest,
+        BlockPos lootChest,
+        BlockPos water,
+        Vec3d chamber,
+        Vec3d pearlTarget
+    ) {
+        mode.set(runtimeMode);
+        if (runtimePartner != null && !runtimePartner.isBlank()) partnerName.set(runtimePartner);
+        ignoreSingleChest.set(ignoreSingles);
+        useEChest.set(useEnderChest);
+        debugConfigureForHarness(pearlChest, lootChest, water, chamber, pearlTarget);
+    }
+
+    public void debugSetReturnCommandForHarness(String command) {
+        returnCommand.set(command == null || command.isBlank() ? "kill" : command.trim());
+    }
+
+    public void debugSetLocalThrowSnapForHarness(boolean enabled) {
+        localThrowSnapEnabled = enabled;
+    }
+
+    public void debugPrepareBootstrapReturnForHarness() {
+        disableAfterPartnerSeen = false;
+        loadingReturnPearlAfterDeposit = true;
+        ownPearlTracker.reset();
+        clearPearlChestBorrowState();
+        currentLootSourceChest = null;
+        openedContainerTarget = null;
+        renderedSourceChests.clear();
+        loadAckReceived = false;
+        trackedPearlReadyOnRemoval = false;
+        setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "bootstrap-initial-return");
+        actionCooldownTicks = 0;
+        chestActionCooldownTicks = 0;
+    }
+
+    public void debugHandleReceivedChatMessageForHarness(String message) {
+        handleReceivedChatMessage(message);
     }
 
     public String debugForceMoverPhaseForHarness(String phaseName) {

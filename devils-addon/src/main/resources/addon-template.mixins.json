@@ -3,6 +3,9 @@
   "package": "com.example.addon.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "ChestTrackerOpenGuardMixin",
+    "ChestTrackerInventoryButtonGuardMixin",
+    "YaclChestTrackerConfigMixin",
     "ClientConnectionMixin",
     "ClientPlayerInteractionManagerInvoker",
     "ExampleMixin",

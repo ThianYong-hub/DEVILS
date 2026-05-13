@@ -3,12 +3,16 @@ package com.example.addon.commands;
 import com.example.addon.modules.AutoLogin;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import meteordevelopment.meteorclient.MeteorClient;
+import meteordevelopment.meteorclient.events.game.GameLeftEvent;
+import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.accounts.Accounts;
 import meteordevelopment.meteorclient.systems.accounts.types.CrackedAccount;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
@@ -19,8 +23,12 @@ import net.minecraft.command.CommandSource;
 import net.minecraft.util.StringHelper;
 
 public class SessionCommand extends Command {
+    private static final SessionReconnectController RECONNECT_CONTROLLER = new SessionReconnectController();
+    private static boolean reconnectControllerInitialized;
+
     public SessionCommand() {
         super("session", "Switches to a cracked session for the current server and optionally saves AutoLogin password.");
+        initReconnectController();
     }
 
     @Override
@@ -42,6 +50,7 @@ public class SessionCommand extends Command {
     private int run(String rawNick, String rawPassword) {
         String nick = rawNick == null ? "" : rawNick.trim();
         String password = rawPassword == null ? null : rawPassword.trim();
+        clearSessionCommandHistory(nick, password);
 
         if (!StringHelper.isValidPlayerName(nick)) {
             error("Invalid nickname. Use a standard Minecraft username.");
@@ -72,11 +81,11 @@ public class SessionCommand extends Command {
 
         ReconnectTarget reconnectTarget = resolveReconnectTarget();
         if (reconnectTarget != null) {
-            reconnect(reconnectTarget);
+            RECONNECT_CONTROLLER.schedule(reconnectTarget);
             if (password != null && !password.isEmpty()) {
-                info("Switched to %s, saved AutoLogin password for %s and reconnecting to %s.", nick, nick, reconnectTarget.info.address);
+                info("Switched to %s, saved AutoLogin password for %s and queued reconnect to %s.", nick, nick, reconnectTarget.info.address);
             } else {
-                info("Switched to %s and reconnecting to %s.", nick, reconnectTarget.info.address);
+                info("Switched to %s and queued reconnect to %s.", nick, reconnectTarget.info.address);
             }
             return SINGLE_SUCCESS;
         }
@@ -88,6 +97,41 @@ public class SessionCommand extends Command {
         }
 
         return SINGLE_SUCCESS;
+    }
+
+    public static boolean switchToCrackedSession(String rawNick) {
+        String nick = rawNick == null ? "" : rawNick.trim();
+        if (!StringHelper.isValidPlayerName(nick)) return false;
+
+        CrackedAccount account = findCrackedAccount(nick);
+        boolean created = false;
+        if (account == null) {
+            account = new CrackedAccount(nick);
+            created = true;
+        }
+
+        if (!account.fetchInfo()) return false;
+        if (created) Accounts.get().add(account);
+        return account.login();
+    }
+
+    public static boolean scheduleReconnect(String rawServerAddress) {
+        String serverAddress = rawServerAddress == null ? "" : rawServerAddress.trim();
+        if (serverAddress.isBlank()) return false;
+
+        ServerAddress address;
+        try {
+            address = ServerAddress.parse(serverAddress);
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+
+        initReconnectController();
+        RECONNECT_CONTROLLER.schedule(new ReconnectTarget(
+            address,
+            new ServerInfo(serverAddress, serverAddress, ServerInfo.ServerType.OTHER)
+        ));
+        return true;
     }
 
     private void saveAutoLoginProfile(String nick, String serverKey, String password) {
@@ -110,10 +154,25 @@ public class SessionCommand extends Command {
         Modules.get().save();
     }
 
-    private void reconnect(ReconnectTarget reconnectTarget) {
-        Screen parent = new MultiplayerScreen(new TitleScreen());
-        if (mc.world != null || mc.player != null) mc.disconnect(parent, false);
-        ConnectScreen.connect(parent, mc, reconnectTarget.address, reconnectTarget.info, false, null);
+    private void clearSessionCommandHistory(String nick, String password) {
+        if (mc == null || mc.inGameHud == null) return;
+
+        String commandLine = password == null || password.isBlank()
+            ? toString(nick)
+            : toString(nick, password);
+
+        mc.inGameHud.getChatHud().getMessageHistory().removeLastOccurrence(commandLine);
+        mc.inGameHud.getChatHud().discardDraft();
+    }
+
+    private static void initReconnectController() {
+        if (reconnectControllerInitialized) return;
+        reconnectControllerInitialized = true;
+        MeteorClient.EVENT_BUS.subscribe(RECONNECT_CONTROLLER);
+    }
+
+    private static Screen createReconnectParent() {
+        return new MultiplayerScreen(new TitleScreen());
     }
 
     private ReconnectTarget resolveReconnectTarget() {
@@ -154,5 +213,63 @@ public class SessionCommand extends Command {
     }
 
     private record ReconnectTarget(ServerAddress address, ServerInfo info) {
+    }
+
+    private static final class SessionReconnectController {
+        private static final int CONNECT_DELAY_TICKS = 2;
+
+        private ReconnectTarget pendingTarget;
+        private int pendingDelayTicks;
+        private boolean waitingForDisconnect;
+
+        void schedule(ReconnectTarget reconnectTarget) {
+            pendingTarget = reconnectTarget;
+            pendingDelayTicks = CONNECT_DELAY_TICKS;
+            waitingForDisconnect = hasLiveSession();
+
+            if (waitingForDisconnect) {
+                Screen parent = createReconnectParent();
+                SessionCommand.mc.disconnect(parent, false);
+            }
+        }
+
+        @EventHandler
+        private void onGameLeft(GameLeftEvent event) {
+            if (pendingTarget == null) return;
+            waitingForDisconnect = false;
+            if (pendingDelayTicks < CONNECT_DELAY_TICKS) pendingDelayTicks = CONNECT_DELAY_TICKS;
+        }
+
+        @EventHandler
+        private void onTick(TickEvent.Post event) {
+            ReconnectTarget reconnectTarget = pendingTarget;
+            if (reconnectTarget == null) return;
+
+            if (waitingForDisconnect) {
+                if (hasLiveSession()) return;
+                waitingForDisconnect = false;
+                if (pendingDelayTicks < CONNECT_DELAY_TICKS) pendingDelayTicks = CONNECT_DELAY_TICKS;
+            }
+
+            if (hasLiveSession()) return;
+
+            if (pendingDelayTicks > 0) {
+                pendingDelayTicks--;
+                return;
+            }
+
+            pendingTarget = null;
+            pendingDelayTicks = 0;
+            waitingForDisconnect = false;
+
+            Screen parent = createReconnectParent();
+            ConnectScreen.connect(parent, SessionCommand.mc, reconnectTarget.address, reconnectTarget.info, false, null);
+        }
+
+        private static boolean hasLiveSession() {
+            return SessionCommand.mc.world != null
+                || SessionCommand.mc.player != null
+                || (SessionCommand.mc.getNetworkHandler() != null && SessionCommand.mc.getNetworkHandler().getConnection() != null);
+        }
     }
 }

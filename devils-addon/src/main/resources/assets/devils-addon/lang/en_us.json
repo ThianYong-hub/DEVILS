@@ -1,0 +1,8 @@
+{
+  "devils-addon.chesttracker.keybind.title": "ChestTracker Keybind",
+  "devils-addon.chesttracker.keybind.instructions": "Press a key or mouse button. Esc cancels, Delete unbinds.",
+  "devils-addon.chesttracker.keybind.current": "Current: %s",
+  "devils-addon.chesttracker.keybind.button": "Open Key: %s",
+  "devils-addon.chesttracker.keybind.listening": "Listening...",
+  "devils-addon.chesttracker.keybind.reset": "Reset"
+}

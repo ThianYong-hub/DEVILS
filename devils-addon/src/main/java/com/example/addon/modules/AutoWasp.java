@@ -4,6 +4,7 @@ import com.example.addon.AddonTemplate;
 import com.example.addon.modules.autowasp.AutoWaspFlightController;
 import com.example.addon.modules.autowasp.AutoWaspPathfinder;
 import com.example.addon.util.CrashGuard;
+import com.example.addon.util.runtime.StrictRuntimeLogger;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.settings.BoolSetting;
@@ -164,8 +165,10 @@ public class AutoWasp extends Module {
 
         if (target == null || target.isRemoved()) {
             if (tryAcquireTarget(false)) {
+                logTargetDecision("activate-acquire", target);
                 info("Target set to: " + target.getName().getString());
             } else if (!keepSearching.get()) {
+                logTargetDecision("activate-no-target", null);
                 error("No valid targets.");
                 toggle();
             }
@@ -217,6 +220,7 @@ public class AutoWasp extends Module {
             ? (onlyFriends.get() && !isFriend) || (!onlyFriends.get() && isFriend)
             : onlyFriends.get() && !isFriend;
         if (shouldIgnore) {
+            logTargetDecision("tick-filter-reject", target);
             clearTargetState();
             if (!handleMissingTarget()) {
                 tickAutoChestSwap();
@@ -272,6 +276,8 @@ public class AutoWasp extends Module {
             if (friendFilter.get()) return onlyFriends.get() ? isFriend : !isFriend;
             return !onlyFriends.get() || isFriend;
         }, SortPriority.LowestDistance);
+
+        logTargetDecision(target == null ? "search-no-match" : "search-selected", target);
     }
 
     private Vec3d getTargetPos() {
@@ -335,9 +341,11 @@ public class AutoWasp extends Module {
     private boolean handleMissingTarget() {
         clearTargetState();
         if (tryAcquireTarget(true)) {
+            logTargetDecision("reacquire-success", target);
             info("New target: " + target.getName().getString());
             return true;
         }
+        logTargetDecision("reacquire-failed", null);
         if (keepSearching.get()) return false;
 
         handleTargetLoss();
@@ -392,12 +400,37 @@ public class AutoWasp extends Module {
         return mc;
     }
 
+    public void debugConfigureForRuntime(boolean friendFilterEnabled, boolean onlyFriendsEnabled, boolean keepSearchingEnabled) {
+        friendFilter.set(friendFilterEnabled);
+        onlyFriends.set(onlyFriendsEnabled);
+        keepSearching.set(keepSearchingEnabled);
+    }
+
+    public String debugTargetName() {
+        return target == null ? "" : target.getGameProfile().name();
+    }
+
+    public boolean debugTargetIsFriend() {
+        return target != null && Friends.get().isFriend(target);
+    }
+
     public double horizontalSpeedValue() {
         return horizontalSpeed.get();
     }
 
     public double verticalSpeedValue() {
         return verticalSpeed.get();
+    }
+
+    private void logTargetDecision(String reason, PlayerEntity player) {
+        String targetName = player == null ? "<none>" : player.getGameProfile().name();
+        boolean isFriend = player != null && Friends.get().isFriend(player);
+        String detail = "target=" + targetName
+            + " friend=" + isFriend
+            + " reason=" + reason
+            + " friendFilter=" + friendFilter.get()
+            + " onlyFriends=" + onlyFriends.get();
+        StrictRuntimeLogger.logAutoWasp("target-decision", detail);
     }
 
     public enum Action {
