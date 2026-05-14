@@ -865,6 +865,12 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             }
 
             currentLootSourceChest = chest.toImmutable();
+            StrictRuntimeLogger.logStashMover(
+                "source-selected",
+                "source=" + formatBlockPosForFeedback(currentLootSourceChest)
+                    + " destinationLootChest=" + formatBlockPosForFeedback(lootChest)
+                    + " pearlChest=" + formatBlockPosForFeedback(pearlChestPos())
+            );
             tryOpenContainer(chest, true);
             return;
         }
@@ -958,20 +964,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                     + " storageSlots=" + storageSlotCount(handler)
                     + " markedFull=" + fullDestinationChests.size()
             );
-            BlockPos alternative = findAlternativeDestinationChest(lootChest, pearlChestPos());
-            if (alternative != null) {
-                lootChestSetting.set(StashMoverConfigCodec.encodeBlockPos(alternative));
-                waitingForDestinationSpace = false;
-                closeHandledScreen();
-                StrictRuntimeLogger.logStashMover(
-                    "destination-switch",
-                    "from=" + formatBlockPosForFeedback(lootChest)
-                        + " to=" + formatBlockPosForFeedback(alternative)
-                        + " reason=destination-full"
-                );
-                actionCooldownTicks = 3;
-                return;
-            }
             if (!waitingForDestinationSpace) {
                 waitingForDestinationSpace = true;
                 warning("Destination chest is full; keeping it open and waiting for free slots.");

@@ -265,7 +265,10 @@ public final class StashMoverLiveRuntimeValidation {
                     "TRACE host-wait-for-world screen=" + screenName + " stageTicks=" + stageTicks
                 );
             }
-            if (stageTicks > 40 && stageTicks % 60 == 0) {
+            boolean loadingWorld = client.currentScreen != null
+                && ("MessageScreen".equals(client.currentScreen.getClass().getSimpleName())
+                || "LevelLoadingScreen".equals(client.currentScreen.getClass().getSimpleName()));
+            if (!loadingWorld && stageTicks > 1_200 && stageTicks % 200 == 0) {
                 StrictRuntimeLogger.logHarness(
                     "STASHMOVER",
                     "TRACE reopen-existing-world-attempt worldName=" + userWorldName() + " stageTicks=" + stageTicks
@@ -2033,16 +2036,13 @@ public final class StashMoverLiveRuntimeValidation {
 
             Path worldDir = runDirectory.toPath().resolve("saves").resolve(userWorldName());
             Path sessionLock = worldDir.resolve("session.lock");
-            Path levelDatOld = worldDir.resolve("level.dat_old");
 
             boolean deletedLock = Files.deleteIfExists(sessionLock);
-            boolean deletedLevelDatOld = Files.deleteIfExists(levelDatOld);
-            if (deletedLock || deletedLevelDatOld) {
+            if (deletedLock) {
                 StrictRuntimeLogger.logHarness(
                     "STASHMOVER",
                     "TRACE user-world-cleanup worldName=" + userWorldName()
                         + " deletedSessionLock=" + deletedLock
-                        + " deletedLevelDatOld=" + deletedLevelDatOld
                 );
             }
         } catch (Throwable throwable) {
