@@ -4,7 +4,7 @@
 
 ## 下载
 
-- 当前构建（`v0.0.44`）：[下载 jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.54/devils-addon-0.0.54.jar)
+- 当前构建（`v0.0.44`）：[下载 jar](https://github.com/ThianYong-hub/DEVILS/releases/download/v0.0.55/devils-addon-0.0.55.jar)
 - 最新发布页：[打开](https://github.com/ThianYong-hub/DEVILS/releases/latest)
 - 全部发布：[打开](https://github.com/ThianYong-hub/DEVILS/releases)
 
