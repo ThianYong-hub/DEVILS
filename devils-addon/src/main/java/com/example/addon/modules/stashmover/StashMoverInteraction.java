@@ -622,6 +622,15 @@ abstract class StashMoverInteraction extends StashMoverSupport {
         }
     }
 
+    protected boolean isSourceChestBlacklisted(BlockPos pos) {
+        if (pos == null) return false;
+        if (blacklistedSourceChests.contains(pos)) return true;
+        for (BlockPos blacklisted : blacklistedSourceChests) {
+            if (isSameChestBlock(pos, blacklisted)) return true;
+        }
+        return false;
+    }
+
     protected BlockPos freeBlockAroundChest(BlockPos pos) {
         if (mc.world == null || pos == null) return pos;
 
@@ -867,7 +876,7 @@ abstract class StashMoverInteraction extends StashMoverSupport {
                 return;
             }
             if (lethalReturn) {
-                setMoverPhase(MoverPhase.LOOT, disableAfterLethalReturn ? "return-command-sent-await-death" : "return-command-sent");
+                setMoverPhase(MoverPhase.AWAITING_RETURN_DEATH, disableAfterLethalReturn ? "return-command-sent-await-death" : "return-command-sent");
                 actionCooldownTicks = 10;
             } else {
                 setMoverPhase(MoverPhase.LOOT, "return-command-sent");

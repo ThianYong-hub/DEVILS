@@ -851,6 +851,35 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         }
 
         if (!isChestLikeHandler(mc.player.currentScreenHandler)) {
+            if (currentLootSourceChest != null) {
+                if (isSourceChestBlacklisted(currentLootSourceChest)) {
+                    currentLootSourceChest = null;
+                    openedContainerTarget = null;
+                    return;
+                }
+
+                if (actionCooldownTicks <= 0) {
+                    StrictRuntimeLogger.logStashMover(
+                        "source-open-retry",
+                        "source=" + formatBlockPosForFeedback(currentLootSourceChest)
+                            + " openedContainer=" + formatValue(openedContainerTarget)
+                            + " handler="
+                            + (mc.player.currentScreenHandler == null
+                                ? "<null>"
+                                : mc.player.currentScreenHandler.getClass().getSimpleName() + "#" + mc.player.currentScreenHandler.syncId)
+                    );
+                    openedContainerTarget = null;
+                    tryOpenContainer(currentLootSourceChest, true);
+                }
+                return;
+            }
+
+            if (baritone.isPathing()
+                && (activeGoalKind == GoalKind.SOURCE_CHEST || activeGoalKind == GoalKind.CONTAINER_INTERACT)
+                && activeGoalPos != null) {
+                return;
+            }
+
             if (stationaryTicks >= STATIONARY_NUDGE_TICKS) {
                 BlockPos target = randomNearbyGoal(3);
                 if (target != null) {
@@ -913,7 +942,15 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
         closeHandledScreen();
         actionCooldownTicks = 5;
-        blacklistSourceChest(currentLootSourceChest);
+        BlockPos depletedSourceChest = currentLootSourceChest;
+        blacklistSourceChest(depletedSourceChest);
+        StrictRuntimeLogger.logStashMover(
+            "source-depleted",
+            "source=" + formatBlockPosForFeedback(depletedSourceChest)
+                + " blacklisted=" + blacklistedSourceChests.size()
+        );
+        currentLootSourceChest = null;
+        openedContainerTarget = null;
 
         if (!hasRemainingEligibleSourceChest(lootChest, pearlChestPos())) {
             if (isPlayerInventoryEmpty()) {
@@ -1004,7 +1041,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     private boolean returnReplenishedPearlsAfterReturnThrow(ScreenHandler handler, BlockPos pearlChest) {
         if (playerInventoryPearlCount() == 0) return false;
         int storageSlots = storageSlotCount(handler);
-        if (isStorageFull(handler)) {
+        if (!canStorageAcceptEnderPearls(handler, storageSlots)) {
             warning("Pearl chest is full; cannot return Replenish-provided pearls before /kill.");
             StrictRuntimeLogger.logStashMover(
                 "replenish-pearl-return-blocked",
@@ -1031,6 +1068,15 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             return true;
         }
 
+        return false;
+    }
+
+    private boolean canStorageAcceptEnderPearls(ScreenHandler handler, int storageSlots) {
+        for (int i = 0; i < storageSlots; i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (stack.isEmpty()) return true;
+            if (stack.isOf(Items.ENDER_PEARL) && stack.getCount() < stack.getMaxCount()) return true;
+        }
         return false;
     }
 
@@ -1129,6 +1175,44 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             );
         } catch (Throwable ignored) {
         }
+    }
+
+    protected void handleReturnDeathConfirmed(String reason, String signal) {
+        if (moverPhase != MoverPhase.AWAITING_RETURN_DEATH) return;
+
+        StrictRuntimeLogger.logStashMover(
+            "return-death-confirmed",
+            "reason=" + reason
+                + " signal=" + signal
+                + " mode=" + mode.get()
+                + " pos=" + (mc.player == null ? "<unset>" : formatVecForFeedback(mc.player.getEntityPos()))
+                + " returnCommand=" + returnCommand.get()
+        );
+        closeHandledScreen();
+        cancelGoal("return-death-confirmed");
+        setMoverPhase(MoverPhase.LOOT, reason == null ? "return-death-confirmed" : reason);
+        loaderPhase = LoaderPhase.WAITING;
+        ownPearlTracker.reset();
+        clearPearlChestBorrowState();
+        currentLootSourceChest = null;
+        openedContainerTarget = null;
+        renderedSourceChests.clear();
+        loadAckReceived = false;
+        loadingReturnPearlAfterDeposit = false;
+        disableAfterPartnerSeen = false;
+        waitingForDestinationSpace = false;
+        chestActionCooldownTicks = 0;
+        actionCooldownTicks = 3;
+        logicPulseTicks = 0;
+        phaseAgeTicks = 0;
+        resendLoadMessageTicks = 0;
+        stationaryTicks = 0;
+        ownPearlStasisTicks = 0;
+        lastPacketReceivedAtMs = System.currentTimeMillis();
+        lastProgressAtMs = System.currentTimeMillis();
+        clearPearlFailureState();
+        lastStallReason = "none";
+        lastRecoveryAction = "return-death-confirmed";
     }
 
     protected void tickTrackedPearlState() {

@@ -95,6 +95,10 @@ public class StashMover extends StashMoverRuntime {
         if (message == null || message.isBlank()) return;
         if (isOwnDiagnosticChatMessage(message)) return;
         StrictRuntimeLogger.logStashMover("chat-receive", "message=" + message);
+        if (mode.get() == Mode.MOVER && isReturnDeathConfirmationMessage(message)) {
+            handleReturnDeathConfirmed("chat-death-confirmation", message);
+            return;
+        }
         if (mode.get() == Mode.LOADER) {
             if (isLoadRequestFromPartner(message)) {
                 if (message.equals(lastLoaderLoadRequestMessage) && loaderPhase == LoaderPhase.LOAD_PEARL) return;
@@ -122,6 +126,25 @@ public class StashMover extends StashMoverRuntime {
         String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
         return normalized.contains("[stash mover] [diag]")
             || (normalized.contains("[meteor]") && normalized.contains("[stash mover]"));
+    }
+
+    private boolean isReturnDeathConfirmationMessage(String message) {
+        if (moverPhase != MoverPhase.AWAITING_RETURN_DEATH || message == null || mc.player == null) return false;
+
+        String playerName = mc.player.getGameProfile().name();
+        String normalized = message.toLowerCase(Locale.ROOT);
+        String normalizedName = playerName == null ? "" : playerName.toLowerCase(Locale.ROOT);
+
+        if (normalized.contains("death position saved")) return true;
+        if (normalized.contains("позиция смерти") || normalized.contains("death waypoint")) return true;
+        if (normalizedName.isBlank()) return false;
+
+        return normalized.contains(normalizedName + " was killed")
+            || normalized.contains("killed " + normalizedName)
+            || normalized.contains(normalizedName + " died")
+            || normalized.contains(normalizedName + " был убит")
+            || normalized.contains(normalizedName + " умер")
+            || normalized.contains("убит " + normalizedName);
     }
 
     @EventHandler
