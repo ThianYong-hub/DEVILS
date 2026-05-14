@@ -13,7 +13,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 ## Download
 
 - Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.55`): `build/libs/devils-addon-0.0.55.jar`
+- Current addon build (`0.0.56`): `build/libs/devils-addon-0.0.56.jar`
 - Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
 - GitHub release links should be treated as latest published release, not as the current local workspace build.
 
@@ -27,7 +27,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 
 | Item | Value |
 | --- | --- |
-| Addon Version | `0.0.55` |
+| Addon Version | `0.0.56` |
 | Game Version | `0.0.4` |
 | Minecraft | `1.21.11` |
 | Fabric Loader | `0.18.4+` |
@@ -73,6 +73,7 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | `ping` | Synchronized ping markers with 2D/3D render, sound, custom icon and SyncHub bridge. |
 | `tracker-player` (`join-watcher`) | Per-player join/leave/death rules with sounds and optional delayed chat actions. |
 | `auto-login` | Auto `/login` and `/reg` by username + server profile. |
+| `stash-mover` | Two-account stash transfer loop: MOVER loots source chests, deposits into a configured loot chest, stages return pearls, and coordinates a LOADER account that clicks the trapdoor chamber. |
 | `auto-anvil-rename` | Auto-renames matching items in open anvil with filters and XP assist. |
 | `discord-rpc` | Shows Devils Addon presence in Discord Rich Presence. |
 
@@ -103,7 +104,82 @@ An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
 | --- | --- |
 | `.autoraname setname <text>` | Set target rename text for `auto-anvil-rename`. |
 | `.autoraname clearitems` | Clear item filter list for `auto-anvil-rename`. |
+| `.stashmover pearlchest` | Save the chest that contains ender pearls. Look at the pearl chest and run this on the MOVER account. |
+| `.stashmover lootchest` | Save the destination loot chest. This is where stolen shulkers/items are deposited, not a source chest to loot from. |
+| `.stashmover water` | Save the water block used for the pearl chamber. Stand in the water/lunka and run this. |
+| `.stashmover chamber` | Save the trapdoor/chamber hit point. Look at the trapdoor or intended chamber interaction point and run this. |
+| `.stashmover pearltarget` | Save the precise pearl aim/entry point. Look at the exact point where the pearl should enter/settle and run this. |
+| `.stashmover status` | Print saved positions and runtime state. Useful before starting a long run. |
+| `.stashmover clear <target>` | Clear one saved target: `pearlchest`, `lootchest`, `water`, `chamber`, or `pearltarget`. |
 | `.example` | Internal example command. |
+
+## StashMover Quick Start
+
+`stash-mover` is built around two accounts:
+
+- `MOVER`: loots source stash chests, deposits shulkers/items into the configured `loot-chest`, takes one return pearl from `pearl-chest`, throws it into the chamber/water, returns any leftover Replenish pearls to `pearl-chest`, then sends the configured return command, usually `/kill`.
+- `LOADER`: stands beside the pearl chamber and clicks the trapdoor after receiving the MOVER message. The LOADER does not loot chests.
+
+Required setup:
+
+1. Put the LOADER account at the loader station near the trapdoor. It should stand near the water/chamber, not inside the water unless your build requires it.
+2. Put the MOVER account at the stash/source station with access to source chests and a bed/respawn route back to the source station.
+3. Fill the pearl chest with ender pearls. This chest is only for return pearls.
+4. Set the destination loot chest. This chest receives resources from source chests. It is not a source chest.
+5. Make sure the chamber/trapdoor path is clear enough that the thrown pearl can enter the water/stasis area.
+
+Recommended MOVER commands:
+
+```text
+.stashmover pearlchest
+.stashmover lootchest
+.stashmover water
+.stashmover chamber
+.stashmover pearltarget
+.stashmover status
+```
+
+Capture notes:
+
+- Run `.stashmover pearlchest` while looking at the chest with ender pearls.
+- Run `.stashmover lootchest` while looking at the destination chest where resources must be deposited.
+- Run `.stashmover water` while the player is standing in the exact water block used by the pearl chamber.
+- Run `.stashmover chamber` while looking at the trapdoor/chamber click point.
+- Run `.stashmover pearltarget` while looking at the exact pearl entry/settle point. This is optional but recommended for precise builds.
+
+Recommended module settings:
+
+| Setting | MOVER | LOADER | Notes |
+| --- | --- | --- | --- |
+| `mode` | `MOVER` | `LOADER` | Each account must use the correct role. |
+| `partner-name` | LOADER nick | MOVER nick | Must match the other account's current in-game name. |
+| `load-message` | same text | same text | Both accounts must use the same coordination message. |
+| `return-command` | `kill` | unused | MOVER sends this after staging the next return pearl. |
+| `use-ender-chest` | optional | unused | Uses nearby ender chest as an overflow/buffer if enabled. |
+| `ignore-single-chest` | usually `true` | unused | Keeps source scanning focused on double chests. |
+| `only-shulkers` | optional | unused | Enable if only shulker boxes should be moved. |
+| `stall-timeout-ticks` | tune if needed | unused | Higher values wait longer before recovery. |
+| `debug-logging` | optional | optional | Writes detailed StashMover runtime events to logs/chat. |
+
+Runtime cycle:
+
+1. MOVER loots eligible source chests found by scan distance and filters.
+2. MOVER travels to `loot-chest` and deposits carried items.
+3. When inventory is empty, MOVER loads one return pearl from `pearl-chest`.
+4. MOVER throws the return pearl into the configured chamber/water target.
+5. If another module such as Replenish topped ender pearls back up to a stack, MOVER puts the leftover pearls back into `pearl-chest`.
+6. MOVER immediately sends the return command, normally `/kill`, so it does not stand near and load its own return pearl.
+7. MOVER respawns, scans for source chests again, and repeats.
+8. LOADER responds to the coordination message by clicking/loading the chamber trapdoor when the staged pearl is present.
+
+Important behavior:
+
+- The first test pearl can be manually staged by the player/build, but after the loop starts the MOVER is expected to throw subsequent return pearls itself.
+- `loot-chest` means destination chest. Do not use it as a resource/source chest.
+- `pearl-chest` means return pearl supply chest. It should contain ender pearls and enough free space to receive leftover pearls if Replenish is enabled.
+- If Replenish is enabled and refills the MOVER to 16 pearls after taking one, StashMover returns those extra pearls to `pearl-chest` after the throw, before `/kill`.
+- If the pearl chest is full, the MOVER will not discard leftover pearls; it waits/logs instead.
+- Live servers remain authoritative. Anti-cheat, chunk loading, death/pearl rules, server-side pearl-on-death behavior, and mob/player displacement can still affect results.
 
 ## SyncHub Backend Quick Start (For Regular Users)
 
@@ -360,6 +436,13 @@ Build only the game companion:
 ```bash
 ./gradlew :devils-game:build
 ```
+
+## Release Notes (`v0.0.56`)
+
+- documented StashMover commands, two-account setup, MOVER/LOADER settings, runtime cycle, and pearl/loot chest semantics
+- fixed StashMover return-pearl cycle when Meteor Replenish refills ender pearls after taking one pearl from the pearl chest
+- changed `/kill` return handling to proceed after the thrown return pearl is launched instead of waiting for a long stasis-ready condition near the player
+- preserves the destination `loot-chest` as deposit-only and returns leftover Replenish pearls to `pearl-chest` before `/kill`
 
 ## Release Notes (`v0.0.55`)
 

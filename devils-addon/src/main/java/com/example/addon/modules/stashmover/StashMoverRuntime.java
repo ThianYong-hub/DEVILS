@@ -360,6 +360,9 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         boolean lethalReturnFlightConfirmed = loadingReturnPearlAfterDeposit
             && lethalReturn
             && isLethalReturnPearlFlightConfirmed(target, pearlPos, pearlVelocity, ownPearlStasisTicks);
+        boolean lethalReturnPearlLaunched = loadingReturnPearlAfterDeposit
+            && lethalReturn
+            && isLethalReturnPearlLaunched(target, pearlPos, pearlVelocity, ownPearlStasisTicks, speedSq);
         boolean lethalReturnPearlReady = loadingReturnPearlAfterDeposit
             && lethalReturn
             && target != null
@@ -380,24 +383,24 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         boolean lethalReturnCommandFlightConfirmed = loadingReturnPearlAfterDeposit
             && lethalReturn
             && !lethalReturnChestCleanupPending
-            && lethalReturnFlightConfirmed;
+            && (lethalReturnFlightConfirmed || lethalReturnPearlLaunched);
         boolean lethalReturnCommandReady = loadingReturnPearlAfterDeposit
             && lethalReturn
             && !lethalReturnChestCleanupPending
             && lethalReturnPearlReady;
         boolean readyForPutBack = loadingReturnPearlAfterDeposit && lethalReturn
-            ? (lethalReturnChestCleanupPending && lethalReturnPearlReady)
+            ? (lethalReturnChestCleanupPending && lethalReturnPearlLaunched)
             : (returnPearlFlightConfirmed || returnPearlReady || genericStasisReady);
         trackedPearlReadyOnRemoval = loadingReturnPearlAfterDeposit
             && lethalReturn
-            && lethalReturnPearlReady;
+            && (lethalReturnPearlLaunched || lethalReturnPearlReady);
         String readyEvent = loadingReturnPearlAfterDeposit && lethalReturn
-            ? "pearl-return-kill-ready"
+            ? (lethalReturnPearlLaunched ? "pearl-return-kill-launched" : "pearl-return-kill-ready")
             : (returnPearlFlightConfirmed
                 ? "pearl-return-flight-confirmed"
                 : (returnPearlReady ? "pearl-return-ready" : "pearl-stasis-ready"));
         String readyReason = loadingReturnPearlAfterDeposit && lethalReturn
-            ? "tracked-own-pearl-return-kill-ready"
+            ? (lethalReturnPearlLaunched ? "tracked-own-pearl-return-kill-launched" : "tracked-own-pearl-return-kill-ready")
             : (returnPearlFlightConfirmed
                 ? "tracked-own-pearl-return-flight-confirmed"
                 : (returnPearlReady ? "tracked-own-pearl-return-ready" : "tracked-own-pearl-stasis-ready"));
@@ -629,6 +632,14 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             && horizontalVelocitySq <= 0.035 * 0.035;
     }
 
+    private static boolean isLethalReturnPearlLaunched(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks, double speedSq) {
+        if (pearlPos == null || pearlVelocity == null) return false;
+        double verticalBelow = target == null ? 0.0 : Math.max(0.0, target.y - pearlPos.y);
+        return stasisTicks >= 3
+            && speedSq >= 0.0025
+            && verticalBelow <= 8.0;
+    }
+
     private static boolean isLethalReturnRemovalConfirmation(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks) {
         if (target == null || pearlPos == null || pearlVelocity == null) return false;
         double horizontalSq = squaredHorizontalDistance(pearlPos, target);
@@ -643,7 +654,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     }
 
     protected boolean hasPearlChestCleanupPendingAfterThrow() {
-        return pearlChestSwapPending || resolveBorrowedPearlHotbarSlot() != -1;
+        return pearlChestSwapPending || resolveBorrowedPearlHotbarSlot() != -1 || playerInventoryPearlCount() > 0;
     }
 
     protected void dispatchLethalReturnAfterTrackedPearl(
@@ -770,7 +781,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     }
 
     protected void tickPutBackPearl(BlockPos pearlChest, BlockPos lootChest) {
-        if (!pearlChestSwapPending && resolveBorrowedPearlHotbarSlot() == -1) {
+        if (!pearlChestSwapPending && resolveBorrowedPearlHotbarSlot() == -1 && playerInventoryPearlCount() == 0) {
             ownPearlTracker.reset();
             clearPearlChestBorrowState();
             continueAfterPearlStage(lootChest, "put-back-no-hotbar-pearl");
@@ -782,6 +793,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         }
         ScreenHandler handler = mc.player.currentScreenHandler;
         if (!isChestLikeHandler(handler)) return;
+        if (loadingReturnPearlAfterDeposit && returnReplenishedPearlsAfterReturnThrow(handler, pearlChest)) return;
         if (pearlChestSwapPending) {
             if (!restoreDisplacedPearlChestStack(handler)) return;
             ownPearlTracker.reset();
@@ -795,7 +807,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (pearlHotbarSlot == -1) {
             clearPearlChestBorrowState();
             closeHandledScreen();
-            continueAfterPearlStage(lootChest, "put-back-no-hotbar-pearl");
+            continueAfterPearlStage(lootChest, "post-return-throw-pearls-cleaned");
             return;
         }
         if (!returnPearlsToChest(handler, pearlHotbarSlot)) return;
@@ -920,6 +932,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
     protected void tickWalkingToDestination(BlockPos lootChest) {
         if (lootChest == null) return;
+
         double destinationDistanceSq = mc.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(lootChest));
         if (destinationDistanceSq > CONTAINER_REACH * CONTAINER_REACH) {
             requestGoal(GoalKind.LOOT_CHEST, freeBlockAroundChest(lootChest), "walking-to-destination");
@@ -986,6 +999,39 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             movedStacks += 1.0f;
             return;
         }
+    }
+
+    private boolean returnReplenishedPearlsAfterReturnThrow(ScreenHandler handler, BlockPos pearlChest) {
+        if (playerInventoryPearlCount() == 0) return false;
+        int storageSlots = storageSlotCount(handler);
+        if (isStorageFull(handler)) {
+            warning("Pearl chest is full; cannot return Replenish-provided pearls before /kill.");
+            StrictRuntimeLogger.logStashMover(
+                "replenish-pearl-return-blocked",
+                "reason=pearl-chest-full-after-return-throw pearlChest=" + formatBlockPosForFeedback(pearlChest)
+                    + " pearls=" + playerInventoryPearlCount()
+            );
+            actionCooldownTicks = Math.max(actionCooldownTicks, 10);
+            return true;
+        }
+
+        for (int i = storageSlots; i < handler.slots.size(); i++) {
+            ItemStack stack = handler.getSlot(i).getStack();
+            if (stack.isEmpty() || !stack.isOf(Items.ENDER_PEARL)) continue;
+            if (!readyForChestAction()) return true;
+            StrictRuntimeLogger.logStashMover(
+                "replenish-pearl-return",
+                "slot=" + i
+                    + " count=" + stack.getCount()
+                    + " pearlChest=" + formatBlockPosForFeedback(pearlChest)
+                    + " stage=after-return-throw"
+            );
+            mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
+            chestActionCooldownTicks = 2;
+            return true;
+        }
+
+        return false;
     }
 
     protected void tickEchestFill() {

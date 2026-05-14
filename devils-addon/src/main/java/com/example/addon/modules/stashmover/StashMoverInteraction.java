@@ -292,6 +292,15 @@ abstract class StashMoverInteraction extends StashMoverSupport {
         return true;
     }
 
+    protected int playerInventoryPearlCount() {
+        int count = 0;
+        for (int i = 0; i < 36; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isOf(Items.ENDER_PEARL)) count += stack.getCount();
+        }
+        return count;
+    }
+
     protected boolean isStorageFull(ScreenHandler handler) {
         int storageSlots = storageSlotCount(handler);
         for (int i = 0; i < storageSlots; i++) {
