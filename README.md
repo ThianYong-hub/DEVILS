@@ -16,7 +16,7 @@ Current versions are read from `gradle.properties`:
 
 | Property | Current Value |
 | --- | --- |
-| `addon_version` | `0.0.57` |
+| `addon_version` | `0.0.58` |
 | `game_version` | `0.0.4` |
 | `minecraft_version` | `1.21.11` |
 | `loader_version` | `0.18.4` |

@@ -134,6 +134,9 @@ _tmp_mio_1218_decomp/
 *_javap*.txt
 *waypointrender*_javap*.txt
 nametag_javap.txt
+jar-before.txt
+jar-after.txt
+release-audit/
 
 # local AutoLogin sync backend playground
 local-autologin-sync/
