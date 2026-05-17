@@ -16,7 +16,7 @@ Release continuation approved by repository owner.
 - Real secrets found: NO
 - SyncHub `.env` tracked: NO
 - Real private IP/domain/local paths found: NO
-- LifeFish/LiteFish/lifefish scan: CLEAN
+- Removed AFK fishing module scan: CLEAN
 
 ## Third-Party Notices
 
