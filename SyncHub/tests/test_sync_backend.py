@@ -166,7 +166,7 @@ class TestSyncBackend(unittest.TestCase):
                     {
                         "enabled": True,
                         "username": "ping-user",
-                        "server": "2k2f.ru",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ping-marker-v1\"}",
                         "delay": 0,
@@ -182,13 +182,13 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "device-b",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "baseRevision": 0,
                 "profiles": [
                     {
                         "enabled": True,
-                        "username": "bank:multiplayer/2k2f.ru",
-                        "server": "2k2f.ru",
+                        "username": "bank:multiplayer/example.test",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ct-file-v1\",\"nbt\":\"AAA\"}",
                         "delay": 0,
@@ -200,7 +200,7 @@ class TestSyncBackend(unittest.TestCase):
         self.assertTrue(push_ct.get("ok"))
 
         ping_file = self.harness.modules_dir / "core-sensitive" / "ping" / "ping.json"
-        ct_file = self.harness.modules_dir / "core-sensitive" / "chest-tracker" / "2k2f.ru.json"
+        ct_file = self.harness.modules_dir / "core-sensitive" / "chest-tracker" / "example.test.json"
         self.assertTrue(ping_file.exists(), "ping namespace file is missing")
         self.assertTrue(ct_file.exists(), "chest-tracker namespace file is missing")
 
@@ -218,13 +218,13 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "device-b",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "knownRevision": -1,
             },
         )
         self.assertEqual(200, status)
         self.assertTrue(pull_ct.get("ok"))
-        self.assertEqual("chest-tracker:2k2f.ru", pull_ct.get("namespace"))
+        self.assertEqual("chest-tracker:example.test", pull_ct.get("namespace"))
         self.assertEqual(1, len(pull_ct.get("profiles", [])))
 
     def test_game_routes_use_dedicated_storage_domain(self):
@@ -236,9 +236,9 @@ class TestSyncBackend(unittest.TestCase):
                 {
                     "enabled": True,
                     "username": "games-a",
-                    "server": "2k2f.ru",
+                    "server": "example.test",
                     "mode": "LOGIN",
-                    "password": "{\"v\":1,\"deviceId\":\"games-a\",\"name\":\"Games A\",\"server\":\"2k2f.ru\",\"lastSeen\":1}",
+                    "password": "{\"v\":1,\"deviceId\":\"games-a\",\"name\":\"Games A\",\"server\":\"example.test\",\"lastSeen\":1}",
                     "delay": 0,
                 }
             ],
@@ -272,13 +272,13 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-device",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "baseRevision": 0,
                 "profiles": [
                     {
                         "enabled": True,
-                        "username": "bank:multiplayer/2k2f.ru",
-                        "server": "2k2f.ru",
+                        "username": "bank:multiplayer/example.test",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ct-file-v1\",\"nbt\":\"AAA\"}",
                         "delay": 0,
@@ -294,7 +294,7 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-device",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "baseRevision": first_push.get("revision"),
                 "profiles": [],
             },
@@ -310,7 +310,7 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-device",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "knownRevision": -1,
             },
         )
@@ -323,13 +323,13 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-force",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "baseRevision": 0,
                 "profiles": [
                     {
                         "enabled": True,
-                        "username": "bank:multiplayer/2k2f.ru",
-                        "server": "2k2f.ru",
+                        "username": "bank:multiplayer/example.test",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ct-file-v1\",\"nbt\":\"AAA\"}",
                         "delay": 0,
@@ -345,7 +345,7 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-force",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "baseRevision": first_push.get("revision"),
                 "allowEmptyOverwrite": True,
                 "profiles": [],
@@ -360,7 +360,7 @@ class TestSyncBackend(unittest.TestCase):
             {
                 "deviceId": "ct-force",
                 "module": "chest-tracker",
-                "namespace": "chest-tracker:2k2f.ru",
+                "namespace": "chest-tracker:example.test",
                 "knownRevision": -1,
             },
         )
@@ -378,7 +378,7 @@ class TestSyncBackend(unittest.TestCase):
                     {
                         "enabled": True,
                         "username": "socketlost",
-                        "server": "2k2f.ru",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "/login 12345",
                         "delay": 20,
@@ -413,7 +413,7 @@ class TestSyncBackend(unittest.TestCase):
                     {
                         "enabled": True,
                         "username": "marker-id",
-                        "server": "2k2f.ru",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ping-marker-v1\",\"createdAt\":1}",
                         "delay": 0,
@@ -467,7 +467,7 @@ class TestSyncBackend(unittest.TestCase):
                     {
                         "enabled": True,
                         "username": "marker-id",
-                        "server": "2k2f.ru",
+                        "server": "example.test",
                         "mode": "LOGIN",
                         "password": "{\"schema\":\"devils-ping-marker-v1\",\"createdAt\":1}",
                         "delay": 0,

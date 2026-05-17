@@ -288,7 +288,6 @@ jobs:
           git checkout -B "readme-sync-${RELEASE_TAG}" "origin/${default_branch}"
 
           python3 - <<'PY'
-          import glob
           import os
           import re
           import subprocess
@@ -314,7 +313,7 @@ jobs:
           addon_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-addon-{addon_version}.jar"
           game_url = f"https://github.com/ThianYong-hub/DEVILS/releases/download/{release_tag}/devils-game-{game_version}.jar"
 
-          files = [Path("README.md")] + [Path(p) for p in glob.glob("docs/i18n/*.md")]
+          files = [Path("README.md")]
           url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-addon-\d+\.\d+\.\d+\.jar")
           game_url_re = re.compile(r"https://github\.com/ThianYong-hub/DEVILS/releases/download/v\d+\.\d+\.\d+/devils-game-\d+\.\d+\.\d+\.jar")
           ver_plain_re = re.compile(r"\(v\d+\.\d+\.\d+\)")
@@ -333,6 +332,8 @@ jobs:
               text = re.sub(r"Current game build \(`\d+\.\d+\.\d+`\)", f"Current game build (`{game_version}`)", text)
               text = re.sub(r"\| Addon Version \| `\d+\.\d+\.\d+` \|", f"| Addon Version | `{addon_version}` |", text)
               text = re.sub(r"\| Game Version \| `\d+\.\d+\.\d+` \|", f"| Game Version | `{game_version}` |", text)
+              text = re.sub(r"\| `addon_version` \| `[^`]+` \|", f"| `addon_version` | `{addon_version}` |", text)
+              text = re.sub(r"\| `game_version` \| `[^`]+` \|", f"| `game_version` | `{game_version}` |", text)
             file.write_text(text, encoding="utf-8")
           PY
 
@@ -343,6 +344,6 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add README.md docs/i18n/*.md
+          git add README.md
           git commit -m "docs: sync README download link for ${RELEASE_TAG}"
           git push origin "HEAD:${default_branch}"

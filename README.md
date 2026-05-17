@@ -1,134 +1,173 @@
-# Devils Addon
+# DEVILS-ADDON
 
-An addon for [Meteor Client](https://github.com/MeteorDevelopment/meteor-client) focused on combat automation, movement control, SyncHub networking, and deep Xaero map integration.
+DEVILS-ADDON is a client-side Fabric addon for Meteor Client. It contains the main `devils-addon` module set, an optional `devils-game` companion jar, and an optional SyncHub backend for cross-client synchronization.
 
-[![Release](https://img.shields.io/github/v/release/ThianYong-hub/DEVILS?label=Release)](https://github.com/ThianYong-hub/DEVILS/releases/latest)
-[![Minecraft](https://img.shields.io/badge/Minecraft-1.21.11-31a24c)](https://github.com/ThianYong-hub/DEVILS)
-[![Java](https://img.shields.io/badge/Java-21-orange)](https://adoptium.net/)
-[![Downloads](https://img.shields.io/github/downloads/ThianYong-hub/DEVILS/total)](https://github.com/ThianYong-hub/DEVILS/releases)
-[![Stars](https://img.shields.io/github/stars/ThianYong-hub/DEVILS?style=social)](https://github.com/ThianYong-hub/DEVILS)
-[![Last Commit](https://img.shields.io/github/last-commit/ThianYong-hub/DEVILS)](https://github.com/ThianYong-hub/DEVILS/commits)
-[![Build](https://github.com/ThianYong-hub/DEVILS/actions/workflows/dev_build.yml/badge.svg)](https://github.com/ThianYong-hub/DEVILS/actions/workflows/dev_build.yml)
+It is installed into `.minecraft/mods` like a normal Fabric client mod and runs on the client.
 
-## Download
+## Artifacts
 
-- Latest release: <https://github.com/ThianYong-hub/DEVILS/releases/latest>
-- Current addon build (`0.0.57`): `build/libs/devils-addon-0.0.56.jar`
-- Current game build (`0.0.4`): `build/libs/devils-game-0.0.4.jar`
-- GitHub release links should be treated as latest published release, not as the current local workspace build.
-
-## Artifact Model
-
-- `devils-addon` is the main addon jar with combat, utility, world, SyncHub, AutoCraft, and Xaero integrations.
-- `devils-game` is a separate addon jar that contains checkers, chess, blackjack, slot machine, Doom, and dedicated game sync.
-- `devils-addon` and `devils-game` can be installed separately or together. Shared sync/config primitives live in an internal shared layer.
-
-## Verified Runtime Matrix
-
-| Item | Value |
+| Artifact | Purpose |
 | --- | --- |
-| Addon Version | `0.0.57` |
-| Game Version | `0.0.4` |
-| Minecraft | `1.21.11` |
-| Fabric Loader | `0.18.4+` |
-| Java | `21` |
-| Meteor Client | build for `1.21.11` |
-| Source-Native Assimilations | `Xaero MiniMap`, `Xaero World Map`, `XaeroPlus`, `ChestTracker Port` |
+| `devils-addon` | Main Meteor Client addon with combat, movement, utility, world automation, SyncHub, ChestTracker, and Xaero-related integrations. |
+| `devils-game` | Optional Meteor Client companion addon with game overlays and game-sync configuration. |
+| `SyncHub` | Optional standalone Python backend used by sync-aware modules. It is not required for local-only addon usage. |
 
-## Why This Addon
+Current versions are read from `gradle.properties`:
 
-- Combat and movement modules are bundled with sync-aware team tooling.
-- SyncHub supports signed requests and encrypted payload flow.
-- Xaero integration is not cosmetic: live player markers and managed waypoint pipeline are integrated into addon runtime as source-native addon code, not nested mod jars.
-- ChestTracker / WhereIsIt / Searchables / YACL are assimilated into the addon build instead of shipping as jar-in-jar payload.
-- Includes migration tooling (`mod-auto-updater`) and dedicated backend stress tests (`SyncHub/tests/sync_stress_tester.py`).
+| Property | Current Value |
+| --- | --- |
+| `addon_version` | `0.0.57` |
+| `game_version` | `0.0.4` |
+| `minecraft_version` | `1.21.11` |
+| `loader_version` | `0.18.4` |
+| `fabric_api_version` | `0.141.3+1.21.11` |
 
-## Modules
+## Requirements
 
-### Combat Modules
+- Minecraft `1.21.11`
+- Fabric Loader `0.18.4+`
+- Fabric API for `1.21.11`
+- Java `21`
+- Meteor Client build for `1.21.11`
+
+The main addon integrates source-native patches for the Xaero map ecosystem, ChestTracker, WhereIsIt, Searchables, YACL, and supporting libraries. Normal builds use Gradle-resolved inputs plus tracked patch/vendor files, so no external local source dump is required for a ZIP or git-clone build.
+
+## Installation
+
+1. Install Minecraft with Fabric Loader for the supported Minecraft version.
+2. Install Fabric API and Meteor Client for the same Minecraft version.
+3. Download `devils-addon-*.jar` from GitHub Releases, or build it from source.
+4. Optional: download `devils-game-*.jar` if you want the companion game overlays.
+5. Put the selected jars into `.minecraft/mods`.
+6. Launch Minecraft and open the Meteor GUI.
+7. Main modules appear under the `Devils` category. Companion game modules appear under `Devils-Game`.
+
+## Building From Source
+
+Linux/macOS:
+
+```bash
+./gradlew build
+```
+
+Windows:
+
+```bat
+gradlew.bat build
+```
+
+Build only one client jar:
+
+```bash
+./gradlew :devils-addon:build
+./gradlew :devils-game:build
+```
+
+Root release artifacts are collected into:
+
+```text
+build/libs/
+```
+
+Project-level artifacts are produced under:
+
+```text
+devils-addon/build/libs/
+devils-game/build/libs/
+```
+
+Note: the `devils-addon` build validates tracked source-native patch files, the vendored XaeroLib helper jar, and remapped dependency inputs before processing resources.
+
+## Main Modules
+
+### Combat
 
 | Module | Description |
 | --- | --- |
-| `auto-cev` | Places obsidian and crystals for an aggressive Cev cycle. |
-| `auto-pearl` | Tracks target and chases with pearls. Supports chat trigger `!pearl <nick>`. |
-| `tnt-bomber` | Traps target with obsidian and executes TNT bombing sequence. |
-| `lava-bucket` | Automatically places and collects lava around nearby players. |
-| `mace-spoof` | Spoofs fall-distance conditions to amplify mace damage. |
-| `spear-spoof` | Full spear FSM: targeting, movement controller, attack contour, debug pipeline. |
+| `auto-cev` | Places obsidian and crystals for a Cev cycle. |
+| `auto-pearl` | Tracks a target and chases with ender pearls. |
+| `tnt-bomber` | Builds an obsidian trap and executes a TNT bombing sequence. |
+| `lava-bucket` | Places and collects lava around nearby players. |
+| `mace-spoof` | Spoofs fall-distance conditions for mace damage logic. |
+| `spear-spoof` | Spear combat FSM with targeting, movement, attack contour, and debug pipeline. |
 
-### Movement and World Modules
-
-| Module | Description |
-| --- | --- |
-| `auto-wasp` | Elytra follow/chase with obstacle-aware routing. |
-| `anti-wasp` | Elytra evasion patterns (circle/square/triangle) with obstacle checks. |
-| `h-clip` | Fast horizontal corner clip helper. |
-| `v-clip` | Instant vertical clip by configured distance. |
-| `highway-builder-plus` | Automated Nether highway/tunnel/flat path builder with mining, placing, and task pipeline. |
-
-### Utility and Team Modules
+### Movement And World
 
 | Module | Description |
 | --- | --- |
-| `ping` | Synchronized ping markers with 2D/3D render, sound, custom icon and SyncHub bridge. |
-| `tracker-player` (`join-watcher`) | Per-player join/leave/death rules with sounds and optional delayed chat actions. |
-| `auto-login` | Auto `/login` and `/reg` by username + server profile. |
-| `stash-mover` | Two-account stash transfer loop: MOVER loots source chests, deposits into a configured loot chest, stages return pearls, and coordinates a LOADER account that clicks the trapdoor chamber. |
-| `auto-anvil-rename` | Auto-renames matching items in open anvil with filters and XP assist. |
-| `discord-rpc` | Shows Devils Addon presence in Discord Rich Presence. |
+| `auto-wasp` | Elytra follow/chase module with obstacle-aware routing. |
+| `anti-wasp` | Elytra evasion patterns with obstacle checks. |
+| `h-clip` | Horizontal corner clip helper. |
+| `v-clip` | Vertical clip by configured distance. |
+| `highway-builder-plus` | Nether highway, tunnel, and flat-path builder. |
+| `nuker-plus` | Area block breaking with filters, sorting, render, and speed-mine related settings. |
 
-### Core and Integrations
-
-| Module | Description |
-| --- | --- |
-| `sync-hub` | Shared sync settings for `auto-login`, `ping`, `chest-tracker`, `xaero-world-map`. |
-| `chest-tracker` | Integrated ChestTracker module with Devils theme, local storage and SyncHub sync. |
-| `mod-auto-updater` | One-click migration helper for `1.21.11` updates (Modrinth + GitHub lookups). |
-| `xaero-sync` | Internal runtime integration for Xaero World Map overlay and tracked players. Auto-started by `sync-hub`. |
-
-### Devils Game Companion Modules
+### Utility And Team
 
 | Module | Description |
 | --- | --- |
-| `games` | Launcher module for the companion games pack. |
-| `chess-overlay` | Floating chess window with script and SyncHub play modes. |
-| `devils-game-overlay` | Floating checkers window with script and SyncHub play modes. |
-| `blackjack-overlay` | Blackjack overlay window and session runtime. |
-| `slot-machine` | Slot machine overlay with bundled assets. |
-| `russian-roulette` | Russian roulette overlay and death-sequence runtime. |
-| `devilsdoom-overlay` | Embedded Doom runtime with bundled Freedoom assets. |
+| `auto-login` | Sends saved `/login` or `/reg` commands matched by username and multiplayer address. |
+| `auto-craft` | Slot-driven chain crafting without recipe-book placement. |
+| `auto-anvil-rename` | Automates anvil rename operations for matching items. |
+| `ping` | Sync-aware ping markers with render and sound. |
+| `tracker-player` / `join-watcher` | Per-player join, leave, death, sound, and optional chat-send rules. |
+| `stash-mover` | Two-account stash transfer loop using container automation and pearl stasis coordination. |
+| `discord-rpc` | Discord Rich Presence branding for the addon. |
+
+### Integrations
+
+| Module Or Integration | Description |
+| --- | --- |
+| `sync-hub` | Shared sync settings for AutoLogin, Ping, ChestTracker, and Xaero live map marker sync. |
+| `chest-tracker` | Integrated ChestTracker runtime with Devils theme, local storage controls, and SyncHub sync. |
+| `mod-auto-updater` | Fabric mod migration helper using Modrinth and GitHub release lookups. |
+| Xaero integration | Source-native runtime integration for Xaero Minimap, Xaero World Map, XaeroPlus, and live marker sync. |
+
+## Devils Game
+
+The optional `devils-game` jar registers the `Devils-Game` Meteor category.
+
+| Module | Description |
+| --- | --- |
+| `game-sync-hub` | Dedicated sync settings for companion game sessions and presence. |
+| `checkers` | Checkers overlay with script and game-sync modes. |
+| `chess` | Chess overlay with script and game-sync modes. |
+| `slot-machine` | Slot machine overlay. |
+| `blackjack` | Blackjack overlay. |
+| `russian-roulette` | Russian roulette overlay. |
+| `doom` | Doom launcher using bundled runtime assets. |
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
-| `.autoraname setname <text>` | Set target rename text for `auto-anvil-rename`. |
-| `.autoraname clearitems` | Clear item filter list for `auto-anvil-rename`. |
-| `.stashmover pearlchest` | Save the chest that contains ender pearls. Look at the pearl chest and run this on the MOVER account. |
-| `.stashmover lootchest` | Save the destination loot chest. This is where stolen shulkers/items are deposited, not a source chest to loot from. |
-| `.stashmover water` | Save the water block used for the pearl chamber. Stand in the water/lunka and run this. |
-| `.stashmover chamber` | Save the trapdoor/chamber hit point. Look at the trapdoor or intended chamber interaction point and run this. |
-| `.stashmover pearltarget` | Save the precise pearl aim/entry point. Look at the exact point where the pearl should enter/settle and run this. |
-| `.stashmover status` | Print saved positions and runtime state. Useful before starting a long run. |
-| `.stashmover clear <target>` | Clear one saved target: `pearlchest`, `lootchest`, `water`, `chamber`, or `pearltarget`. |
-| `.example` | Internal example command. |
+| `.autoraname setname <text>` | Set the target rename text for `auto-anvil-rename`. |
+| `.autoraname clearitems` | Clear the `auto-anvil-rename` item filter list. |
+| `.session <nick> [password]` | Switch to a cracked Meteor account, optionally save an AutoLogin password for the current address, and reconnect when possible. |
+| `.stashmover pearlchest` | Save the return-pearl supply chest from the crosshair target. |
+| `.stashmover lootchest` | Save the destination chest where moved resources are deposited. |
+| `.stashmover water` | Save the water block used by the pearl chamber from the player's current position. |
+| `.stashmover chamber` | Save the chamber/trapdoor interaction point from the crosshair target. |
+| `.stashmover pearltarget` | Save the precise pearl aim point from the crosshair target. |
+| `.stashmover status` | Print saved StashMover positions and runtime state. |
+| `.stashmover clear <target>` | Clear one saved StashMover target: `pearlchest`, `lootchest`, `water`, `chamber`, or `pearltarget`. |
 
-## StashMover Quick Start
+## StashMover
 
-`stash-mover` is built around two accounts:
+`stash-mover` is designed for a two-account workflow:
 
-- `MOVER`: loots source stash chests, deposits shulkers/items into the configured `loot-chest`, takes one return pearl from `pearl-chest`, throws it into the chamber/water, returns any leftover Replenish pearls to `pearl-chest`, then sends the configured return command, usually `/kill`.
-- `LOADER`: stands beside the pearl chamber and clicks the trapdoor after receiving the MOVER message. The LOADER does not loot chests.
+- `MOVER` loots source containers, deposits resources into the configured loot chest, stages the next return pearl, and uses the configured return command.
+- `LOADER` stays near the pearl chamber and clicks/loads the chamber when the MOVER message is received.
 
-Required setup:
+Required saved positions:
 
-1. Put the LOADER account at the loader station near the trapdoor. It should stand near the water/chamber, not inside the water unless your build requires it.
-2. Put the MOVER account at the stash/source station with access to source chests and a bed/respawn route back to the source station.
-3. Fill the pearl chest with ender pearls. This chest is only for return pearls.
-4. Set the destination loot chest. This chest receives resources from source chests. It is not a source chest.
-5. Make sure the chamber/trapdoor path is clear enough that the thrown pearl can enter the water/stasis area.
+- `pearlchest`: chest containing ender pearls used for return staging.
+- `lootchest`: destination chest where moved resources are deposited.
+- `water`: water block for the pearl chamber.
+- `chamber`: trapdoor or chamber interaction point.
+- `pearltarget`: optional precise pearl entry/settle point.
 
-Recommended MOVER commands:
+Recommended setup commands on the MOVER account:
 
 ```text
 .stashmover pearlchest
@@ -139,190 +178,55 @@ Recommended MOVER commands:
 .stashmover status
 ```
 
-Capture notes:
-
-- Run `.stashmover pearlchest` while looking at the chest with ender pearls.
-- Run `.stashmover lootchest` while looking at the destination chest where resources must be deposited.
-- Run `.stashmover water` while the player is standing in the exact water block used by the pearl chamber.
-- Run `.stashmover chamber` while looking at the trapdoor/chamber click point.
-- Run `.stashmover pearltarget` while looking at the exact pearl entry/settle point. This is optional but recommended for precise builds.
-
-Recommended module settings:
-
-| Setting | MOVER | LOADER | Notes |
-| --- | --- | --- | --- |
-| `mode` | `MOVER` | `LOADER` | Each account must use the correct role. |
-| `partner-name` | LOADER nick | MOVER nick | Must match the other account's current in-game name. |
-| `load-message` | same text | same text | Both accounts must use the same coordination message. |
-| `return-command` | `kill` | unused | MOVER sends this after staging the next return pearl. |
-| `use-ender-chest` | optional | unused | Uses nearby ender chest as an overflow/buffer if enabled. |
-| `ignore-single-chest` | usually `true` | unused | Keeps source scanning focused on double chests. |
-| `only-shulkers` | optional | unused | Enable if only shulker boxes should be moved. |
-| `stall-timeout-ticks` | tune if needed | unused | Higher values wait longer before recovery. |
-| `debug-logging` | optional | optional | Writes detailed StashMover runtime events to logs/chat. |
-
-Runtime cycle:
-
-1. MOVER loots eligible source chests found by scan distance and filters.
-2. MOVER travels to `loot-chest` and deposits carried items.
-3. When inventory is empty, MOVER loads one return pearl from `pearl-chest`.
-4. MOVER throws the return pearl into the configured chamber/water target.
-5. If another module such as Replenish topped ender pearls back up to a stack, MOVER puts the leftover pearls back into `pearl-chest`.
-6. MOVER immediately sends the return command, normally `/kill`, so it does not stand near and load its own return pearl.
-7. MOVER respawns, scans for source chests again, and repeats.
-8. LOADER responds to the coordination message by clicking/loading the chamber trapdoor when the staged pearl is present.
-
 Important behavior:
 
-- The first test pearl can be manually staged by the player/build, but after the loop starts the MOVER is expected to throw subsequent return pearls itself.
-- `loot-chest` means destination chest. Do not use it as a resource/source chest.
-- `pearl-chest` means return pearl supply chest. It should contain ender pearls and enough free space to receive leftover pearls if Replenish is enabled.
-- If Replenish is enabled and refills the MOVER to 16 pearls after taking one, StashMover returns those extra pearls to `pearl-chest` after the throw, before `/kill`.
-- If the pearl chest is full, the MOVER will not discard leftover pearls; it waits/logs instead.
-- Live servers remain authoritative. Anti-cheat, chunk loading, death/pearl rules, server-side pearl-on-death behavior, and mob/player displacement can still affect results.
+- `lootchest` is deposit-only. It is not a source chest.
+- Source chests are selected dynamically by scan distance and filters.
+- If `only-shulkers` is enabled, non-shulker contents are ignored for source-looting decisions.
+- If another module refills ender pearls after taking one pearl, StashMover returns leftover pearls to `pearlchest` before sending the return command.
+- Public multiplayer environments remain authoritative for death, pearl, chunk-loading, anti-cheat, and movement behavior. Test the setup in the target environment before leaving it unattended.
 
-## SyncHub Backend Quick Start (For Regular Users)
+## SyncHub Backend
 
-This is the shortest path to run your own SyncHub backend on a home PC, VPS, or dedicated server.
+SyncHub is an optional Python backend used by sync-aware modules. It supports bearer auth, request signing, E2E payload enforcement, long-poll/stream sync routes, admin diagnostics, and Docker Compose deployment.
 
-### 1) Requirements
-
-- Docker + Docker Compose plugin installed
-- Open TCP port (default `7878`) on the host firewall/provider firewall
-
-### 2) Prepare Environment File
+Create a private environment file from the safe template:
 
 ```bash
 cd SyncHub
 cp .env.example .env
 ```
 
-Generate secrets and paste values into `.env`:
+Generate your own secrets:
 
 ```bash
 python -c "import secrets; print('SYNC_AUTH_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_REQUEST_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_E2E_SECRET=' + secrets.token_urlsafe(48))"
 ```
 
-Important:
-- `SYNC_E2E_SECRET` is client-side only. Do not add it to backend `.env`.
-- Keep `SYNC_REQUIRE_REQUEST_SIGNING=true` and `SYNC_REQUIRE_E2E=true` unless this is a throwaway local test server.
-
-### 3) Start Backend
-
-```bash
-cd SyncHub
-docker compose up -d --build
-docker compose ps
-```
-
-Health check:
-
-```text
-GET http://<SERVER_IP>:7878/health
-```
-
-### 4) Configure Meteor `sync-hub` Module
-
-| Setting | Value |
-| --- | --- |
-| `base-url` | `http://<SERVER_IP>:7878` or `https://<DOMAIN>` |
-| `auth-token` | `SYNC_AUTH_TOKEN` |
-| `transport-signing-key` | `SYNC_REQUEST_SIGNING_KEY` |
-| `e2e-secret` | your generated `SYNC_E2E_SECRET` |
-| `allow-http` | `true` only for plain HTTP, `false` for HTTPS |
-
-### 5) Deploy On Your Own Server (VPS / Dedicated)
-
-```bash
-git clone https://github.com/ThianYong-hub/DEVILS.git
-cd DEVILS/SyncHub
-cp .env.example .env
-# edit .env with your real tokens
-docker compose up -d --build
-```
-
-After deploy:
-- allow inbound TCP `7878` or put service behind reverse proxy on `443`
-- keep `.env` private
-- rotate tokens immediately if they were exposed
-
-## SyncHub Setup (Exact Values)
-
-### 1) Generate Secrets
-
-Generate three role-specific values:
-- `SYNC_AUTH_TOKEN`: bearer auth credential
-- `SYNC_REQUEST_SIGNING_KEY`: HMAC key for signed transport requests
-- `SYNC_E2E_SECRET`: client-only E2E payload secret
-
-```bash
-python -c "import secrets; print('SYNC_AUTH_TOKEN=' + secrets.token_urlsafe(32)); print('SYNC_REQUEST_SIGNING_KEY=' + secrets.token_urlsafe(48)); print('SYNC_E2E_SECRET=' + secrets.token_urlsafe(48))"
-```
-
-### 2) Backend `.env` (SyncHub)
+Backend `.env` should contain backend values such as:
 
 ```env
-# Required
 SYNC_AUTH_TOKEN=replace_me
 SYNC_REQUEST_SIGNING_KEY=replace_me
 SYNC_REQUIRE_REQUEST_SIGNING=true
 SYNC_REQUIRE_E2E=true
-
-# Transport / storage
 SYNC_HOST=0.0.0.0
 SYNC_PORT=7878
-SYNC_STATE_FILE=/data/sync-hub-state.json
-SYNC_NAMESPACES_DIR=/data/modules
-
-# Optional HTTP behavior / limits
-SYNC_ALLOW_CORS=false
-SYNC_PULL_WAIT_MAX_MS=25000
-SYNC_MAX_BODY_BYTES=1048576
-
-# Optional admin token
-SYNC_ADMIN_AUTH_TOKEN=
-
-# Optional HTTPS
-SYNC_TLS_CERT_FILE=
-SYNC_TLS_KEY_FILE=
-SYNC_TLS_MIN_VERSION=TLSv1_3
 ```
 
-Compatibility:
-- backend still accepts legacy `SYNC_TOKEN`, `SYNC_ADMIN_TOKEN`, `SYNC_SIGNING_KEY`, `SYNC_REQUIRE_SIGNED`, `SYNC_REQUIRE_ENCRYPTED`
-- backend does not use `SYNC_E2E_SECRET`; that secret stays client-side
-- legacy backend aliases are deprecated-but-supported during the migration window; preferred names stay authoritative
-
-### 3) Client `sync-hub` Settings (Meteor)
-
-| Setting | Value |
-| --- | --- |
-| `base-url` | `https://your-domain` or `http://IP:PORT` |
-| `auth-token` | `SYNC_AUTH_TOKEN` or legacy `SYNC_TOKEN` |
-| `transport-signing-key` | `SYNC_REQUEST_SIGNING_KEY` or legacy `SYNC_SIGNING_KEY` |
-| `e2e-secret` | `SYNC_E2E_SECRET` or legacy `SYNC_ENCRYPTION_KEY` |
-| `allow-http` | `false` for HTTPS, `true` only for plain HTTP |
-| `use-stream` | `true` (recommended) |
-
-Important:
-- Do not use bare `144.31.167.88:25570` as `base-url`.
-- Correct form is `http://144.31.167.88:25570` (or `https://...` when TLS is configured).
-- `auth-token` is auth only; do not reuse it as crypto material.
-- `transport-signing-key` protects request integrity and replay resistance.
-- `e2e-secret` encrypts payloads before they leave the client; backend never needs it.
+`SYNC_E2E_SECRET` is client-side only. Put it into the Meteor `sync-hub` / `game-sync-hub` setting named `e2e-secret`; do not add it to backend `.env`.
 
 Resolve order and migration behavior:
-- preferred names win over legacy aliases
-- if only a legacy client field exists, Devils migrates it to the preferred name for the current session and warns once
-- if preferred and legacy client fields both exist with different values, the preferred value wins and Devils warns once
-- if `auth-token` is empty, sync only works against a backend that allows anonymous requests
-- if `transport-signing-key` is empty, sync only works against a backend with request signing disabled
-- if `e2e-secret` is empty, encrypted sync modules stay blocked until it is filled
 
-### 4) Run Backend via Docker
+- preferred names win over legacy aliases
+- legacy aliases are still accepted during the compatibility window
+- `auth-token` is authentication material only; do not reuse it as an encryption key
+- `e2e-secret` encrypts payloads before they leave the client; the backend does not need the raw value
+- If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers built from `SYNC_REQUEST_SIGNING_KEY`
+
+Run the backend:
 
 ```bash
-cd SyncHub
 docker compose up -d --build
 ```
 
@@ -332,146 +236,84 @@ Health endpoint:
 GET /health
 ```
 
-Admin-only config diagnostics:
+Admin diagnostics endpoint:
 
 ```text
 GET /v1/admin/config
 ```
 
-Use `Authorization: Bearer <SYNC_ADMIN_AUTH_TOKEN>` or, if no dedicated admin token is configured, `Authorization: Bearer <SYNC_AUTH_TOKEN>`.
-If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers built from `SYNC_REQUEST_SIGNING_KEY`.
+Admin routes require the configured auth token and, when request signing is enabled, the `X-Devils-*` signing headers.
 
-This endpoint reports config mode, deprecated alias usage, and active auth/signing/E2E policy without exposing secret values.
+## SyncHub Stress Tester
 
-## SyncHub Stress Tester (2 Modes)
+Script:
 
-Script: `SyncHub/tests/sync_stress_tester.py`
+```text
+SyncHub/tests/sync_stress_tester.py
+```
 
-Preferred flags:
-- `--auth-token`
-- `--request-signing-key`
-- `--e2e-secret`
+Common flags:
 
-Deprecated compatibility flags:
-- `--token`
-- `--signing-key`
-- `--encryption-key`
+```text
+--base-url
+--module
+--server-key
+--mode random|elytra48
+--duration-sec
+--clients
+--push-interval-ms
+--pull-interval-ms
+--auth-token
+--request-signing-key
+--e2e-secret
+--output-json
+```
 
-### Mode 1: Random Traffic (2 minutes)
+Example:
 
 ```bash
 python SyncHub/tests/sync_stress_tester.py \
   --base-url http://127.0.0.1:7878 \
   --module xaero-world-map \
+  --server-key example.test:25565 \
   --duration-sec 120 \
   --mode random \
   --clients 2 \
-  --push-interval-ms 50 \
-  --pull-interval-ms 50 \
   --auth-token "$SYNC_AUTH_TOKEN" \
   --request-signing-key "$SYNC_REQUEST_SIGNING_KEY" \
   --e2e-secret "$SYNC_E2E_SECRET"
 ```
 
-### Mode 2: Elytra48 (48 blocks/sec)
+## Security
 
-```bash
-python SyncHub/tests/sync_stress_tester.py \
-  --base-url http://127.0.0.1:7878 \
-  --module xaero-world-map \
-  --duration-sec 120 \
-  --mode elytra48 \
-  --elytra-speed-bps 48 \
-  --clients 2 \
-  --push-interval-ms 50 \
-  --pull-interval-ms 50 \
-  --auth-token "$SYNC_AUTH_TOKEN" \
-  --request-signing-key "$SYNC_REQUEST_SIGNING_KEY" \
-  --e2e-secret "$SYNC_E2E_SECRET"
-```
-
-Optional report output:
-
-```bash
---output-json SyncHub/tests/last-summary.json
-```
-
-## Installation
-
-1. Install Minecraft + Fabric + Fabric API for `1.21.11`.
-2. Install Meteor Client for `1.21.11`.
-3. Download `devils-addon-*.jar` from releases.
-4. Optional: download `devils-game-*.jar` if you want the games companion pack.
-5. Put the selected jars into `.minecraft/mods`.
-6. Launch game and open `Devils` and, when installed, `Devils-Game` categories in Meteor.
-
-## Build From Source
-
-```bash
-git clone https://github.com/ThianYong-hub/DEVILS.git
-cd DEVILS
-./gradlew build
-```
-
-Windows:
-
-```bat
-gradlew.bat build
-```
-
-Run tests:
-
-```bash
-./gradlew test
-```
-
-Build only the main addon:
-
-```bash
-./gradlew :devils-addon:build
-```
-
-Build only the game companion:
-
-```bash
-./gradlew :devils-game:build
-```
-
-## Release Notes (`v0.0.56`)
-
-- documented StashMover commands, two-account setup, MOVER/LOADER settings, runtime cycle, and pearl/loot chest semantics
-- fixed StashMover return-pearl cycle when Meteor Replenish refills ender pearls after taking one pearl from the pearl chest
-- changed `/kill` return handling to proceed after the thrown return pearl is launched instead of waiting for a long stasis-ready condition near the player
-- preserves the destination `loot-chest` as deposit-only and returns leftover Replenish pearls to `pearl-chest` before `/kill`
-
-## Release Notes (`v0.0.55`)
-
-- removed the invalid StashMover source-station abstraction from the release flow; source chests remain dynamically selected after respawn
-- fixed StashMover destination handling so the configured loot chest stays deposit-only and is not auto-switched to a source chest when full
-- fixed the live runtime harness so user-world recovery preserves `level.dat_old` and does not reopen the world while it is loading
-- confirmed a two-client realistic live run in the user world with real loader clicks, real `/kill` death/respawn, disturbance injection, and `20/20` successful transfers
-- added strict runtime logging/harnesses for StashMover, Input, and AutoWasp validation work
-- improved AutoLogin account actions and active-account highlighting behavior
-- cleaned generated Minecraft runtime folders and expanded ignore rules for local client state
+- Do not commit `.env`, local Meteor config, Minecraft logs, crash reports, runtime saves, cookies, sessions, or database/state files.
+- Never commit or share SyncHub auth tokens, admin tokens, request signing keys, or E2E secrets.
+- Do not reuse `auth-token` as an encryption secret.
+- Use `.env.example` only as a template.
+- Keep production SyncHub configuration private.
+- Rotate any secret that was copied into a public issue, log, screenshot, or commit.
+- AutoLogin and `.session` can store account credentials locally; keep local addon config folders private.
 
 ## Repository Structure
 
-- `devils-addon/` - main addon sources, tests, fabric metadata, and source-native assimilated integrations.
-- `devils-game/` - companion games addon sources, assets, and fabric metadata.
-- `devils-addon/src/main/java/com/example/addon/modules` - public module entrypoints for the main addon.
-- `devils-game/src/main/java/com/example/addon/modules/games` - game overlays, sessions, windows, and launcher runtime.
-- `devils-addon/src/main/java/com/example/addon/util/xaerosync` - waypoint and tracked-player integration helpers.
-- `SyncHub/` - standalone sync backend (`sync_backend.py`, Docker files, tests).
-- `SyncHub/tests/sync_stress_tester.py` - load and propagation test harness.
+| Path | Purpose |
+| --- | --- |
+| `devils-addon/` | Main Fabric/Meteor addon source, resources, tests, and source-native integration code. |
+| `devils-game/` | Optional companion Fabric/Meteor addon for game overlays. |
+| `devils-shared/` | Shared Java code used by both addon jars. |
+| `SyncHub/` | Optional Python sync backend, Docker files, and backend tests. |
+| `chesttracker-port/` | Source basis for ChestTracker-related integration work. |
+| `tools/` | Local build helper artifacts that are explicitly allowed by `.gitignore`. |
+| `.github/workflows/` | CI, release, and README-version automation. |
 
-## Credits
+## Credits And Notices
 
-- [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
-- [Xaero's Minimap](https://www.curseforge.com/minecraft/mc-mods/xaeros-minimap)
-- [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map)
-- [XaeroPlus](https://github.com/rfresh2/XaeroPlus)
-- [ChestTracker](https://modrinth.com/mod/chest-tracker)
+This project builds on Meteor Client, Fabric, Fabric API, Xaero Minimap, Xaero World Map, XaeroPlus, ChestTracker, WhereIsIt, Searchables, YACL, JackFredLib, and other libraries listed in Gradle metadata and generated third-party notices.
+
+Bundled game/audio assets include their own notice files under the relevant resource directories, including Freedoom/Doom runtime notices and sound library notices. Keep those notices with redistributed builds.
 
 ## License
 
-Project license: [GPL-3.0](LICENSE).
+The root project license is GPL-3.0. See [LICENSE](LICENSE).
+
+Bundled and source-native third-party components remain subject to their own upstream license terms and notices.

@@ -60,7 +60,7 @@ val sourceNativeModDependencies = listOf(
     "maven.modrinth:xaeroplus:$xaeroPlusVersion"
 )
 val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
-val sourceNativeBuildRoot = rootProject.file("Souce 1.21.11/Source Native Build")
+val sourceNativeBuildRoot = rootProject.file("local-source-native/Source Native Build")
 val sourceNativeModuleDirs = listOf(
     "chesttracker-port-embedded",
     "searchables-fabric",
@@ -512,14 +512,14 @@ tasks {
         fun firstExisting(vararg candidates: File): File? = candidates.firstOrNull { it.isFile }
 
         val chestTrackerLicense = firstExisting(
-            rootProject.file("Souce 1.21.11/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
+            rootProject.file("local-source-native/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
             sourceNativeBuildRoot.resolve("chesttracker-port-embedded/LICENSE_devils-addon-chesttracker"),
             sourceNativeBuildRoot.resolve("jackfredlib/LICENSE_jackfredlib")
         )
         val whereIsItLicense = firstExisting(sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null"))
         val xaeroHudNotice = firstExisting(sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud"))
         val xaeroPlusLicense = firstExisting(
-            rootProject.file("Souce 1.21.11/Source Github/XaeroPlus-2.30.9/LICENSE"),
+            rootProject.file("local-source-native/Source Github/XaeroPlus-2.30.9/LICENSE"),
             sourceNativeBuildRoot.resolve("xaeroplus-fabric/LICENSE")
         )
         val sqliteLicense = firstExisting(sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE"))
@@ -555,7 +555,7 @@ tasks {
             val searchablesMitNotice = """
                 Searchables is declared as MIT-licensed in the local source metadata.
                 Source metadata path:
-                - Souce 1.21.11/Source Native Build/searchables-fabric/fabric.mod.json
+                - local-source-native/Source Native Build/searchables-fabric/fabric.mod.json
 
                 The local source snapshot used for this build does not include a separate upstream LICENSE file,
                 so this consolidated notice keeps the declared license identifier and source path.
@@ -564,7 +564,7 @@ tasks {
             val yaclLgplNotice = """
                 YetAnotherConfigLib is declared as LGPL-3.0-or-later in the local source metadata.
                 Source metadata path:
-                - Souce 1.21.11/Source Native Build/yet-another-config-lib/fabric.mod.json
+                - local-source-native/Source Native Build/yet-another-config-lib/fabric.mod.json
 
                 The local source snapshot used for this build does not include a separate standalone license text,
                 so the LGPL-3.0 text bundled below for the JackFred/ChestTracker/WhereIsIt family also covers this component.
@@ -575,9 +575,9 @@ tasks {
                 in the local source metadata used for this build.
 
                 Metadata paths:
-                - Souce 1.21.11/Source Native Build/xaerolib-fabric/fabric.mod.json
-                - Souce 1.21.11/Source Native Build/xaeros-minimap-fabric/fabric.mod.json
-                - Souce 1.21.11/Source Native Build/xaeros-world-map-fabric/fabric.mod.json
+                - local-source-native/Source Native Build/xaerolib-fabric/fabric.mod.json
+                - local-source-native/Source Native Build/xaeros-minimap-fabric/fabric.mod.json
+                - local-source-native/Source Native Build/xaeros-world-map-fabric/fabric.mod.json
 
                 Bundled notice text:
                 ${readOrNotice(xaeroHudNotice, "Xaero notice unavailable in clean checkout", "The source-native Xaero notice file was not present; upstream metadata marks the bundled Xaero components as All Rights Reserved.")}
@@ -605,7 +605,7 @@ tasks {
                                 XaeroPlus is declared as MIT-licensed in the local source metadata used for this build.
 
                                 Metadata path:
-                                - Souce 1.21.11/Source Native Build/xaeroplus-fabric/fabric.mod.json
+                                - local-source-native/Source Native Build/xaeroplus-fabric/fabric.mod.json
 
                                 The local source snapshot used for this build does not include a separate standalone upstream LICENSE file,
                                 so this consolidated notice keeps the declared license identifier and source path.

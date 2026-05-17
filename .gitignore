@@ -1,4 +1,4 @@
-# gradle
+# Gradle / Java
 
 .gradle/
 .gradle-codex/
@@ -7,37 +7,96 @@ build/
 libs/
 out/
 classes/
+*.class
 
-# eclipse
+# IDE
 
 *.launch
-
-
-logs/
-codex log/
-
-# idea
-
 .idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
-
-# vscode
-
 .settings/
-.vscode/
 bin/
 .classpath
 .project
 
-# macos
+# OS
 
 *.DS_Store
+Thumbs.db
 
-# fabric
+# Secrets and private runtime credentials
+.env
+.env.*
+!.env.example
+!SyncHub/.env.example
+*.key
+*.pem
+*.p12
+*.jks
+secrets.*
+credentials.*
+tokens.*
+session.dat
+session/
+sessions/
+*.session
+*.sessions
+cookies/
+cookies.txt
+*.cookie
+*.cookies
+
+# Logs, dumps and temporary output
+*.log
+logs/
+codex log/
+crash-reports/
+*.dump
+*.sql
+*.sqlite
+*.db
+tmp/
+temp/
+cache/
+*.bak
+*.backup
+
+# Python / SyncHub local state
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Docker local state
+/data/
+docker-data/
+
+# Fabric / Minecraft local runtime
 
 run/
+/server/
+/world/
+/world_nether/
+/world_the_end/
+/.minecraft/
+/mods/
+/config/
+/screenshots/
+/resourcepacks/
+/shaderpacks/
+/options.txt
+/servers.dat
+/servers.dat_old
+/usercache.json
+/banned-ips.json
+/banned-players.json
+/ops.json
+/whitelist.json
 src/test/*
 !src/test/java/
 !src/test/java/**
@@ -55,6 +114,7 @@ embedded-libs/
 # local server sources and reverse-engineering workdirs
 Folia-ver-1.21.8/
 NoCheatPlus/
+local-source-native/
 Source/
 Source 1.21.11/
 Source 1.21.11/decompiled/

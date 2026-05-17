@@ -745,7 +745,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Devils SyncHub stress tester")
     parser.add_argument("--base-url", default="http://127.0.0.1:7878", help="SyncHub base URL")
     parser.add_argument("--module", default="xaero-world-map", help="Namespace module")
-    parser.add_argument("--server-key", default="144.31.167.88:25570", help="Server key used in presence profile")
+    parser.add_argument("--server-key", default="example.test:25565", help="Server key used in presence profile")
     parser.add_argument("--mode", choices=["random", "elytra48"], default="random", help="Traffic profile mode")
     parser.add_argument("--elytra-speed-bps", type=float, default=48.0, help="Elytra speed in blocks/sec for elytra48 mode")
     parser.add_argument("--duration-sec", type=float, default=120.0, help="Test duration in seconds")
