@@ -194,10 +194,6 @@ public class PathfinderHandler {
         }
     }
 
-    /**
-     * Returns true if there are non-deferred, movement-blocking tasks still pending.
-     * While this returns true the player stays put and works, instead of advancing.
-     */
     private boolean hasActionableWork() {
         for (BlockTask task : module.taskManager.getTasks().values()) {
             if (!isMovementBlockingState(task.taskState)) continue;

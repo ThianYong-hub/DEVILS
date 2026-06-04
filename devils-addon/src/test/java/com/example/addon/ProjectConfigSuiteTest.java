@@ -1,10 +1,12 @@
 package com.example.addon;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Set;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -143,10 +145,11 @@ class ProjectConfigSuiteTest {
         assertTrue(readme.contains("SYNC_E2E_SECRET"));
         assertTrue(readme.contains("Resolve order and migration behavior:"));
         assertTrue(readme.contains("preferred names win over legacy aliases"));
+        assertTrue(readme.contains("simple encryption so admins cant sniff coords"));
         assertTrue(readme.contains("If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers"));
 
-        assertTrue(envExample.contains("Required auth + transport signing"));
-        assertTrue(envExample.contains("Compatibility window only. Prefer the names above."));
+        assertTrue(envExample.contains("basic auth + signing"));
+        assertTrue(envExample.contains("old names still work, but dont use them in new configs"));
         assertTrue(envExample.contains("SYNC_ADMIN_AUTH_TOKEN"));
         assertTrue(envExample.contains("SYNC_E2E_SECRET=replace_me"));
 
@@ -161,11 +164,27 @@ class ProjectConfigSuiteTest {
     }
 
     @Test
-    void codexArtifactIndexListsCanonicalEvidenceSet() throws IOException {
-        Path artifactDir = Path.of("..", "codex log").normalize();
+    void embeddedGuiIconsKeepTransparentBackgrounds() throws IOException {
+        assertIconHasTransparentBackground(Path.of("src", "main", "resources", "assets", "devils-addon", "textures", "gui", "devils_ping_icon_white.png"));
+        assertIconHasTransparentBackground(Path.of("src", "main", "resources", "assets", "devils-addon", "textures", "gui", "devils_map_icon.png"));
+
+        String mapIconManager = readRepoFile("devils-addon", "src", "main", "java", "com", "example", "addon", "util", "MapIconManager.java");
+        String pingConstants = readRepoFile("devils-addon", "src", "main", "java", "com", "example", "addon", "modules", "ping", "PingConstants.java");
+        String xaeroConstants = readRepoFile("devils-addon", "src", "main", "java", "com", "example", "addon", "modules", "xaerosync", "XaeroSyncConstants.java");
+
+        assertTrue(mapIconManager.contains("DEFAULT_PING_ICON_PATH"));
+        assertTrue(mapIconManager.contains("DEFAULT_MAP_ICON_PATH"));
+        assertTrue(pingConstants.contains("MapIconManager.DEFAULT_PING_ICON_PATH"));
+        assertTrue(xaeroConstants.contains("MapIconManager.DEFAULT_MAP_ICON_PATH"));
+        assertTrue(xaeroConstants.contains("textures/gui/devils_map_icon.png"));
+    }
+
+    @Test
+    void debugArtifactIndexListsCanonicalEvidenceSet() throws IOException {
+        Path artifactDir = Path.of("..", "devils debug log").normalize();
         assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
         Path indexPath = artifactDir.resolve("ARTIFACT_INDEX.md");
-        assertTrue(Files.exists(indexPath), "codex log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
+        assertTrue(Files.exists(indexPath), "debug log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
         String index = Files.readString(indexPath);
 
         assertTrue(index.contains("STASHMOVER_MIGRATION_AUDIT.md"));
@@ -210,8 +229,8 @@ class ProjectConfigSuiteTest {
     }
 
     @Test
-    void codexLogDirectoryRemainsSmallAndWhitelistedWhenPresent() throws IOException {
-        Path artifactDir = Path.of("..", "codex log").normalize();
+    void debugLogDirectoryRemainsSmallAndWhitelistedWhenPresent() throws IOException {
+        Path artifactDir = Path.of("..", "devils debug log").normalize();
         assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
 
         List<String> files;
@@ -270,9 +289,9 @@ class ProjectConfigSuiteTest {
             "FINAL_RUNTIME_REPORT.md"
         );
 
-        assertTrue(files.size() <= 32, "codex log must stay small and canonical: " + files);
+        assertTrue(files.size() <= 32, "debug log must stay small and canonical: " + files);
         for (String file : files) {
-            assertTrue(allowed.contains(file), "Unexpected file in codex log: " + file);
+            assertTrue(allowed.contains(file), "Unexpected file in debug log: " + file);
         }
         assertFalse(
             files.stream().anyMatch(name -> name.endsWith(".log") && !Set.of(
@@ -287,9 +306,9 @@ class ProjectConfigSuiteTest {
                 "autowasp-runtime.log",
                 "stashmover-runtime.log"
             ).contains(name)),
-            "Only canonical raw logs may remain in codex log: " + files
+            "Only canonical raw logs may remain in debug log: " + files
         );
-        assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when codex log contains artifacts.");
+        assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when debug log contains artifacts.");
     }
 
     @Test
@@ -311,6 +330,8 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("name: Build Pull Request Artifacts"));
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
+        assertTrue(workflow.contains("Check addon jar contents"));
+        assertTrue(workflow.contains("META-INF/devils-addon/mixins/chesttracker.mixins.json"));
         assertTrue(workflow.contains("name: Upload Artifact"));
         assertFalse(workflow.contains("softprops/action-gh-release"));
     }
@@ -321,6 +342,8 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("name: Publish Development Build"));
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
+        assertTrue(workflow.contains("Check addon jar contents"));
+        assertTrue(workflow.contains("META-INF/devils-addon/mixins/chesttracker.mixins.json"));
         assertTrue(workflow.contains("branches-ignore:"));
         assertTrue(workflow.contains("- main"));
         assertTrue(workflow.contains("tags-ignore:"));
@@ -389,5 +412,35 @@ class ProjectConfigSuiteTest {
         Path path = Path.of("src", "main", "java");
         for (String part : parts) path = path.resolve(part);
         return path;
+    }
+
+    private static void assertIconHasTransparentBackground(Path path) throws IOException {
+        assertTrue(Files.exists(path), "Missing icon: " + path);
+        BufferedImage image = ImageIO.read(path.toFile());
+        assertTrue(image != null, "Unreadable icon: " + path);
+
+        int transparent = 0;
+        int opaque = 0;
+        int opaqueBlack = 0;
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                int argb = image.getRGB(x, y);
+                int alpha = (argb >>> 24) & 0xFF;
+                if (alpha == 0) {
+                    transparent++;
+                    continue;
+                }
+
+                opaque++;
+                int red = (argb >>> 16) & 0xFF;
+                int green = (argb >>> 8) & 0xFF;
+                int blue = argb & 0xFF;
+                if (red <= 8 && green <= 8 && blue <= 8) opaqueBlack++;
+            }
+        }
+
+        assertTrue(transparent > 0, "Icon background is not transparent: " + path);
+        assertTrue(opaque > 0, "Icon has no visible pixels: " + path);
+        assertTrue(opaqueBlack == 0, "Icon still has opaque black pixels: " + path + " count=" + opaqueBlack);
     }
 }

@@ -84,14 +84,14 @@ def filtered_log(lines: list[str]) -> list[str]:
     interesting = []
     for line in lines:
         if (
-            "Devils sync hub backend started" in line
-            or "listen         :" in line
-            or "auth-token     :" in line
-            or "admin-auth     :" in line
-            or "require-e2e    :" in line
-            or "require-signed :" in line
-            or "config-mode    :" in line
-            or "deprecation    :" in line
+            "SyncHub up" in line
+            or "url:" in line
+            or "auth:" in line
+            or "admin-auth:" in line
+            or "e2e-required:" in line
+            or "signing:" in line
+            or "config-mode:" in line
+            or "old-env:" in line
             or "/v1/admin/config" in line
         ):
             interesting.append(line)

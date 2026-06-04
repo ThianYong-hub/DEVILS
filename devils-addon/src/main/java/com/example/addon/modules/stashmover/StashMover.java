@@ -196,6 +196,7 @@ public class StashMover extends StashMoverRuntime {
 
         if (ownPearlTracker.onEntityRemoved(event.entity.getId()) == StashMoverOwnPearlTracker.RemovalOutcome.TRACKED_REMOVED
             && shouldResetOnTrackedPearlRemoval()) {
+            // hack: some servers remove the pearl entity before our stasis state catches up.
             if (event.entity instanceof EnderPearlEntity pearl && shouldTreatTrackedPearlRemovalAsReady(pearl)) {
                 acceptTrackedPearlRemovalAsReady(pearl);
                 return;

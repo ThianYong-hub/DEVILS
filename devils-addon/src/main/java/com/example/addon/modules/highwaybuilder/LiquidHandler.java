@@ -23,10 +23,6 @@ public class LiquidHandler {
         this.module = module;
     }
 
-    /**
-     * Checks for liquid blocks adjacent to a break task and schedules only one best liquid
-     * mitigation task (source-first, then closest threat to the player).
-     */
     public boolean handleLiquid(BlockTask blockTask) {
         if (mc.world == null || mc.player == null || module.taskManager == null) return false;
 
@@ -40,10 +36,6 @@ public class LiquidHandler {
         return upsertLiquidTask(best);
     }
 
-    /**
-     * Proactively scans the active mining/build area ahead and pre-queues one liquid
-     * mitigation task before the bot reaches exposed lava.
-     */
     public boolean preScanAheadLiquids() {
         if (mc.world == null || mc.player == null || module.taskManager == null || module.pathfinder == null) {
             return false;

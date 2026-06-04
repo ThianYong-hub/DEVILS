@@ -32,9 +32,9 @@ SYNC_REQUIRE_REQUEST_SIGNING_ENV_KEYS = ("SYNC_REQUIRE_REQUEST_SIGNING", "SYNC_R
 SYNC_REQUEST_SIGNING_KEY_ENV_KEYS = ("SYNC_REQUEST_SIGNING_KEY", "SYNC_SIGNING_KEY")
 BACKEND_DEPRECATION_STATUS = "deprecated-but-supported"
 BACKEND_REMOVAL_PREREQUISITES = (
-    "preferred names are the documented default path",
-    "operators have had a compatibility window to migrate",
-    "admin diagnostics show no remaining legacy-only production setup",
+    "new env names are the normal path",
+    "old configs had time to move",
+    "admin config shows no old-only setup",
 )
 
 MODULE_ALIASES = {
@@ -2066,8 +2066,8 @@ def main() -> None:
     config = resolve_runtime_config()
 
     if config.require_signed and not config.signing_key:
-        print('FATAL: request signing is enabled but no signing key was provided.')
-        print('       Use SYNC_REQUEST_SIGNING_KEY (preferred) or legacy SYNC_SIGNING_KEY.')
+        print('FATAL: signing on, key missing.')
+        print('Set SYNC_REQUEST_SIGNING_KEY.')
         raise SystemExit(2)
 
     store = SyncStore(config.state_file, config.namespaces_dir, config.events_max)
@@ -2091,7 +2091,7 @@ def main() -> None:
     listen_scheme = 'http'
     if config.tls_cert_file or config.tls_key_file:
         if not config.tls_cert_file or not config.tls_key_file:
-            print('FATAL: both SYNC_TLS_CERT_FILE and SYNC_TLS_KEY_FILE are required for HTTPS.')
+            print('FATAL: TLS needs cert + key.')
             raise SystemExit(2)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.options |= ssl.OP_NO_COMPRESSION
@@ -2100,39 +2100,30 @@ def main() -> None:
         elif config.tls_min_version == 'TLSV1_2':
             context.minimum_version = ssl.TLSVersion.TLSv1_2
         else:
-            print(f'FATAL: unsupported SYNC_TLS_MIN_VERSION={config.tls_min_version} (expected TLSv1_2 or TLSv1_3).')
+            print(f'FATAL: bad TLS version: {config.tls_min_version}')
             raise SystemExit(2)
         context.load_cert_chain(certfile=config.tls_cert_file, keyfile=config.tls_key_file)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         listen_scheme = 'https'
 
-    print('Devils sync hub backend started')
-    print(f'  listen         : {listen_scheme}://{config.host}:{config.port}')
-    print(f'  meta-state     : {config.state_file}')
-    print(f'  namespaces-dir : {config.namespaces_dir}')
-    print(f"  auth-token     : {'enabled' if config.sync_token else 'disabled'}")
-    print(f"  admin-auth     : {'enabled' if config.admin_token else 'disabled (fallback to user token)'}")
-    print(f'  require-e2e    : {config.require_encrypted_sync}')
-    print(f'  require-signed : {config.require_signed}')
-    print(f'  sign-window    : {config.sign_window_sec} sec')
-    print(f'  nonce-ttl      : {config.nonce_ttl_sec} sec')
-    print(f'  nonce-max      : {config.nonce_cache_max}')
+    print('SyncHub up')
+    print(f'  url: {listen_scheme}://{config.host}:{config.port}')
+    print(f'  state: {config.state_file}')
+    print(f'  namespaces: {config.namespaces_dir}')
+    print(f"  auth: {'on' if config.sync_token else 'off'}")
+    print(f"  admin-auth: {'on' if config.admin_token else 'off (using user token)'}")
+    print(f'  e2e-required: {config.require_encrypted_sync}')
+    print(f'  signing: {config.require_signed}')
+    print(f'  nonce: ttl={config.nonce_ttl_sec}s max={config.nonce_cache_max}')
     if listen_scheme == 'https':
-        print(f'  tls-cert-file  : {config.tls_cert_file}')
-        print(f'  tls-key-file   : {config.tls_key_file}')
-        print(f'  tls-min-ver    : {config.tls_min_version}')
-    print(f'  allow-cors     : {config.allow_cors}')
-    print(f'  events-max     : {config.events_max}')
-    print(f'  pull-wait-max  : {config.pull_wait_max_ms} ms')
-    print(f'  max-body-bytes : {config.max_body_bytes}')
-    print(f'  log-pull-ok    : {config.log_pull_success}')
-    print(f'  log-push-2xx   : {config.log_push_success}')
-    print(f'  config-mode    : {config.diagnostics.overall_mode}')
+        print(f'  tls: {config.tls_min_version} cert={config.tls_cert_file} key={config.tls_key_file}')
+    print(f'  limits: events={config.events_max} wait={config.pull_wait_max_ms}ms body={config.max_body_bytes}')
+    print(f'  noisy-ok-logs: pull={config.log_pull_success} push={config.log_push_success}')
+    print(f'  config-mode: {config.diagnostics.overall_mode}')
     for warning in config.diagnostics.warnings:
-        print(f'  deprecation    : {warning}')
-    print('  routes         : /pull, /push, /health')
-    print('  api-v3         : /v1/client/start, /v1/sync/*, /v1/admin/*')
-    print('  stream         : /stream, /v1/sync/stream')
+        print(f'  old-env: {warning}')
+    print('  routes: /pull /push /health /v1/sync/* /v1/admin/*')
+    print('  stream: /stream /v1/sync/stream')
     server.serve_forever()
 
 

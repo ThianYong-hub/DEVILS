@@ -48,7 +48,7 @@ public final class XaeroSyncConstants {
     public static final int DEVILS_MARKER_ICON_V = 120;
     public static final int DEVILS_MARKER_ICON_REGION_W = 560;
     public static final int DEVILS_MARKER_ICON_REGION_H = 500;
-    public static final Identifier XAERO_SYNC_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_ping_icon_white.png");
+    public static final Identifier XAERO_SYNC_ICON_TEXTURE = Identifier.of("devils-addon", "textures/gui/devils_map_icon.png");
     public static final int DEVILS_ACCENT_BORDER = 0xFF5C0000;
     public static final int DEVILS_PANEL_BACKGROUND = 0xD0110505;
     public static final int DEVILS_TOOLTIP_BACKGROUND = 0xD0140606;
@@ -66,7 +66,7 @@ public final class XaeroSyncConstants {
     public static final int DEVILS_MAP_LABEL_MARGIN = 160;
     public static final int DEVILS_MAP_LABEL_MAX = 80;
     public static final int XAERO_TOOLBAR_WIDTH = 24;
-    public static final String DEFAULT_DEVILS_MAP_ICON_PATH = MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
+    public static final String DEFAULT_DEVILS_MAP_ICON_PATH = MapIconManager.DEFAULT_MAP_ICON_PATH;
 
     private XaeroSyncConstants() {
     }

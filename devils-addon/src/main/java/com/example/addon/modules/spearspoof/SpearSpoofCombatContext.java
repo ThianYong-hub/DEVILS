@@ -155,12 +155,10 @@ abstract class SpearSpoofCombatContext {
     protected void onTargetChanged(long now, LivingEntity newTarget) {
         lockApproachDirection(newTarget);
         runtime.hitChain = 0;
-        // Keep existing RMB hold/charge across target switches.
-        // This prevents unnecessary re-click when mobs die close to each other.
+        // Keep RMB charge when the target swaps. Feels jank if we reclick every mob.
         runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, now + 35L);
 
-        // If charge is already in late fatigue/recovery on target switch, restart windup automatically.
-        // This prevents "new target reached but spear already discharged" cases that required manual RMB.
+        // FIXME: late charge can be dead already; restart it or the next hit just whiffs.
         if (!attributeSwap.get() && autoHoldUse.get() && runtime.useStartedAtMs > 0L) {
             long heldMs = runtime.holdMs(now);
             long fullWindow = fullChargeWindowMs();

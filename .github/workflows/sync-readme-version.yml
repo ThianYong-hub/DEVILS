@@ -81,12 +81,8 @@ jobs:
             text = url_re.sub(addon_url, text)
             text = game_url_re.sub(game_url, text)
             if file.name == "README.md":
-              text = re.sub(r"Current addon build \(`\d+\.\d+\.\d+`\)", f"Current addon build (`{addon_version}`)", text)
-              text = re.sub(r"Current game build \(`\d+\.\d+\.\d+`\)", f"Current game build (`{game_version}`)", text)
-              text = re.sub(r"\| Addon Version \| `\d+\.\d+\.\d+` \|", f"| Addon Version | `{addon_version}` |", text)
-              text = re.sub(r"\| Game Version \| `\d+\.\d+\.\d+` \|", f"| Game Version | `{game_version}` |", text)
-              text = re.sub(r"\| `addon_version` \| `[^`]+` \|", f"| `addon_version` | `{addon_version}` |", text)
-              text = re.sub(r"\| `game_version` \| `[^`]+` \|", f"| `game_version` | `{game_version}` |", text)
+              text = re.sub(r"Current addon build \(`[^`]+`\)", f"Current addon build (`{addon_version}`)", text)
+              text = re.sub(r"Current game build \(`[^`]+`\)", f"Current game build (`{game_version}`)", text)
             file.write_text(text, encoding="utf-8")
           PY
 

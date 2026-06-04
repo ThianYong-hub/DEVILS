@@ -21,13 +21,13 @@ public final class AutoPearlTrajectory {
     private AutoPearlTrajectory() {
     }
 
-    public static float calculatePitchToTarget(MinecraftClient mc, PlayerEntity target, float yaw, float fallbackPitch) {
+    public static float pitchToTarget(MinecraftClient mc, PlayerEntity target, float yaw, float fallbackPitch) {
         if (mc == null || mc.player == null || mc.world == null || target == null) return fallbackPitch;
         Vec3d targetCenter = target.getEntityPos().add(0, target.getHeight() * 0.5, 0);
-        return calculatePitchToPoint(mc, targetCenter, yaw, fallbackPitch);
+        return pitchToPoint(mc, targetCenter, yaw, fallbackPitch);
     }
 
-    public static float calculatePitchToPoint(MinecraftClient mc, Vec3d targetPoint, float yaw, float fallbackPitch) {
+    public static float pitchToPoint(MinecraftClient mc, Vec3d targetPoint, float yaw, float fallbackPitch) {
         if (mc == null || mc.player == null || mc.world == null || targetPoint == null) return fallbackPitch;
         Vec3d eye = mc.player.getEyePos();
 
@@ -125,20 +125,20 @@ public final class AutoPearlTrajectory {
                 case "auto", "reset" -> {
                     module.forcedTargetName = null;
                     module.target = null;
-                    module.info("Target reset to auto-select.");
+                    module.info("Target reset.");
                 }
                 case "on" -> {
                     if (!module.isActive()) module.toggle();
-                    module.info("Module enabled via chat command.");
+                    module.info("AutoPearl on.");
                 }
                 case "off" -> {
                     if (module.isActive()) module.toggle();
-                    module.info("Module disabled via chat command.");
+                    module.info("AutoPearl off.");
                 }
                 default -> {
                     module.forcedTargetName = arg;
                     module.target = null;
-                    module.info("Target forced to: В§e" + arg);
+                    module.info("Target: В§e" + arg);
                 }
             }
         }

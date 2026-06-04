@@ -33,18 +33,10 @@ public enum HWDirection {
         return values[((this.ordinal() - steps) % values.length + values.length) % values.length];
     }
 
-    /**
-     * Lateral axis used by HighwayBuilder blueprint for this forward direction.
-     * Cardinal: 90 deg side (clockwise 2). Diagonal: cardinal side (clockwise 1).
-     */
     public HWDirection lateralDirection() {
         return clockwise(isDiagonal ? 1 : 2);
     }
 
-    /**
-     * Forward progress coordinate that stays constant across the lateral lanes
-     * generated for this direction.
-     */
     public double forwardProgress(BlockPos origin, BlockPos pos) {
         int dx = pos.getX() - origin.getX();
         int dz = pos.getZ() - origin.getZ();
@@ -55,17 +47,12 @@ public enum HWDirection {
 
         HWDirection lateral = lateralDirection();
         if (lateral.directionVec.getX() != 0) {
-            // Lateral axis is X, so forward comes from Z component only.
             return dz * directionVec.getZ();
         }
 
-        // Lateral axis is Z, so forward comes from X component only.
         return dx * directionVec.getX();
     }
 
-    /**
-     * Lateral offset coordinate for sorting center-first lane priorities.
-     */
     public double lateralOffset(BlockPos origin, BlockPos pos) {
         int dx = pos.getX() - origin.getX();
         int dz = pos.getZ() - origin.getZ();

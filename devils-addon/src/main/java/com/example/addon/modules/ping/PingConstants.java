@@ -22,7 +22,7 @@ public final class PingConstants {
     public static final long SYNC_PROBLEM_LOG_COOLDOWN_MS = 20_000;
     public static final int SYNC_ERROR_DETAIL_MAX = 120;
     public static final int MAX_SYNC_MARKERS = 256;
-    public static final String DEFAULT_PING_ICON_PATH = MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
+    public static final String DEFAULT_PING_ICON_PATH = MapIconManager.DEFAULT_PING_ICON_PATH;
     public static final long MARKER_TTL_MS = 10_000;
     public static final long MARKER_PULSE_PERIOD_MS = 1_200;
     public static final long PULL_FALLBACK_INTERVAL_MS = 250;

@@ -76,7 +76,7 @@ public final class XaeroWaypointNaming {
 
         String legacyPath = parseLegacyIconPath(rawName == null ? "" : rawName);
         if (!legacyPath.isBlank()) return legacyPath;
-        return MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
+        return MapIconManager.DEFAULT_MAP_ICON_PATH;
     }
 
     public static String formatManagedWaypointName(com.example.addon.util.XaeroSyncWaypoints.MapWaypointMarker marker) {

@@ -29,6 +29,39 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
 
+      - name: Check addon jar contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          addon_version="$(grep '^addon_version=' gradle.properties | cut -d= -f2)"
+          addon_jar="build/libs/devils-addon-${addon_version}.jar"
+          test -f "${addon_jar}" || { echo "::error::Missing ${addon_jar}"; exit 1; }
+
+          jar_list="$(mktemp)"
+          jar tf "${addon_jar}" > "${jar_list}"
+          required_mixins=(
+            "META-INF/devils-addon/mixins/addon-template.mixins.json"
+            "META-INF/devils-addon/mixins/chesttracker.mixins.json"
+            "META-INF/devils-addon/mixins/whereisit.mixins.json"
+            "META-INF/devils-addon/mixins/searchables.mixins.json"
+            "META-INF/devils-addon/mixins/searchables.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/yacl.mixins.json"
+            "META-INF/devils-addon/mixins/yacl-fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerolib.mixins.json"
+            "META-INF/devils-addon/mixins/xaerolib.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerohud.mixins.json"
+            "META-INF/devils-addon/mixins/xaerohud.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerominimap.mixins.json"
+            "META-INF/devils-addon/mixins/xaerominimap.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroworldmap.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroworldmap.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroplus.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroplus-fabric.mixins.json"
+          )
+          for path in "${required_mixins[@]}"; do
+            grep -Fxq "${path}" "${jar_list}" || { echo "::error::Missing jar resource ${path}"; exit 1; }
+          done
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:

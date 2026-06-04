@@ -104,13 +104,13 @@ abstract class StashMoverSupport extends Module {
 
     protected final Setting<String> loadMessage = sgGeneral.add(new StringSetting.Builder()
         .name("load-message")
-        .description("Whisper payload both accounts use to coordinate the pearl chamber.")
+        .description("Whisper text both alts use for the pearl chamber.")
         .defaultValue("LOAD PEARL")
         .build());
 
     protected final Setting<String> returnCommand = sgGeneral.add(new StringSetting.Builder()
         .name("return-command")
-        .description("Command sent after the next stasis pearl is reloaded. Use kill for legacy behavior or tp to preserve the staged pearl.")
+        .description("Command after next pearl is loaded. kill is old mode, tp keeps the staged pearl.")
         .defaultValue("kill")
         .visible(() -> mode.get() == Mode.MOVER)
         .build());

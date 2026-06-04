@@ -1211,7 +1211,7 @@ public final class NukerPlusDamageTimeRuntimeValidation {
     private static Path resolveOutputDir() {
         String configured = System.getProperty(OUTPUT_DIR_PROPERTY, "").trim();
         if (!configured.isBlank()) return Path.of(configured).toAbsolutePath().normalize();
-        return Path.of("codex log").toAbsolutePath().normalize();
+        return Path.of("devils debug log").toAbsolutePath().normalize();
     }
 
     private static void prepareOutputDir(Path directory) {

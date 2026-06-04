@@ -93,7 +93,7 @@ public final class StrictRuntimeLogger {
     private static Path resolveLogPath(String fileName) {
         String configured = System.getProperty(OUTPUT_DIR_PROPERTY, "").trim();
         Path directory = configured.isBlank()
-            ? Path.of("codex log").toAbsolutePath().normalize()
+            ? Path.of("devils debug log").toAbsolutePath().normalize()
             : Path.of(configured).toAbsolutePath().normalize();
         return directory.resolve(fileName);
     }

@@ -17,9 +17,6 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
-/**
- * EChest Miner places and breaks ender chests to farm obsidian.
- */
 public class EChestMiner {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 

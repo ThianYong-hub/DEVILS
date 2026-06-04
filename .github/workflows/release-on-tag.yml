@@ -79,6 +79,32 @@ jobs:
 
           test -f "${addon_asset}" || { echo "::error::Missing addon artifact ${addon_asset}"; exit 1; }
           test -f "${game_asset}" || { echo "::error::Missing game artifact ${game_asset}"; exit 1; }
+
+          jar_list="$(mktemp)"
+          jar tf "${addon_asset}" > "${jar_list}"
+          required_mixins=(
+            "META-INF/devils-addon/mixins/addon-template.mixins.json"
+            "META-INF/devils-addon/mixins/chesttracker.mixins.json"
+            "META-INF/devils-addon/mixins/whereisit.mixins.json"
+            "META-INF/devils-addon/mixins/searchables.mixins.json"
+            "META-INF/devils-addon/mixins/searchables.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/yacl.mixins.json"
+            "META-INF/devils-addon/mixins/yacl-fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerolib.mixins.json"
+            "META-INF/devils-addon/mixins/xaerolib.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerohud.mixins.json"
+            "META-INF/devils-addon/mixins/xaerohud.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaerominimap.mixins.json"
+            "META-INF/devils-addon/mixins/xaerominimap.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroworldmap.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroworldmap.fabric.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroplus.mixins.json"
+            "META-INF/devils-addon/mixins/xaeroplus-fabric.mixins.json"
+          )
+          for path in "${required_mixins[@]}"; do
+            grep -Fxq "${path}" "${jar_list}" || { echo "::error::Missing jar resource ${path}"; exit 1; }
+          done
+
           echo "addon_asset=${addon_asset}" >> "${GITHUB_OUTPUT}"
           echo "game_asset=${game_asset}" >> "${GITHUB_OUTPUT}"
 
@@ -328,12 +354,8 @@ jobs:
             text = ver_backtick_re.sub(f"(`v{version}`)", text)
             text = ver_plain_re.sub(f"(v{version})", text)
             if file.name == "README.md":
-              text = re.sub(r"Current addon build \(`\d+\.\d+\.\d+`\)", f"Current addon build (`{addon_version}`)", text)
-              text = re.sub(r"Current game build \(`\d+\.\d+\.\d+`\)", f"Current game build (`{game_version}`)", text)
-              text = re.sub(r"\| Addon Version \| `\d+\.\d+\.\d+` \|", f"| Addon Version | `{addon_version}` |", text)
-              text = re.sub(r"\| Game Version \| `\d+\.\d+\.\d+` \|", f"| Game Version | `{game_version}` |", text)
-              text = re.sub(r"\| `addon_version` \| `[^`]+` \|", f"| `addon_version` | `{addon_version}` |", text)
-              text = re.sub(r"\| `game_version` \| `[^`]+` \|", f"| `game_version` | `{game_version}` |", text)
+              text = re.sub(r"Current addon build \(`[^`]+`\)", f"Current addon build (`{addon_version}`)", text)
+              text = re.sub(r"Current game build \(`[^`]+`\)", f"Current game build (`{game_version}`)", text)
             file.write_text(text, encoding="utf-8")
           PY
 

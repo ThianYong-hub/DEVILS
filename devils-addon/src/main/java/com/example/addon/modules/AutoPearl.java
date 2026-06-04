@@ -178,7 +178,7 @@ public class AutoPearl extends Module {
 
         float baseYaw = (float) Rotations.getYaw(target);
         float yaw = applyOrbitOffset(baseYaw, distToTarget);
-        float pitch = AutoPearlTrajectory.calculatePitchToTarget(mc, target, yaw, -30f);
+        float pitch = AutoPearlTrajectory.pitchToTarget(mc, target, yaw, -30f);
 
         posBeforeThrow = mc.player.getEntityPos();
         waitingForTeleport = true;
@@ -271,7 +271,7 @@ public class AutoPearl extends Module {
         double ldx = landSpot.x - playerPos.x;
         double ldz = landSpot.z - playerPos.z;
         float yaw = (float) Math.toDegrees(-Math.atan2(ldx, ldz));
-        float pitch = AutoPearlTrajectory.calculatePitchToPoint(mc, landSpot, yaw, -30f);
+        float pitch = AutoPearlTrajectory.pitchToPoint(mc, landSpot, yaw, -30f);
 
         posBeforeThrow = mc.player.getEntityPos();
         waitingForTeleport = true;

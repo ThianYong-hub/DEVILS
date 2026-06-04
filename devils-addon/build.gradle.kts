@@ -98,6 +98,11 @@ val bundledRuntimeLibs by configurations.creating {
     isCanBeResolved = true
     isTransitive = true
 }
+val sourceNativeResourceJars by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    isTransitive = false
+}
 val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
 val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
@@ -148,6 +153,10 @@ val sourceNativeResourceExcludes = arrayOf(
     "pack.mcmeta",
     "architectury_inject_*",
     "architectury_inject_*/**"
+)
+val sourceNativeJarResourceExcludes = sourceNativeResourceExcludes + arrayOf(
+    "**/*.class",
+    "module-info.class"
 )
 val sourceNativeJavaExcludes = arrayOf(
     "dev/isxander/yacl3/mixin/MinecraftMixin.java",
@@ -414,6 +423,7 @@ dependencies {
         modCompileOnly(dependencyNotation)
         testCompileOnly(dependencyNotation)
         testRuntimeOnly(dependencyNotation)
+        add(sourceNativeResourceJars.name, dependencyNotation)
     }
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
     add(bundledRuntimeLibs.name, "com.github.ben-manes.caffeine:caffeine:3.2.0")
@@ -640,6 +650,16 @@ tasks {
             exclude(*sourceNativeResourceExcludes)
         }
 
+        from({
+            (sourceNativeResourceJars.resolve() + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
+                val dependencyTree =
+                    if (dependencyArtifact.isDirectory) fileTree(dependencyArtifact) else zipTree(dependencyArtifact)
+                dependencyTree.matching {
+                    exclude(*sourceNativeJarResourceExcludes)
+                }
+            }
+        })
+
         from(generatedThirdPartyNoticeDir)
 
         filesMatching(relocatedMixinConfigs.toList()) {
@@ -659,12 +679,30 @@ tasks {
         }
     }
 
+    val verifyAssimilatedMixinResources by registering {
+        dependsOn(processResources)
+        val processedResourcesDir = layout.buildDirectory.dir("resources/main")
+        inputs.dir(processedResourcesDir)
+
+        doLast {
+            val resourceRoot = processedResourcesDir.get().asFile
+            val missingMixinConfigs = relocatedMixinConfigs
+                .map { "$mergedMixinResourceDir/$it" }
+                .filterNot { resourceRoot.resolve(it).isFile }
+
+            check(missingMixinConfigs.isEmpty()) {
+                "Missing relocated mixin resources: ${missingMixinConfigs.joinToString()}"
+            }
+        }
+    }
+
     compileJava {
         dependsOn(verifySourceNativeBuildBasis)
     }
 
     named("classes") {
         dependsOn(extractSourceNativeRuntimeClasses)
+        dependsOn(verifyAssimilatedMixinResources)
     }
 
     jar {

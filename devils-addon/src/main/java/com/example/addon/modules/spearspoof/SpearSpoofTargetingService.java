@@ -54,8 +54,7 @@ public final class SpearSpoofTargetingService {
         LivingEntity current = runtime.target;
 
         if (current != null) {
-            // Sticky lock:
-            // keep current target for a minimum duration, then allow switching to a better candidate.
+            // Sticky lock so targeting does not flicker every tick.
             if (isHardLockedTargetAlive(current)) {
                 if (runtime.targetLockedAtMs == 0) runtime.targetLockedAtMs = now;
                 long lockAgeMs = Math.max(0L, now - runtime.targetLockedAtMs);
@@ -103,14 +102,11 @@ public final class SpearSpoofTargetingService {
         if (living == null || module.client().player == null || module.client().world == null) return false;
         if (living == module.client().player) return false;
         if (living.isRemoved() || !living.isAlive() || living.isDead()) return false;
-        // Out of client render/chunk tracking.
         if (module.client().world.getEntityById(living.getId()) == null) return false;
-        // Keep lock only inside permanent combat range.
         return module.client().player.distanceTo(living) <= module.permanentTargetRange();
     }
 
     private LivingEntity findCandidate() {
-        // KillAura-style targeting: one global valid-entity pool sorted by selected SortPriority.
         Entity generic = TargetUtils.get(this::isCandidateValid, priority.get());
         return generic instanceof LivingEntity living ? living : null;
     }
@@ -144,7 +140,6 @@ public final class SpearSpoofTargetingService {
         if (isTargetFullyHardEnclosed(living)) return false;
         boolean reachableLane = hasReachableAttackLane(living);
         boolean stablePocket = false;
-        // Roof by itself is not a reject when side lane is reachable.
         if (!reachableLane && isHardRoofedTarget(living)) {
             stablePocket = hasStableCombatPocket(living);
             if (!stablePocket) return false;
@@ -181,7 +176,6 @@ public final class SpearSpoofTargetingService {
         for (Vec3d sample : samples) {
             if (isHardBlocking(BlockPos.ofFloored(sample))) blocked++;
         }
-        // Reject only when target is fully embedded in hard blocks.
         return blocked >= samples.length;
     }
 
@@ -239,10 +233,8 @@ public final class SpearSpoofTargetingService {
 
     private boolean isDeepUndergroundTarget(LivingEntity living, boolean sideReachable) {
         if (living == null || module.client().world == null || module.client().player == null) return false;
-        // Nether/End: no sky visibility logic, don't apply underground cut there.
         if (!module.client().world.getDimension().hasSkyLight()) return false;
 
-        // Only treat as underground when target is noticeably lower than player.
         double belowBy = module.client().player.getY() - living.getY();
         if (belowBy < 4.0) return false;
 
@@ -256,21 +248,16 @@ public final class SpearSpoofTargetingService {
         double coveredBy = surfaceY - topY;
         boolean skyVisible = isSkyVisibleAround(top);
 
-        // Hard cave reject: if target is well below us and has no sky access, ignore it.
-        // Keeps module from diving into deep caves/tunnels discovered via ESP/Xray.
+        // hack: do not dive into cave ESP targets; pathing gets stupid down there.
         if (!skyVisible && belowBy >= 5.0) return true;
 
-        // When side lane is reachable, reject only clearly buried targets.
-        // This keeps valid "roof-only" targets (open from sides) attackable.
         if (sideReachable) {
             if (!skyVisible && belowBy >= 3.0 && coveredBy >= 2.0) return true;
             if (!skyVisible && belowBy >= 4.0 && coveredBy >= 1.4) return true;
             return false;
         }
 
-        // Hard reject: clearly under terrain roof.
         if (coveredBy >= 2.5) return true;
-        // Conservative reject for cave targets that are below us and not open to sky.
         if (!skyVisible && belowBy >= 3.0 && coveredBy >= 1.2) return true;
 
         return false;
@@ -303,12 +290,10 @@ public final class SpearSpoofTargetingService {
             new Vec3d(x2, yBody, z2)
         };
 
-        // Direct lane: at least one clear hard-block ray from player.
         for (Vec3d sample : targetSamples) {
             if (!isHardPathBlocked(eye, sample) || !isHardPathBlocked(body, sample)) return true;
         }
 
-        // Top-down lane: can route to a point above target and then dive.
         Vec3d[] above = new Vec3d[] {
             new Vec3d(cx, box.maxY + TOP_DOWN_ROUTE_HEIGHT, cz),
             new Vec3d(cx, box.maxY + TOP_DOWN_ROUTE_HEIGHT_ALT, cz)
@@ -363,7 +348,6 @@ public final class SpearSpoofTargetingService {
     private boolean hasAnchorClearance(Vec3d pocket) {
         if (module.client().world == null || pocket == null) return false;
 
-        // Check a player-sized clearance column around this pocket point.
         int minX = MathHelper.floor(pocket.x - 0.30);
         int maxX = MathHelper.floor(pocket.x + 0.30);
         int minY = MathHelper.floor(pocket.y + 0.02);

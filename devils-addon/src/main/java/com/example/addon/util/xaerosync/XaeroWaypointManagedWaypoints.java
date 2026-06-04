@@ -38,7 +38,7 @@ public final class XaeroWaypointManagedWaypoints {
             if (!marker.player()) {
                 String renderKey = XaeroWaypointNaming.managedWaypointRenderKey(markerName, x, y, z);
                 String iconPath = MapIconManager.normalizeIconPath(marker.iconPath());
-                if (iconPath.isBlank()) iconPath = MapIconManager.DEFAULT_EMBEDDED_ICON_PATH;
+                if (iconPath.isBlank()) iconPath = MapIconManager.DEFAULT_MAP_ICON_PATH;
                 if (!iconPath.isBlank()) iconPathsByWaypoint.put(renderKey, iconPath);
             }
         }

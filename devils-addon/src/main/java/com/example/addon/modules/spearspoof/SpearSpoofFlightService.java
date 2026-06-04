@@ -148,16 +148,13 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
             double approachY = targetPos.y + MODE_4X_APPROACH_DISTANCE;
             double retreatY = targetPos.y + MODE_4X_APPROACH_DISTANCE + MODE_4X_POST_HIT_RETREAT;
             if (horizontalToTarget > PIT_AXIS_LOCK_RADIUS + 0.08) {
-                // Stage 1: horizontal axis lock above pit target, no diagonal dive.
                 steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
                 verticalRouteStage = "4x-vert-axis";
             } else if (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
-                // Stage 2: retreat straight up by +2 blocks from strike lane.
                 steerPos = new Vec3d(playerPos.x, retreatY, playerPos.z);
                 forceVerticalClimb = true;
                 verticalRouteStage = "4x-vert-reset";
             } else {
-                // Stage 3: return strictly on vertical lane to strike distance.
                 steerPos = new Vec3d(playerPos.x, approachY, playerPos.z);
                 forceVerticalAlign = true;
                 verticalRouteStage = "4x-vert-approach";
@@ -179,7 +176,7 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
             }
 
             if (pitRoutingMode) {
-                // In pits/caves, reset should climb out first instead of lateral ping-pong in cramped space.
+                // TODO: pit routing is still hacky; climb first or it ping-pongs in walls.
                 double climbY = Math.max(
                     runtime.resetRequiredY,
                     Math.max(
@@ -198,12 +195,10 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 Vec3d awayNow = normalizeOrFallback(horizontal(playerPos.subtract(targetPos)), horizontal(runtime.lockedApproachDirection));
                 Vec3d resetDir;
                 if (mode4xHorizontal) {
-                    // In 4X keep one stable reset axis for the whole cycle to avoid lateral ping-pong.
                     resetDir = runtime.resetDirection.lengthSquared() > 1.0E-6 ? runtime.resetDirection : awayNow;
                     if (resetDir.dotProduct(awayNow) < -0.25) resetDir = awayNow;
                 } else {
                     resetDir = runtime.resetDirection.lengthSquared() > 1.0E-6 ? runtime.resetDirection : awayNow;
-                    // Keep reset direction strictly away from target to avoid ping-pong around the hitbox edge.
                     if (resetDir.dotProduct(awayNow) < 0.15) resetDir = awayNow;
                 }
                 runtime.resetDirection = normalizeOrFallback(resetDir, awayNow);
@@ -214,7 +209,6 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                     : 2.2;
                 steerPos = new Vec3d(
                     playerPos.x + runtime.resetDirection.x * outwardStep,
-                    // Keep non-pit reset retreat horizontal. Vertical correction is handled in dedicated phases.
                     playerPos.y,
                     playerPos.z + runtime.resetDirection.z * outwardStep
                 );
@@ -222,7 +216,6 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
         } else if (verticalRouteMode) {
             double routeHeight;
             if (targetPitMode) {
-                // Keep pit loop compact so descent doesn't stop early at the top ring.
                 routeHeight = MathHelper.clamp(
                     target.getHeight() + PIT_ROUTE_HEIGHT_OFFSET,
                     PIT_ROUTE_HEIGHT_MIN,
@@ -232,8 +225,7 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 routeHeight = Math.max(VERTICAL_ROUTE_HEIGHT, target.getHeight() + 1.5);
             }
             double aboveY = targetPos.y + routeHeight;
-            // Do not anchor climb target to current player Y each tick; that causes infinite ascent.
-            // Keep a minimal extra lift only when player is still below target body level.
+            // Do not anchor to current Y every tick or we moonwalk into the sky.
             if (targetPitMode && playerPos.y < targetPos.y + 0.35) {
                 aboveY = Math.max(aboveY, playerPos.y + PIT_ROUTE_SELF_ASCEND_MIN);
             }
@@ -263,12 +255,10 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 readyDive = !needClimb && playerPos.y > targetPos.y + diveReadyAbove && horizontalToTarget <= diveRadius;
             }
             if (needClimb) {
-                // Stage 1: climb almost vertically first; do not pull diagonally into terrain.
                 steerPos = new Vec3d(targetPos.x, aboveTarget.y, targetPos.z);
                 forceVerticalClimb = true;
                 verticalRouteStage = targetPitMode ? "axis-climb" : "climb";
             } else if (targetPitMode && (horizontalBlocked || routeToTargetBlocked) && horizontalToTarget > PIT_AXIS_LOCK_RADIUS + 0.08) {
-                // Path to pit center is blocked by crater wall: gain altitude, but never infinitely.
                 double blockedCapY = targetPos.y + PIT_BLOCKED_ASCEND_MAX_ABOVE_TARGET;
                 if (playerPos.y < blockedCapY - 0.18) {
                     double blockedClimbY = Math.max(
@@ -280,12 +270,10 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                     forceVerticalClimb = true;
                     verticalRouteStage = "pit-block-climb";
                 } else {
-                    // At cap: stop climbing and center on axis.
                     steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
                     verticalRouteStage = "pit-block-axis";
                 }
             } else if (targetPitMode && horizontalToTarget > PIT_AXIS_LOCK_RADIUS) {
-                // Lock directly above target center before dive. No ring run-up in pits.
                 steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
                 verticalRouteStage = "axis-lock";
             } else if (readyDive) {
@@ -296,7 +284,6 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
                 verticalRouteStage = "axis-hold";
             } else {
-                // Stage 2: build run-up ring (2-3 blocks), then dive through target.
                 steerPos = new Vec3d(targetPos.x, aboveTarget.y, targetPos.z);
                 verticalRouteStage = "align";
             }
@@ -317,7 +304,6 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
         }
 
         if (runtime.passPhase == SpearSpoofRuntime.PassPhase.RESET) {
-            // Reset is retreat/recharge phase only: no dive logic here.
             diveToLowerTarget = false;
         }
 
@@ -325,11 +311,9 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
             double yGap = targetPos.y - playerPos.y;
             if (!clearHorizontalLane) {
                 if (horizontalToTarget >= PLAIN_BLOCKED_ROUTE_DISTANCE) {
-                    // Long blocked route: use waypoint pathing instead of climbing into sky.
                     steerPos = new Vec3d(targetPos.x, Math.max(playerPos.y, targetPos.y + 0.35), targetPos.z);
                     verticalRouteStage = "plain-block-route";
                 } else {
-                    // Near blocked route: gain a small altitude margin, but with hard cap.
                     double blockedCapY = targetPos.y + PLAIN_BLOCKED_ASCEND_MAX_ABOVE_TARGET;
                     if (playerPos.y < blockedCapY - 0.18) {
                         double climbY = Math.max(
@@ -347,15 +331,12 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 }
                 diveToLowerTarget = false;
             } else if (yGap > PLAIN_ALIGN_Y_THRESHOLD) {
-                // Target above us: pure vertical climb first.
                 steerPos = new Vec3d(playerPos.x, targetPos.y, playerPos.z);
                 forceVerticalAlign = true;
                 verticalRouteStage = "plain-align-up";
                 diveToLowerTarget = false;
             } else if (yGap < -PLAIN_ALIGN_Y_THRESHOLD
                 && (targetDistance <= PLAIN_DESCEND_START_DISTANCE || horizontalToTarget <= PLAIN_DESCEND_START_HORIZONTAL)) {
-                // Descend when horizontally aligned, even if 3D distance is large due height delta.
-                // If canopy blocks the direct vertical column, move to a side anchor first.
                 if (isVerticalColumnBlocked(playerPos, targetPos)) {
                     steerPos = selectCanopyBypassAnchor(playerPos, targetPos);
                     verticalRouteStage = "canopy-bypass";
@@ -366,7 +347,6 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 }
                 diveToLowerTarget = false;
             } else {
-                // On open flat lane keep attack pass horizontal; no diagonal downward drift.
                 diveToLowerTarget = false;
             }
         }
@@ -380,12 +360,10 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 pathfinder.clearTargetState();
                 steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
             } else if (forceVerticalAlign) {
-                // For plain Y-align do not clamp to safe corridor, otherwise descent can be canceled near terrain.
                 pathfinder.clearTargetState();
             } else {
                 Vec3d safeSteer = pathfinder.adjustToSafeCorridor(steerPos, playerPos);
                 if (forceVerticalClimb || pitRoutingMode || mode4xHorizontal) {
-                    // Keep pure vertical climb path deterministic.
                     pathfinder.clearTargetState();
                     steerPos = mode4xHorizontal ? new Vec3d(safeSteer.x, playerPos.y, safeSteer.z) : safeSteer;
                 } else {

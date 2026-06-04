@@ -1042,7 +1042,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (playerInventoryPearlCount() == 0) return false;
         int storageSlots = storageSlotCount(handler);
         if (!canStorageAcceptEnderPearls(handler, storageSlots)) {
-            warning("Pearl chest is full; cannot return Replenish-provided pearls before /kill.");
+            warning("Pearl chest full; cant dump extra pearls before /kill.");
             StrictRuntimeLogger.logStashMover(
                 "replenish-pearl-return-blocked",
                 "reason=pearl-chest-full-after-return-throw pearlChest=" + formatBlockPosForFeedback(pearlChest)
@@ -1105,24 +1105,24 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     protected boolean validateConfiguration() {
         if (mode.get() == Mode.MOVER) {
             if (pearlChestPos() == null) {
-                error("Pearl chest position is not configured.");
+                error("Set pearlchest first.");
                 toggle();
                 return false;
             }
             if (lootChestPos() == null) {
-                error("Loot chest position is not configured.");
+                error("Set lootchest first.");
                 toggle();
                 return false;
             }
             if (waterPos() == null) {
-                error("Water position is not configured.");
+                error("Set water first.");
                 toggle();
                 return false;
             }
         }
 
         if (chamberLookPos() == null) {
-            error("Chamber position is not configured.");
+            error("Set chamber first.");
             toggle();
             return false;
         }

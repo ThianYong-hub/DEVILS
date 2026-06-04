@@ -101,10 +101,6 @@ public class InventoryHandler {
         junkCleanupDelay = dropWholeStack ? 1 : 0;
     }
 
-    /**
-     * Find and swap to the best tool for breaking the given block task.
-     * Returns true if a suitable tool was equipped.
-     */
     public boolean swapOrMoveBestTool(BlockTask blockTask) {
         if (mc.player == null || mc.world == null) return false;
 
@@ -225,10 +221,6 @@ public class InventoryHandler {
         return -1;
     }
 
-    /**
-     * Find and swap to the building material for the given block task.
-     * Returns true if material was equipped.
-     */
     public boolean swapOrMoveBlock(BlockTask blockTask) {
         if (mc.player == null) return false;
 
