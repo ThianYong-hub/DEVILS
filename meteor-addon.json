@@ -16,11 +16,11 @@
   "homepage": "https://github.com/ThianYong-hub/DEVILS",
   "feature_directories": {
     "commands": [
-      "commands",
-      "modules/stashmover"
+      "devils-addon/src/main/java/com/devils/addon/commands",
+      "devils-addon/src/main/java/com/devils/addon/modules/stashmover"
     ],
     "modules": [
-      "modules"
+      "devils-addon/src/main/java/com/devils/addon/modules"
     ],
     "hud_elements": []
   }
