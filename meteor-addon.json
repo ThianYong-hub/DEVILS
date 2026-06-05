@@ -1,0 +1,27 @@
+{
+  "description": "An anarchy-focused Meteor Client addon for Minecraft 1.21.11. Combat tools, stash moving, ping markers, Xaero/ChestTracker glue, and a small SyncHub backend.",
+  "tags": [
+    "PvP",
+    "Utility",
+    "Movement",
+    "Building",
+    "World",
+    "QoL",
+    "Automation"
+  ],
+  "supported_versions": [
+    "1.21.11"
+  ],
+  "icon": "https://raw.githubusercontent.com/ThianYong-hub/DEVILS/main/devils-addon/src/main/resources/assets/devils-addon/icon.png",
+  "homepage": "https://github.com/ThianYong-hub/DEVILS",
+  "feature_directories": {
+    "commands": [
+      "commands",
+      "modules/stashmover"
+    ],
+    "modules": [
+      "modules"
+    ],
+    "hud_elements": []
+  }
+}

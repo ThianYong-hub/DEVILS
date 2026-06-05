@@ -14,29 +14,23 @@
   ],
   "version": "${version}",
   "name": "Devils",
-  "description": "Devils Addon for Meteor Client.",
+  "description": "Anarchy-focused Meteor Client addon with combat, stash, ping, Xaero and ChestTracker tools.",
   "icon": "assets/devils-addon/icon.png",
   "authors": [
     "23XT",
     "SOCKETLOST"
   ],
-  "license": [
-    "GPL-3.0-only",
-    "MIT",
-    "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
-    "All Rights Reserved"
-  ],
+  "license": "GPL-3.0-only",
   "contact": {
     "sources": "https://github.com/ThianYong-hub/DEVILS"
   },
   "environment": "client",
   "entrypoints": {
     "preLaunch": [
-      "com.example.addon.util.CrashGuard"
+      "com.devils.addon.util.CrashGuard"
     ],
     "meteor": [
-      "com.example.addon.AddonTemplate"
+      "com.devils.addon.DevilsAddon"
     ],
     "main": [
       "red.jackf.jackfredlib.impl.base.ServerTrackerImpl::setup",
@@ -86,7 +80,7 @@
   },
   "accessWidener": "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener",
   "mixins": [
-    "META-INF/devils-addon/mixins/addon-template.mixins.json",
+    "META-INF/devils-addon/mixins/devils-addon.mixins.json",
     "META-INF/devils-addon/mixins/chesttracker.mixins.json",
     "META-INF/devils-addon/mixins/whereisit.mixins.json",
     "META-INF/devils-addon/mixins/searchables.mixins.json",

@@ -16,7 +16,7 @@
   "environment": "client",
   "entrypoints": {
     "meteor": [
-      "com.example.addon.games.DevilsGameAddon"
+      "com.devils.addon.games.DevilsGameAddon"
     ]
   },
   "custom": {

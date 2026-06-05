@@ -214,7 +214,7 @@ extends MinimapElementRenderer<Waypoint, WaypointMapRenderContext> {
 
     private boolean drawManagedIcon(MinimapElementGraphics guiGraphics, String iconPath, int x, int y, int size) {
         try {
-            Class<?> iconManagerClass = Class.forName("com.example.addon.util.MapIconManager");
+            Class<?> iconManagerClass = Class.forName("com.devils.addon.util.MapIconManager");
             Object iconSprite = iconManagerClass.getMethod("resolveIconSprite", String.class).invoke(null, iconPath);
             if (iconSprite != null) {
                 Identifier id = (Identifier)iconSprite.getClass().getMethod("id").invoke(iconSprite);
@@ -238,7 +238,7 @@ extends MinimapElementRenderer<Waypoint, WaypointMapRenderContext> {
             if (managedIconPath.isBlank()) {
                 return false;
             }
-            Class<?> iconManagerClass = Class.forName("com.example.addon.util.MapIconManager");
+            Class<?> iconManagerClass = Class.forName("com.devils.addon.util.MapIconManager");
             Object result = iconManagerClass
                 .getMethod("drawCustomIcon", DrawContext.class, String.class, Integer.TYPE, Integer.TYPE, Integer.TYPE, Integer.TYPE)
                 .invoke(null, guiGraphics, managedIconPath, x, y, size, -1);
@@ -285,7 +285,7 @@ extends MinimapElementRenderer<Waypoint, WaypointMapRenderContext> {
 
     private String resolveManagedIconPath(Waypoint waypoint) {
         try {
-            Class<?> syncClass = Class.forName("com.example.addon.util.XaeroSyncWaypoints");
+            Class<?> syncClass = Class.forName("com.devils.addon.util.XaeroSyncWaypoints");
             Object resolved = syncClass.getMethod("resolveManagedWaypointIconPath", Object.class).invoke(null, waypoint);
             return resolved instanceof String ? ((String)resolved).trim() : "";
         } catch (Throwable ignored) {

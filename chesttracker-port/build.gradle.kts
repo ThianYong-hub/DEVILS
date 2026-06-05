@@ -3,7 +3,7 @@ plugins {
     java
 }
 
-group = (findProperty("maven_group") as String?) ?: "com.example"
+group = (findProperty("maven_group") as String?) ?: "com.devils"
 version = "2.8.1-devils"
 
 java {

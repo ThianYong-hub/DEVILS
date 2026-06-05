@@ -1,0 +1,28 @@
+{
+  "required": true,
+  "package": "com.devils.addon.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ChestTrackerOpenGuardMixin",
+    "ChestTrackerInventoryButtonGuardMixin",
+    "YaclChestTrackerConfigMixin",
+    "ClientConnectionMixin",
+    "ClientPlayerInteractionManagerInvoker",
+    "GuiMapXaeroSyncMixin",
+    "HudModSafeModFileMixin",
+    "XaeroCommonFabricPlatformHelperMixin",
+    "XaeroPlusCompatibilityMetadataMixin",
+    "XaeroPlusInitializeCompatibilityMixin",
+    "XaeroPlusVersionCheckResultMixin",
+    "XaeroPlatformProvidedVersionMixin",
+    "WorldMapFabricSafeModFileMixin",
+    "ScreenXaeroSyncMixin",
+    "PlayerTrackerPingNameMixin",
+    "ItemListSettingScreenMixin",
+    "ModulesScreenIconsMixin",
+    "ModulesNameCollisionMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

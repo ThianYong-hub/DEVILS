@@ -107,7 +107,7 @@ val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
 val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
 val relocatedMixinConfigs = setOf(
-    "addon-template.mixins.json",
+    "devils-addon.mixins.json",
     "chesttracker.mixins.json",
     "whereisit.mixins.json",
     "searchables.mixins.json",

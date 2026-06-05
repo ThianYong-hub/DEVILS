@@ -287,7 +287,7 @@ extends ElementRenderer<Waypoint, WaypointRenderContext, WaypointRenderer> {
             return "";
         }
         try {
-            Class<?> syncClass = Class.forName("com.example.addon.util.XaeroSyncWaypoints");
+            Class<?> syncClass = Class.forName("com.devils.addon.util.XaeroSyncWaypoints");
             Method resolver = syncClass.getMethod("resolveManagedWaypointIconPath", Object.class);
             Object resolved = resolver.invoke(null, waypoint.getOriginal());
             return resolved instanceof String ? (String)resolved : "";
@@ -302,7 +302,7 @@ extends ElementRenderer<Waypoint, WaypointRenderContext, WaypointRenderer> {
         }
         boolean drawn = false;
         try {
-            Class<?> iconManagerClass = Class.forName("com.example.addon.util.MapIconManager");
+            Class<?> iconManagerClass = Class.forName("com.devils.addon.util.MapIconManager");
             Method resolveIconSprite = iconManagerClass.getMethod("resolveIconSprite", String.class);
             Object iconSprite = resolveIconSprite.invoke(null, iconPath);
             if (iconSprite == null) {
