@@ -1,6 +1,19 @@
-# DEVILS
+<div align="center">
+  <img src="icon.png" alt="Devils Addon Icon" width="200"/>
+  
+  # Devils Addon
+  
+  **Client-side Fabric addon for Meteor Client**
+  
+  [![Stars](https://img.shields.io/github/stars/ThianYong-hub/DEVILS?style=for-the-badge&color=blue)](https://github.com/ThianYong-hub/DEVILS/stargazers)
+  [![Issues](https://img.shields.io/github/issues/ThianYong-hub/DEVILS?style=for-the-badge&color=red)](https://github.com/ThianYong-hub/DEVILS/issues)
+  [![License](https://img.shields.io/github/license/ThianYong-hub/DEVILS?style=for-the-badge&color=green)](https://github.com/ThianYong-hub/DEVILS/blob/main/LICENSE)
+  [![Discord](https://img.shields.io/badge/Discord-Join-7289da?style=for-the-badge&logo=discord)](https://discord.gg/meteorclient)
+</div>
 
-Client-side Fabric addon for Meteor Client. Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
+<br>
+
+Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
 Current addon build (`0.0.59`)
 Current game build (`0.0.4`)
