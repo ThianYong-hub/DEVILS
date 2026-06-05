@@ -8,7 +8,7 @@
   [![Stars](https://img.shields.io/github/stars/ThianYong-hub/DEVILS?style=for-the-badge&color=blue)](https://github.com/ThianYong-hub/DEVILS/stargazers)
   [![Issues](https://img.shields.io/github/issues/ThianYong-hub/DEVILS?style=for-the-badge&color=red)](https://github.com/ThianYong-hub/DEVILS/issues)
   [![License](https://img.shields.io/github/license/ThianYong-hub/DEVILS?style=for-the-badge&color=green)](https://github.com/ThianYong-hub/DEVILS/blob/main/LICENSE)
-  [![Discord](https://img.shields.io/badge/Discord-Methodllo-7289da?style=for-the-badge&logo=discord)](https://discord.com/users/524640609047281674)
+  [![Discord](https://img.shields.io/badge/DISCORD-Methodllo-7289da)](https://discord.com/users/524640609047281674)
 
 </div>
 
