@@ -15,7 +15,7 @@
 
 Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
-Current addon build (`0.0.59`)
+Current addon build (`0.0.60`)
 Current game build (`0.0.4`)
 
 ## What Is In Here
