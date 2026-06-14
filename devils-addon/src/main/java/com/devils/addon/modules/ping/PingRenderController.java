@@ -1,7 +1,6 @@
 package com.devils.addon.modules.ping;
 
 import com.devils.addon.modules.Ping;
-import com.devils.addon.modules.XaeroSync;
 import com.devils.addon.util.MapIconManager;
 import meteordevelopment.meteorclient.events.render.Render2DEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -13,8 +12,6 @@ import net.minecraft.client.gl.RenderPipelines;
 import org.joml.Vector3d;
 
 public final class PingRenderController {
-    private static volatile Boolean xaeroWaypointRendererPresent;
-
     private final Ping module;
     private final PingMarkerController markerController;
 
@@ -65,7 +62,6 @@ public final class PingRenderController {
 
     public void renderMarkers2D(Render2DEvent event) {
         if (module.client().player == null || module.client().world == null || module.client().currentScreen != null) return;
-        if (shouldUseXaeroWaypointLabelsOnly()) return;
 
         Vector3d pos = new Vector3d();
         long now = System.currentTimeMillis();
@@ -98,21 +94,7 @@ public final class PingRenderController {
                 int iconY = (int) Math.round(y - 1);
                 boolean drawnCustom = MapIconManager.drawCustomIcon(event.drawContext, marker.iconPath(), iconX, iconY, iconSize, 0xFFFFFFFF);
                 if (!drawnCustom) {
-                    event.drawContext.drawTexture(
-                        RenderPipelines.GUI_TEXTURED,
-                        PingConstants.PING_MARKER_ICON_TEXTURE,
-                        iconX,
-                        iconY,
-                        PingConstants.DEVILS_MAP_ICON_U,
-                        PingConstants.DEVILS_MAP_ICON_V,
-                        iconSize,
-                        iconSize,
-                        PingConstants.DEVILS_MAP_ICON_REGION_W,
-                        PingConstants.DEVILS_MAP_ICON_REGION_H,
-                        PingConstants.DEVILS_MAP_ICON_SOURCE_SIZE,
-                        PingConstants.DEVILS_MAP_ICON_SOURCE_SIZE,
-                        0xFFFFFFFF
-                    );
+                    MapIconManager.drawCustomIcon(event.drawContext, PingConstants.DEFAULT_PING_ICON_PATH, iconX, iconY, iconSize, 0xFFFFFFFF);
                 }
                 cursorX += iconWidth + spacing;
             }
@@ -139,22 +121,6 @@ public final class PingRenderController {
             case Distance -> pingPrefix;
             case Coords -> pingPrefix + " | " + coords;
         };
-    }
-
-    private boolean shouldUseXaeroWaypointLabelsOnly() {
-        if (XaeroSync.isWaypointIntegrationRunning()) return true;
-        Boolean cached = xaeroWaypointRendererPresent;
-        if (cached != null) return cached;
-
-        boolean present;
-        try {
-            Class.forName("xaero.map.mods.gui.WaypointRenderer", false, Ping.class.getClassLoader());
-            present = true;
-        } catch (Throwable ignored) {
-            present = false;
-        }
-        xaeroWaypointRendererPresent = present;
-        return present;
     }
 
     private Color pulseColor(Color base, PingMarker marker, long nowMs, double minMul, double maxMul) {

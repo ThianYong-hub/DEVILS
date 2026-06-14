@@ -342,7 +342,7 @@ abstract class SpearSpoofCombatDecisionOps extends SpearSpoofCombatRuntimeOps {
     }
 
     protected boolean uses4xRangeWindow(LivingEntity target) {
-        if (mode4x.get()) return true;
+        if (mode4x != null && mode4x.get()) return true;
         if (target == null) return false;
         long now = System.currentTimeMillis();
         return runtime.pitVerticalLockTargetId == target.getId()
@@ -366,14 +366,18 @@ abstract class SpearSpoofCombatDecisionOps extends SpearSpoofCombatRuntimeOps {
         double reach = Math.max(ENFORCED_MAX_RANGE + 0.65, toAimLength + 0.15);
         Vec3d end = eyePos.add(dir.multiply(reach));
         double expansion = ctx.smallTarget ? 0.08 : 0.15;
-        if (target.getBoundingBox().expand(expansion).raycast(eyePos, end).isPresent()) return true;
+        
+        Vec3d offset = ctx.predictedTargetPos.subtract(ctx.targetPos);
+        Box predictedBox = target.getBoundingBox().offset(offset);
 
-        Vec3d targetCenter = target.getBoundingBox().getCenter();
+        if (predictedBox.expand(expansion).raycast(eyePos, end).isPresent()) return true;
+
+        Vec3d targetCenter = predictedBox.getCenter();
         Vec3d toCenter = targetCenter.subtract(eyePos);
         double toCenterLen = toCenter.length();
         if (toCenterLen < 1.0E-6) return false;
         Vec3d centerEnd = eyePos.add(toCenter.multiply(1.0 / toCenterLen).multiply(Math.max(ENFORCED_MAX_RANGE + 0.65, toCenterLen + 0.15)));
-        return target.getBoundingBox().expand(expansion).raycast(eyePos, centerEnd).isPresent();
+        return predictedBox.expand(expansion).raycast(eyePos, centerEnd).isPresent();
     }
 
     protected long strikeReadyDelayMs(LivingEntity target, SpearSpoofCombatTypes.AttackContext ctx, long now) {

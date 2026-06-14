@@ -190,8 +190,15 @@ public final class AutoCraftExecutor {
                         continue;
                     }
 
-                    click(handler.syncId, currentTargetSlotId, 1, SlotActionType.PICKUP);
-                    currentTargetRemaining--;
+                    if (cursor.getCount() <= currentTargetRemaining) {
+                        int amount = cursor.getCount();
+                        click(handler.syncId, currentTargetSlotId, 0, SlotActionType.PICKUP);
+                        currentTargetRemaining -= amount;
+                    } else {
+                        click(handler.syncId, currentTargetSlotId, 1, SlotActionType.PICKUP);
+                        currentTargetRemaining--;
+                    }
+                    
                     if (currentTargetRemaining <= 0) phase = Phase.PLACE_RETURN_CURSOR;
                     return TickResult.action("Placing ingredient into crafting grid.");
                 }
@@ -221,9 +228,15 @@ public final class AutoCraftExecutor {
                         return TickResult.blocked("Crafting result is not available yet.");
                     }
 
-                    click(handler.syncId, outputSlotId, 0, SlotActionType.PICKUP);
-                    phase = Phase.OUTPUT_STORE_CURSOR;
-                    return TickResult.action("Taking crafted output.");
+                    if (dropFinalOutput) {
+                        click(handler.syncId, outputSlotId, 0, SlotActionType.PICKUP);
+                        phase = Phase.OUTPUT_STORE_CURSOR;
+                        return TickResult.action("Taking crafted output for drop.");
+                    } else {
+                        click(handler.syncId, outputSlotId, 0, SlotActionType.QUICK_MOVE);
+                        outputRemainingBatches--;
+                        return TickResult.action("Quick-moving crafted output.");
+                    }
                 }
                 case OUTPUT_STORE_CURSOR -> {
                     if (cursor.isEmpty()) {

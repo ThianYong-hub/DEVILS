@@ -11,9 +11,12 @@ import com.devils.addon.modules.spearspoof.SpearSpoofTargetingService;
 import com.devils.addon.util.CrashGuard;
 import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
+import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.mixininterface.IPlayerInteractEntityC2SPacket;
+import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting;
+import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
 import meteordevelopment.meteorclient.settings.EnumSetting;
 import meteordevelopment.meteorclient.settings.IntSetting;
@@ -21,6 +24,8 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
+import meteordevelopment.meteorclient.utils.render.color.Color;
+import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
@@ -33,6 +38,9 @@ import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.HealthUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.math.Box;
 
 import java.lang.reflect.Method;
 
@@ -47,6 +55,74 @@ public class SpearSpoof extends Module {
     private final SettingGroup sgStage = settings.createGroup("Stage");
     private final SettingGroup sgRecovery = settings.createGroup("Recovery");
     private final SettingGroup sgDebug = settings.createGroup("Debug");
+
+    private final SettingGroup sgRender = settings.createGroup("Render");
+
+    public final Setting<Boolean> enableAutoFlight = sgFlight.add(new BoolSetting.Builder()
+        .name("enable-auto-flight")
+        .description("Automatically fly towards target. If false, you can use normal Flight module manually.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Boolean> renderTarget = sgRender.add(new BoolSetting.Builder()
+        .name("render-target")
+        .description("Highlight the current target.")
+        .defaultValue(true)
+        .build()
+    );
+
+    public final Setting<Double> nearRange = sgRender.add(new DoubleSetting.Builder()
+        .name("near-range")
+        .description("Range for near color.")
+        .defaultValue(7.0)
+        .min(1.0)
+        .sliderRange(1.0, 16.0)
+        .visible(renderTarget::get)
+        .build()
+    );
+
+    public final Setting<SettingColor> nearColor = sgRender.add(new ColorSetting.Builder()
+        .name("near-color")
+        .description("Color when target is near.")
+        .defaultValue(new SettingColor(255, 230, 40, 90))
+        .visible(renderTarget::get)
+        .build()
+    );
+
+    public final Setting<SettingColor> farColor = sgRender.add(new ColorSetting.Builder()
+        .name("far-color")
+        .description("Color when target is far.")
+        .defaultValue(new SettingColor(70, 255, 90, 80))
+        .visible(renderTarget::get)
+        .build()
+    );
+
+    public final Setting<Double> dashDistance = sgStrike.add(new DoubleSetting.Builder()
+        .name("dash-distance")
+        .description("Extra distance applied when attack starts (in blocks).")
+        .defaultValue(0.0)
+        .min(0.0)
+        .sliderRange(0.0, 10.0)
+        .build()
+    );
+
+    public final Setting<Double> dashSpeed = sgStrike.add(new DoubleSetting.Builder()
+        .name("dash-speed")
+        .description("Speed of dash in blocks per tick.")
+        .defaultValue(0.35)
+        .min(0.01)
+        .sliderRange(0.01, 2.0)
+        .visible(() -> dashDistance.get() > 0.0)
+        .build()
+    );
+
+    public final Setting<Boolean> stayGrounded = sgStrike.add(new BoolSetting.Builder()
+        .name("dash-stay-grounded")
+        .description("Drops vertical boost motion during dash.")
+        .defaultValue(false)
+        .build()
+    );
 
     private final Setting<Boolean> onlyWhileElytra = sgGeneral.add(new BoolSetting.Builder()
         .name("only-while-elytra")
@@ -175,10 +251,9 @@ public class SpearSpoof extends Module {
     private final Setting<Double> maxVerticalDelta = sgMovement.add(new DoubleSetting.Builder()
         .name("max-vertical-delta")
         .description("Maximum allowed vertical difference to aim point.")
-        .defaultValue(2.4)
-        .range(0.5, 6.0)
-        .sliderRange(1.0, 4.0)
-        .visible(this::showAdvanced)
+        .defaultValue(4.0)
+        .range(0.5, 8.0)
+        .sliderRange(1.0, 6.0)
         .build()
     );
 
@@ -573,6 +648,28 @@ public class SpearSpoof extends Module {
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
         CrashGuard.run(this, "onPacketReceive", () -> onPacketReceiveSafe(event));
+    }
+
+    @EventHandler
+    private void onRender3D(Render3DEvent event) {
+        CrashGuard.run(this, "onRender3D", () -> onRender3DSafe(event));
+    }
+
+    private void onRender3DSafe(Render3DEvent event) {
+        if (!renderTarget.get() || mc.player == null || mc.world == null) return;
+        LivingEntity target = runtime.target;
+        if (target == null || !target.isAlive()) return;
+
+        double distanceSq = mc.player.squaredDistanceTo(target);
+        double farSq = 12.0 * 12.0; 
+        double nearSq = nearRange.get() * nearRange.get();
+
+        if (distanceSq > farSq) return;
+
+        SettingColor settingColor = distanceSq <= nearSq ? nearColor.get() : farColor.get();
+        Color side = new Color(settingColor);
+        Color line = new Color(settingColor).a(220);
+        event.renderer.box(target.getBoundingBox().expand(0.1), side, line, ShapeMode.Both, 0);
     }
 
     private void onTickSafe() {

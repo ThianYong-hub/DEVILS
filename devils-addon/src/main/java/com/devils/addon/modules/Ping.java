@@ -262,14 +262,6 @@ public class Ping extends Module {
         return markerController.snapshotMarkerTargets();
     }
 
-    public boolean xaeroMapDebug() {
-        return xaeroMapDebug.get();
-    }
-
-    public InfoMode xaeroInfoMode() {
-        return infoMode.get();
-    }
-
     public boolean logoutSpotsEnabled() {
         return logoutSpots.get();
     }

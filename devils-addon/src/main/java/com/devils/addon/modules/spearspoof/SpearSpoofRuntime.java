@@ -4,7 +4,7 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.Vec3d;
 
 public final class SpearSpoofRuntime {
-    LivingEntity target;
+    public LivingEntity target;
 
     long targetLockedAtMs;
     long targetLostAtMs;
@@ -25,6 +25,9 @@ public final class SpearSpoofRuntime {
     long hitConfirmUntilMs;
     long lastConfirmedHitMs;
     long lastKnownTargetSeenAtMs;
+
+    double dashRemaining;
+    Vec3d dashDirection = Vec3d.ZERO;
 
     int swapBackSlot = -1;
     int swapBackTicks;
@@ -110,6 +113,9 @@ public final class SpearSpoofRuntime {
         hitConfirmUntilMs = 0;
         lastConfirmedHitMs = 0;
         lastKnownTargetSeenAtMs = 0;
+        
+        dashRemaining = 0.0;
+        dashDirection = Vec3d.ZERO;
 
         swapBackSlot = -1;
         swapBackTicks = 0;
@@ -241,8 +247,11 @@ public final class SpearSpoofRuntime {
     }
 
     public void onReject(String reason) {
-        rejectStreak++;
         lastRejectReason = reason == null ? "" : reason;
+
+        if (!"HitUnconfirmed".equals(reason)) {
+            rejectStreak++;
+        }
 
         if ("LowSpeed".equals(reason)) speedRejectStreak++;
         else speedRejectStreak = 0;

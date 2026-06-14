@@ -94,7 +94,8 @@ abstract class SpearSpoofFlightFlowB extends SpearSpoofFlightFlowAExt {
         double offset;
 
         if (isSmallTarget(target)) {
-            offset = MathHelper.clamp(height * 0.52, 0.30, 0.80);
+            double maxBodyOffset = Math.max(0.10, height - 0.06);
+            offset = MathHelper.clamp(height * 0.42, 0.10, maxBodyOffset);
         } else if (target instanceof PlayerEntity) {
             if (target.isOnGround()) offset = MathHelper.clamp(height * 0.56, 0.88, 1.12);
             else offset = MathHelper.clamp(height * 0.60, 0.96, 1.26);
@@ -164,12 +165,17 @@ abstract class SpearSpoofFlightFlowB extends SpearSpoofFlightFlowAExt {
     protected double applyVerticalSafety(double yVel, Vec3d currentPos, double maxVertical) {
         double floorDist = pathfinder.distanceToSolidBelow(currentPos, SAFETY_SCAN);
         double ceilingDist = pathfinder.distanceToSolidAbove(currentPos, SAFETY_SCAN);
+        double floorClearance = runtime.target != null
+            && isSmallTarget(runtime.target)
+            && runtime.passPhase == SpearSpoofRuntime.PassPhase.APPROACH
+            ? SMALL_TARGET_FLOOR_CLEARANCE
+            : FLOOR_CLEARANCE;
 
-        double downBudget = Math.max(0.0, floorDist - FLOOR_CLEARANCE - 0.35);
+        double downBudget = Math.max(0.0, floorDist - floorClearance - 0.35);
         double safeMaxDown = Math.min(maxVertical, downBudget * 0.8);
         yVel = Math.max(yVel, -safeMaxDown);
 
-        if (floorDist < FLOOR_CLEARANCE + 0.35) yVel = Math.max(yVel, 0.12);
+        if (floorDist < floorClearance + 0.35) yVel = Math.max(yVel, 0.12);
         if (ceilingDist < CEILING_CLEARANCE + 0.25) yVel = Math.min(yVel, -0.08);
         return yVel;
     }

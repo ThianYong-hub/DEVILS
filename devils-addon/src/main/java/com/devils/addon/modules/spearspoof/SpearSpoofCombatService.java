@@ -91,6 +91,16 @@ public final class SpearSpoofCombatService extends SpearSpoofCombatDecisionOps {
         boolean hasSpear = ensureSpearInMainHand();
         tickUseKey(hasSpear);
         tickWindupTimer(hasSpear);
+        
+        if (runtime.dashRemaining > 0.0) {
+            double step = Math.min(module.dashSpeed.get(), runtime.dashRemaining);
+            Vec3d motion = runtime.dashDirection.multiply(step);
+            module.client().player.setVelocity(module.client().player.getVelocity().add(motion));
+            if (!module.stayGrounded.get()) module.client().player.setOnGround(false);
+            module.client().player.fallDistance = 0.0F;
+            runtime.dashRemaining -= step;
+        }
+
         if (runtime.switchDelayTicks > 0) runtime.switchDelayTicks--;
 
         if (!hasSpear) {

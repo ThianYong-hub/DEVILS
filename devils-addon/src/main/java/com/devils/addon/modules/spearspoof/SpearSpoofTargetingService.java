@@ -54,17 +54,9 @@ public final class SpearSpoofTargetingService {
         LivingEntity current = runtime.target;
 
         if (current != null) {
-            // Sticky lock so targeting does not flicker every tick.
             if (isHardLockedTargetAlive(current)) {
                 if (runtime.targetLockedAtMs == 0) runtime.targetLockedAtMs = now;
-                long lockAgeMs = Math.max(0L, now - runtime.targetLockedAtMs);
-                if (lockAgeMs < Math.max(0, targetStickMs.get())) return current;
-
-                LivingEntity candidate = findCandidate();
-                if (candidate == null || candidate == current) return current;
-                runtime.target = candidate;
-                runtime.targetLockedAtMs = now;
-                return candidate;
+                return current;
             }
         }
 
@@ -474,4 +466,3 @@ public final class SpearSpoofTargetingService {
             || state.isOf(Blocks.CAVE_VINES_PLANT);
     }
 }
-

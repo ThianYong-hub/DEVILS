@@ -1,7 +1,6 @@
 package com.devils.addon.mixin;
 
 import com.devils.addon.DevilsAddon;
-import com.devils.addon.modules.XaeroSync;
 import com.mojang.authlib.GameProfile;
 import java.lang.reflect.Field;
 import meteordevelopment.meteorclient.gui.GuiThemes;
@@ -71,38 +70,6 @@ abstract class ClientConnectionMixin {
     }
 }
 
-@Pseudo
-@Mixin(targets = "xaero.map.gui.GuiMap", remap = false)
-abstract class GuiMapXaeroSyncMixin {
-    @Inject(method = "render", at = @At("TAIL"), require = 0, remap = false)
-    private void devilsAddon$xaeroSyncGuiMapRenderHook(DrawContext drawContext, int mouseX, int mouseY, float tickDelta, CallbackInfo ci) {
-        Screen self = (Screen) (Object) this;
-        double cameraX = readDouble(self, "cameraX");
-        double cameraZ = readDouble(self, "cameraZ");
-        double scale = readDouble(self, "scale");
-        XaeroSync.onXaeroMapRenderProjectedHook(self, drawContext, mouseX, mouseY, tickDelta, cameraX, cameraZ, scale);
-    }
-
-    private static double readDouble(Object owner, String fieldName) {
-        if (owner == null || fieldName == null || fieldName.isBlank()) return Double.NaN;
-        Class<?> cursor = owner.getClass();
-        while (cursor != null) {
-            try {
-                Field field = cursor.getDeclaredField(fieldName);
-                field.setAccessible(true);
-                Object value = field.get(owner);
-                if (value instanceof Number number) return number.doubleValue();
-                return Double.NaN;
-            } catch (NoSuchFieldException ignored) {
-                cursor = cursor.getSuperclass();
-            } catch (Throwable ignored) {
-                return Double.NaN;
-            }
-        }
-        return Double.NaN;
-    }
-}
-
 @Mixin(ItemListSettingScreen.class)
 abstract class ItemListSettingScreenMixin {
     @Inject(method = "getValueWidget", at = @At("HEAD"), cancellable = true)
@@ -127,36 +94,12 @@ abstract class ModulesNameCollisionMixin {
 
         if (isDevilsModule(existing) && !isDevilsModule(incoming)) {
             // Our module with the same name is already registered, keep it.
-            ci.cancel();
+            if (ci.isCancellable()) ci.cancel();
         }
     }
 
     private static boolean isDevilsModule(Module module) {
         return module != null && module.getClass().getName().startsWith(DEVILS_PACKAGE_PREFIX);
-    }
-}
-
-@Pseudo
-@Mixin(targets = "xaero.map.radar.tracker.PlayerTrackerMapElementRenderer", remap = false)
-abstract class PlayerTrackerPingNameMixin {
-    @Redirect(
-        method = "renderElement",
-        at = @At(value = "INVOKE", target = "Lcom/mojang/authlib/GameProfile;getName()Ljava/lang/String;"),
-        require = 0
-    )
-    private String devilsAddon$renderPingName(GameProfile profile) {
-        if (profile == null) return "";
-        return XaeroSync.resolveTrackedPingDisplayName(profile.id(), profile.name());
-    }
-}
-
-@Mixin(Screen.class)
-abstract class ScreenXaeroSyncMixin {
-    @Inject(method = "render(Lnet/minecraft/client/gui/DrawContext;IIF)V", at = @At("TAIL"), require = 0)
-    private void devilsAddon$xaeroSyncRenderHook(DrawContext drawContext, int mouseX, int mouseY, float tickDelta, CallbackInfo ci) {
-        Screen self = (Screen) (Object) this;
-        if ("xaero.map.gui.GuiMap".equals(self.getClass().getName())) return;
-        XaeroSync.onXaeroMapRenderHook(self, drawContext, mouseX, mouseY, tickDelta);
     }
 }
 

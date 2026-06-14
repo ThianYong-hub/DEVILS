@@ -40,11 +40,9 @@ BACKEND_REMOVAL_PREREQUISITES = (
 MODULE_ALIASES = {
     "autologin": "auto-login",
     "auto_login": "auto-login",
-    "chesttracker": "chest-tracker",
-    "chest_tracker": "chest-tracker",
 }
 
-CORE_SENSITIVE_MODULES = {"auto-login", "ping", "chest-tracker", "xaero-world-map"}
+CORE_SENSITIVE_MODULES = {"auto-login", "ping", }
 GAME_MODULES = {"mini-games"}
 SYNC_DOMAIN_DEFAULT = "default"
 SYNC_DOMAIN_CORE = "core-sensitive"
@@ -52,10 +50,8 @@ SYNC_DOMAIN_GAMES = "games"
 
 ENCRYPTED_PROFILE_USERNAME = "__devils_e2e__"
 ENCRYPTED_PROFILE_PASSWORD_PREFIXES = ("devils-e2e:v1:", "devils-e2e:v2:")
-ENCRYPTED_MODULES = {"auto-login", "ping", "chest-tracker", "xaero-world-map"}
-PROTECTED_EMPTY_OVERWRITE_MODULES = {"auto-login", "chest-tracker", "xaero-world-map"}
-XAERO_ENCRYPTED_SLOTS_MAX = 128
-XAERO_ENCRYPTED_SLOTS_TTL_MS = 180_000
+ENCRYPTED_MODULES = {"auto-login", "ping", }
+PROTECTED_EMPTY_OVERWRITE_MODULES = {"auto-login", }
 
 IGNORE_TRACEBACK_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 IGNORE_TRACEBACK_ERRNOS = {32, 54, 104}
@@ -517,33 +513,6 @@ def _ping_created_at(profile: dict[str, Any]) -> int:
         return 0
 
 
-def _xaero_presence_meta(profile: dict[str, Any]) -> tuple[str, int, int]:
-    username = string_value(profile.get("username")).strip().lower()
-    server = string_value(profile.get("server")).strip().lower()
-    identity = username
-    seq = 0
-    updated_at = 0
-
-    payload = string_value(profile.get("password")).strip()
-    if payload:
-        try:
-            parsed = json.loads(payload)
-            if isinstance(parsed, dict):
-                seq = max(0, int_value(parsed.get("seq"), 0))
-                updated_at = max(0, int_value(parsed.get("updatedAt"), 0))
-                uuid = string_value(parsed.get("uuid")).strip().lower()
-                sender = string_value(parsed.get("sender")).strip().lower()
-                if uuid:
-                    identity = uuid
-                elif sender:
-                    identity = sender
-        except Exception:
-            pass
-
-    key = identity + "|" + server
-    return key, seq, updated_at
-
-
 def is_encrypted_profile_row(profile: Any) -> bool:
     if not isinstance(profile, dict):
         return False
@@ -635,125 +604,6 @@ def extract_envelope_kid(profile: dict[str, Any]) -> str:
     return string_value(envelope.get("kid")).strip()
 
 
-def is_xaero_encrypted_batch(profiles: list[dict[str, Any]]) -> bool:
-    return bool(profiles) and all(is_valid_encrypted_profile_row(profile, "xaero-world-map") for profile in profiles)
-
-
-def load_xaero_encrypted_slots(
-    ns: dict[str, Any], current_profiles: list[dict[str, Any]], fallback_writer: str
-) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    raw = ns.get("xaeroEncryptedSlots")
-    if isinstance(raw, dict):
-        for key, value in raw.items():
-            device_id = string_value(key).strip()
-            if not device_id or not isinstance(value, dict):
-                continue
-            profile_raw = value.get("profile")
-            if isinstance(profile_raw, dict):
-                profile = normalize_profile(profile_raw)
-            else:
-                profile = normalize_profile(value)
-            if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
-                continue
-            kid = string_value(value.get("kid")).strip() or extract_envelope_kid(profile)
-            out[device_id] = {
-                "profile": profile,
-                "updatedAtMs": max(0, int_value(value.get("updatedAtMs"), 0)),
-                "lastRequestId": string_value(value.get("lastRequestId")).strip(),
-                "kid": kid,
-            }
-    if out:
-        return out
-
-    if not is_xaero_encrypted_batch(current_profiles):
-        return out
-
-    if len(current_profiles) == 1 and fallback_writer:
-        out[fallback_writer] = {
-            "profile": deepcopy(current_profiles[0]),
-            "updatedAtMs": now_ms(),
-            "lastRequestId": "",
-            "kid": extract_envelope_kid(current_profiles[0]),
-        }
-        return out
-
-    for index, profile in enumerate(current_profiles):
-        out[f"_legacy_{index + 1}"] = {
-            "profile": deepcopy(profile),
-            "updatedAtMs": now_ms(),
-            "lastRequestId": "",
-            "kid": extract_envelope_kid(profile),
-        }
-    return out
-
-
-def prune_xaero_encrypted_slots(slots: dict[str, dict[str, Any]], reference_ms: int) -> dict[str, dict[str, Any]]:
-    cutoff_ms = max(0, int_value(reference_ms, 0) - XAERO_ENCRYPTED_SLOTS_TTL_MS)
-    filtered: dict[str, dict[str, Any]] = {}
-    for device_id, value in slots.items():
-        if not isinstance(value, dict):
-            continue
-        profile = value.get("profile")
-        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
-            continue
-        updated_at = max(0, int_value(value.get("updatedAtMs"), 0))
-        if updated_at and updated_at < cutoff_ms:
-            continue
-        filtered[device_id] = {
-            "profile": deepcopy(profile),
-            "updatedAtMs": updated_at,
-            "lastRequestId": string_value(value.get("lastRequestId")).strip(),
-            "kid": string_value(value.get("kid")).strip() or extract_envelope_kid(profile),
-        }
-
-    ordered = sorted(
-        filtered.items(),
-        key=lambda item: (
-            -max(0, int_value(item[1].get("updatedAtMs"), 0)),
-            string_value(item[0]).strip().lower(),
-        ),
-    )
-    if len(ordered) > XAERO_ENCRYPTED_SLOTS_MAX:
-        ordered = ordered[:XAERO_ENCRYPTED_SLOTS_MAX]
-    return {device_id: entry for device_id, entry in ordered}
-
-
-def xaero_profiles_from_slots(slots: dict[str, dict[str, Any]], active_kid: str = "") -> list[dict[str, Any]]:
-    if not isinstance(slots, dict) or not slots:
-        return []
-    ordered = sorted(
-        slots.items(),
-        key=lambda item: (
-            -max(0, int_value(item[1].get("updatedAtMs"), 0)),
-            string_value(item[0]).strip().lower(),
-        ),
-    )
-    out: list[dict[str, Any]] = []
-    for _, value in ordered:
-        if not isinstance(value, dict):
-            continue
-        slot_kid = string_value(value.get("kid")).strip()
-        if active_kid and slot_kid != active_kid:
-            continue
-        profile = value.get("profile")
-        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
-            continue
-        out.append(deepcopy(profile))
-    if out or not active_kid:
-        return out
-
-    # Fallback for legacy rows without kid metadata.
-    for _, value in ordered:
-        if not isinstance(value, dict):
-            continue
-        profile = value.get("profile")
-        if not is_valid_encrypted_profile_row(profile, "xaero-world-map"):
-            continue
-        out.append(deepcopy(profile))
-    return out
-
-
 def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
@@ -763,32 +613,6 @@ def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str,
     for item in items:
         if isinstance(item, dict):
             out.append(normalize_profile(item))
-
-    if module == "xaero-world-map":
-        if is_xaero_encrypted_batch(out):
-            dedup_encrypted: dict[str, dict[str, Any]] = {}
-            for profile in out:
-                dedup_encrypted[string_value(profile.get("password"))] = profile
-            ordered_passwords = sorted(dedup_encrypted.keys())
-            return [dedup_encrypted[key] for key in ordered_passwords]
-
-        dedup_xaero: dict[str, tuple[dict[str, Any], int, int]] = {}
-        for profile in out:
-            key, seq, updated_at = _xaero_presence_meta(profile)
-            prev = dedup_xaero.get(key)
-            if prev is None or seq > prev[1] or (seq == prev[1] and updated_at >= prev[2]):
-                dedup_xaero[key] = (profile, seq, updated_at)
-
-        merged_xaero = [entry for entry in dedup_xaero.values()]
-        merged_xaero.sort(
-            key=lambda entry: (
-                -entry[1],
-                -entry[2],
-                string_value(entry[0].get("username")).strip().lower(),
-                string_value(entry[0].get("server")).strip().lower(),
-            )
-        )
-        return [entry[0] for entry in merged_xaero]
 
     if module != "ping":
         return out
@@ -1197,17 +1021,6 @@ class SyncStore:
 
             revision = int_value(ns.get('revision'), 0)
             profiles = normalize_profiles(ns.get('profiles'), canonical)
-            if module == "xaero-world-map":
-                slots = prune_xaero_encrypted_slots(
-                    load_xaero_encrypted_slots(ns, profiles, string_value(ns.get("lastWriter")).strip()),
-                    now_ms(),
-                )
-                if slots:
-                    preferred_kid = ""
-                    if device_id and isinstance(slots.get(device_id), dict):
-                        preferred_kid = string_value(slots[device_id].get("kid")).strip()
-                    active_kid = preferred_kid or string_value(ns.get("xaeroActiveKid")).strip()
-                    profiles = xaero_profiles_from_slots(slots, active_kid)
             checksum = canonical_profiles_checksum(profiles)
             changed = revision != known_revision
             last_writer = string_value(ns.get('lastWriter')).strip()
@@ -1233,79 +1046,6 @@ class SyncStore:
                 checksum = canonical_profiles_checksum(current_profiles)
                 return PushResult(canonical, current_revision, current_profiles, checksum, True, False, '', self._last_event_id())
 
-            if module == "xaero-world-map":
-                if is_xaero_encrypted_batch(normalized):
-                    slots = prune_xaero_encrypted_slots(
-                        load_xaero_encrypted_slots(ns, current_profiles, string_value(ns.get("lastWriter")).strip()),
-                        now_ms(),
-                    )
-                    previous_slot = slots.get(device_id) if isinstance(slots, dict) else None
-                    previous_profile = None
-                    if isinstance(previous_slot, dict) and isinstance(previous_slot.get("profile"), dict):
-                        previous_profile = normalize_profile(previous_slot.get("profile"))
-                    previous_request_id = (
-                        string_value(previous_slot.get("lastRequestId")).strip() if isinstance(previous_slot, dict) else ""
-                    )
-                    active_kid = string_value(ns.get("xaeroActiveKid")).strip()
-
-                    if request_id and previous_request_id and request_id == previous_request_id:
-                        composed = xaero_profiles_from_slots(slots, active_kid)
-                        checksum = canonical_profiles_checksum(composed)
-                        return PushResult(canonical, current_revision, composed, checksum, True, False, '', self._last_event_id())
-
-                    incoming_profile = normalized[0]
-                    incoming_kid = extract_envelope_kid(incoming_profile)
-                    if previous_profile == incoming_profile:
-                        if isinstance(previous_slot, dict):
-                            previous_slot["updatedAtMs"] = now_ms()
-                            previous_slot["lastRequestId"] = request_id
-                            if incoming_kid:
-                                previous_slot["kid"] = incoming_kid
-                            slots[device_id] = previous_slot
-                        if incoming_kid:
-                            active_kid = incoming_kid
-                        composed = xaero_profiles_from_slots(slots, active_kid)
-                        checksum = canonical_profiles_checksum(composed)
-                        return PushResult(canonical, current_revision, composed, checksum, True, False, '', self._last_event_id())
-
-                    slots[device_id] = {
-                        "profile": incoming_profile,
-                        "updatedAtMs": now_ms(),
-                        "lastRequestId": request_id,
-                        "kid": incoming_kid,
-                    }
-                    slots = prune_xaero_encrypted_slots(slots, now_ms())
-                    if incoming_kid:
-                        active_kid = incoming_kid
-                    merged_profiles = xaero_profiles_from_slots(slots, active_kid)
-                    checksum = canonical_profiles_checksum(merged_profiles)
-                    ns['xaeroEncryptedSlots'] = slots
-                    ns['xaeroActiveKid'] = active_kid
-                    ns['profiles'] = merged_profiles
-                    ns['revision'] = current_revision + 1
-                    ns['updatedAt'] = now_ts()
-                    ns['checksum'] = checksum
-                    ns['lastWriter'] = device_id
-                    ns['lastRequestId'] = request_id
-                    self._append_event(
-                        canonical,
-                        'push',
-                        device_id,
-                        {
-                            'revision': ns['revision'],
-                            'profilesCount': len(merged_profiles),
-                            'checksum': checksum,
-                            'staleBaseAccepted': base_revision != current_revision,
-                            'xaeroEncryptedSlots': len(slots),
-                            'xaeroActiveKid': active_kid,
-                        },
-                    )
-
-                    self.namespaces[canonical] = ns
-                    self._save_ns(canonical, ns)
-                    self._save_meta()
-                    self.cond.notify_all()
-                    return PushResult(canonical, int_value(ns['revision'], 0), merged_profiles, checksum, True, False, '', self._last_event_id())
 
                 merged_profiles = normalize_profiles(current_profiles + normalized, canonical)
                 if is_empty_overwrite_protected(canonical, current_profiles, merged_profiles, allow_empty_overwrite):
@@ -1316,8 +1056,6 @@ class SyncStore:
                     return PushResult(canonical, current_revision, current_profiles, checksum, True, False, '', self._last_event_id())
 
                 checksum = canonical_profiles_checksum(merged_profiles)
-                ns.pop('xaeroEncryptedSlots', None)
-                ns.pop('xaeroActiveKid', None)
                 ns['profiles'] = merged_profiles
                 ns['revision'] = current_revision + 1
                 ns['updatedAt'] = now_ts()
