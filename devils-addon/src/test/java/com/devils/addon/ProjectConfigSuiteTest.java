@@ -170,13 +170,10 @@ class ProjectConfigSuiteTest {
 
         String mapIconManager = readRepoFile("devils-addon", "src", "main", "java", "com", "devils", "addon", "util", "MapIconManager.java");
         String pingConstants = readRepoFile("devils-addon", "src", "main", "java", "com", "devils", "addon", "modules", "ping", "PingConstants.java");
-        String xaeroConstants = readRepoFile("devils-addon", "src", "main", "java", "com", "devils", "addon", "modules", "xaerosync", "XaeroSyncConstants.java");
 
         assertTrue(mapIconManager.contains("DEFAULT_PING_ICON_PATH"));
         assertTrue(mapIconManager.contains("DEFAULT_MAP_ICON_PATH"));
         assertTrue(pingConstants.contains("MapIconManager.DEFAULT_PING_ICON_PATH"));
-        assertTrue(xaeroConstants.contains("MapIconManager.DEFAULT_MAP_ICON_PATH"));
-        assertTrue(xaeroConstants.contains("textures/gui/devils_map_icon.png"));
     }
 
     @Test
@@ -318,10 +315,7 @@ class ProjectConfigSuiteTest {
         assertTrue(mixinJson.contains("\"package\": \"com.devils.addon.mixin\""));
         assertTrue(mixinJson.contains("\"ClientPlayerInteractionManagerInvoker\""));
         assertTrue(mixinJson.contains("\"ClientPlayerInteractionManagerInvoker\""));
-        assertTrue(mixinJson.contains("\"GuiMapXaeroSyncMixin\""));
-        assertTrue(mixinJson.contains("\"ItemListSettingScreenMixin\""));
         assertTrue(Files.exists(mainJava("com", "devils", "addon", "mixin", "ClientPlayerInteractionManagerInvoker.java")));
-        assertTrue(Files.exists(mainJava("com", "devils", "addon", "mixin", "XaeroMixinSupport.java")));
     }
 
     @Test
@@ -331,7 +325,6 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
         assertTrue(workflow.contains("Check addon jar contents"));
-        assertTrue(workflow.contains("META-INF/devils-addon/mixins/chesttracker.mixins.json"));
         assertTrue(workflow.contains("name: Upload Artifact"));
         assertFalse(workflow.contains("softprops/action-gh-release"));
     }
@@ -343,7 +336,6 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
         assertTrue(workflow.contains("Check addon jar contents"));
-        assertTrue(workflow.contains("META-INF/devils-addon/mixins/chesttracker.mixins.json"));
         assertTrue(workflow.contains("branches-ignore:"));
         assertTrue(workflow.contains("- main"));
         assertTrue(workflow.contains("tags-ignore:"));

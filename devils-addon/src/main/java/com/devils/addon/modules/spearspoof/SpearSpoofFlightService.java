@@ -16,6 +16,7 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
     }
 
     public void onMove(PlayerMoveEvent event) {
+        if (!module.enableAutoFlight.get()) return;
         if (attributeSwap.get()) return;
         if (module.client().player == null || module.client().world == null) return;
 
@@ -358,7 +359,7 @@ public final class SpearSpoofFlightService extends SpearSpoofFlightMovePhase2 {
                 && !forceVerticalAlign
                 && !forceVerticalClimb) {
                 pathfinder.clearTargetState();
-                steerPos = new Vec3d(targetPos.x, playerPos.y, targetPos.z);
+                steerPos = new Vec3d(targetPos.x, smallTarget ? targetPos.y : playerPos.y, targetPos.z);
             } else if (forceVerticalAlign) {
                 pathfinder.clearTargetState();
             } else {

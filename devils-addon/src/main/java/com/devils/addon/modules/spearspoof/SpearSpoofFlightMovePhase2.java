@@ -336,7 +336,11 @@ abstract class SpearSpoofFlightMovePhase2 extends SpearSpoofFlightFlowB {
             velocity = new Vec3d(0.0, Math.max(velocity.y, PIT_VERTICAL_ASCENT_MIN), 0.0);
         }
 
-        if (!pitVerticalMode && !pureVerticalAscent && !pureVerticalAlign && (clearHorizontalLane || mode4xHorizontal)) {
+        if (!pitVerticalMode
+            && !pureVerticalAscent
+            && !pureVerticalAlign
+            && (clearHorizontalLane || mode4xHorizontal)
+            && !(smallTarget && Math.abs(targetPos.y - playerPos.y) > 0.08)) {
             velocity = new Vec3d(velocity.x, 0.0, velocity.z);
         }
 

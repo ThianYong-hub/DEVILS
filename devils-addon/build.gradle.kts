@@ -50,47 +50,19 @@ val minecraftVersion = properties["minecraft_version"] as String
 val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
 val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
 val xaeroPlusVersion = properties["xaeroplus_version"] as String
-val sourceNativeModDependencies = listOf(
-    "maven.modrinth:chest-tracker-port:2.8.1+1.21.11",
-    "maven.modrinth:where-is-it-port:2.7.3+1.21.11",
-    "com.blamejared.searchables:Searchables-fabric-$minecraftVersion:1.0.2",
-    "dev.isxander:yet-another-config-lib:3.8.1+1.21.11-fabric",
-    "maven.modrinth:xaeros-minimap:$xaeroMinimapVersion",
-    "maven.modrinth:xaeros-world-map:$xaeroWorldMapVersion",
-    "maven.modrinth:xaeroplus:$xaeroPlusVersion"
-)
+val sourceNativeModDependencies = listOf<String>()
 val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
 val sourceNativeBuildRoot = rootProject.file("local-source-native/Source Native Build")
-val sourceNativeModuleDirs = listOf(
-    "chesttracker-port-embedded",
-    "searchables-fabric",
-    "where-is-it-port",
-    "xaerolib-fabric",
-    "xaeroplus-fabric",
-    "xaeros-minimap-fabric",
-    "xaeros-world-map-fabric",
-    "yet-another-config-lib"
-).map { sourceNativeBuildRoot.resolve(it) }
+val sourceNativeModuleDirs = listOf<java.io.File>()
 val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
 val sourceNativeBinaryJars = fileTree(remappedModCacheRoot) {
-    include(
-        "**/chesttracker-port-embedded-*.jar",
-        "**/chest-tracker-port-*.jar",
-        "**/chesttracker-*.jar",
-        "**/Searchables-fabric-*.jar",
-        "**/where-is-it-port-*.jar",
-        "**/xaerolib-fabric-*.jar",
-        "**/xaeros-minimap-*.jar",
-        "**/xaeros-world-map-*.jar",
-        "**/xaeroplus-*.jar",
-        "**/yet-another-config-lib-*.jar"
-    )
-    exclude("**/*-sources.jar")
+    // External mod integrations removed — no embedded JARs
+    include("NEVER_MATCH_ANYTHING_DISABLED_*.jar")
 }
 val sourceNativeNestedJars = fileTree(sourceNativeBuildRoot) {
-    include("**/META-INF/jars/*.jar")
+    // External mod nested JARs removed
 }
-val sourceNativeVendorJars = files(rootProject.file("tools/xaerolib-fabric-1.21.11-1.1.0.jar"))
+val sourceNativeVendorJars = files()
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
 val bundledRuntimeLibs by configurations.creating {
@@ -107,23 +79,7 @@ val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
 val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
 val relocatedMixinConfigs = setOf(
-    "devils-addon.mixins.json",
-    "chesttracker.mixins.json",
-    "whereisit.mixins.json",
-    "searchables.mixins.json",
-    "searchables.fabric.mixins.json",
-    "yacl.mixins.json",
-    "yacl-fabric.mixins.json",
-    "xaerolib.mixins.json",
-    "xaerolib.fabric.mixins.json",
-    "xaerohud.mixins.json",
-    "xaerohud.fabric.mixins.json",
-    "xaerominimap.mixins.json",
-    "xaerominimap.fabric.mixins.json",
-    "xaeroworldmap.mixins.json",
-    "xaeroworldmap.fabric.mixins.json",
-    "xaeroplus.mixins.json",
-    "xaeroplus-fabric.mixins.json"
+    "devils-addon.mixins.json"
 )
 val sourceNativeJavaDirs = listOf(
     file("src/main/thirdparty-audio/java"),
@@ -159,24 +115,9 @@ val sourceNativeJarResourceExcludes = sourceNativeResourceExcludes + arrayOf(
     "module-info.class"
 )
 val sourceNativeJavaExcludes = arrayOf(
-    "dev/isxander/yacl3/mixin/MinecraftMixin.java",
-    "red/jackf/whereisit/client/compat/recipeviewers/**",
-    "red/jackf/whereisit/command/CommandCriteria.java",
     "com/github/benmanes/caffeine/**",
     "net/lenni0451/lambdaevents/**",
-    "xaero/common/mods/SupportAmecs.java",
-    "xaero/common/mixin/MixinFabricBatchableBufferSource.java",
-    "xaero/common/server/mods/argonauts/**",
-    "xaero/common/server/mods/ftbteams/**",
-    "xaero/map/mods/SupportAmecs.java",
-    "xaero/map/server/mods/argonauts/**",
-    "xaero/map/server/mods/ftbteams/**",
-    "xaero/lib/client/compat/prometheus/**",
-    "xaero/lib/common/compat/prometheus/**",
-    "xaero/lib/common/compat/ftbranks/**",
-    "xaero/lib/common/compat/luckperms/**",
-    "xaero/lib/common/compat/permissionapi/**",
-    "architectury_inject_*/**",
+    "architectury_inject_*/**"
 )
 val sharedMainOutput = project(":devils-shared")
     .extensions
@@ -406,7 +347,7 @@ dependencies {
     modImplementation("io.github.llamalad7:mixinextras-fabric:0.5.0")
 
     modCompileOnly("com.terraformersmc:modmenu:17.0.0-beta.1")
-    modCompileOnly("com.misterpemodder:shulkerboxtooltip-fabric:5.2.14+1.21.11")
+    // shulkerboxtooltip removed — not used in code and causes Loom build failure
     modCompileOnly("mcp.mobius.waila:wthit-api:fabric-18.0.4")
     modCompileOnly("maven.modrinth:jade:21.0.1+fabric")
     modCompileOnly("maven.modrinth:litematica:0.25.2")
@@ -477,44 +418,6 @@ tasks {
 
     val verifySourceNativeBuildBasis by registering {
         doLast {
-            val requiredPatchPaths = listOf(
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/api/base/ResultHolder.java"),
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/gps/Coordinate.java"),
-                sourceNativePatchJavaDir.resolve("red/jackf/jackfredlib/client/api/toasts/CustomToast.java")
-            )
-            requiredPatchPaths.forEach { path ->
-                check(path.exists()) {
-                    "Missing source-native patch input: ${path.absolutePath}"
-                }
-            }
-            sourceNativeVendorJars.files.forEach { path ->
-                check(path.isFile) {
-                    "Missing source-native vendor jar: ${path.absolutePath}"
-                }
-            }
-
-            if (!sourceNativeBuildRoot.isDirectory) {
-                logger.lifecycle("Source-native build tree not present; relying on remapped dependency jars and tracked patches.")
-                return@doLast
-            }
-
-            val requiredPaths = listOf(
-                sourceNativeBuildRoot.resolve("chesttracker-port-embedded/red/jackf/chesttracker/impl/ChestTracker.java"),
-                sourceNativeBuildRoot.resolve("where-is-it-port/red/jackf/whereisit/WhereIsIt.java"),
-                sourceNativeBuildRoot.resolve("xaerolib-fabric/xaero/lib/XaeroLibFabric.java"),
-                sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/xaero/minimap/XaeroMinimapFabric.java"),
-                sourceNativeBuildRoot.resolve("xaeros-world-map-fabric/xaero/map/WorldMapFabric.java"),
-                sourceNativeBuildRoot.resolve("xaeroplus-fabric/xaeroplus/fabric/XaeroPlusFabric.java"),
-                sourceNativeBuildRoot.resolve("yet-another-config-lib/dev/isxander/yacl3/platform/PlatformEntrypoint.java"),
-                sourceNativeBuildRoot.resolve("searchables-fabric/searchables.mixins.json"),
-                sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/xaero/common/server/mods/SupportServerMods.java"),
-                sourceNativeBuildRoot.resolve("xaerolib-fabric/xaero/lib/client/compat/amecs/AmecsCompatibility.java")
-            )
-            requiredPaths.forEach { path ->
-                check(path.exists()) {
-                    "Missing source-native build input: ${path.absolutePath}"
-                }
-            }
         }
     }
 

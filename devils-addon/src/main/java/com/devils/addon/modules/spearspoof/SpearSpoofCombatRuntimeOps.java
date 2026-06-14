@@ -236,11 +236,15 @@ abstract class SpearSpoofCombatRuntimeOps extends SpearSpoofCombatContext {
         double leadTicks = 0.0;
         Vec3d targetVel = entity.getVelocity();
         double extraPredictTicks = 0.0;
-        double totalPredictTicks = 0.0;
+        int pingMs = 0;
+        if (module.client().getNetworkHandler() != null && module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()) != null) {
+            pingMs = Math.max(0, module.client().getNetworkHandler().getPlayerListEntry(module.client().player.getUuid()).getLatency());
+        }
+        double totalPredictTicks = (pingMs / 50.0) + extraPredictTicks;
         boolean predictionCollisionAware = false;
-        boolean predictionAuto = false;
-        Vec3d predictedTargetPos = targetPos;
-        Box predictedBox = entity.getBoundingBox();
+        boolean predictionAuto = true;
+        Vec3d predictedTargetPos = targetPos.add(targetVel.multiply(totalPredictTicks));
+        Box predictedBox = entity.getBoundingBox().offset(targetVel.multiply(totalPredictTicks));
         double width = Math.max(predictedBox.getLengthX(), predictedBox.getLengthZ());
         double height = predictedBox.getLengthY();
         boolean smallTarget = entity instanceof PhantomEntity || (width <= 0.90 && height <= 1.10);
@@ -350,6 +354,16 @@ abstract class SpearSpoofCombatRuntimeOps extends SpearSpoofCombatContext {
 
         module.client().interactionManager.attackEntity(module.client().player, strikeTarget);
         module.client().player.swingHand(Hand.MAIN_HAND);
+
+        double dash = module.dashDistance.get();
+        if (dash > 0.0) {
+            Vec3d direction = module.client().player.getRotationVector();
+            if (module.stayGrounded.get()) direction = new Vec3d(direction.x, 0.0, direction.z);
+            if (direction.lengthSquared() > 1.0E-6) {
+                runtime.dashDirection = direction.normalize();
+                runtime.dashRemaining = dash;
+            }
+        }
 
         now = System.currentTimeMillis();
         clearPacketConfirm();

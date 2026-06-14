@@ -94,6 +94,7 @@ abstract class SpearSpoofFlightContext {
     protected static final double LOST_TARGET_IDLE_BRAKE_VERTICAL = 0.55;
     protected static final double LOST_TARGET_FOLLOW_DAMPING = 0.94;
     protected static final double FLOOR_CLEARANCE = 2.2;
+    protected static final double SMALL_TARGET_FLOOR_CLEARANCE = 0.45;
     protected static final double CEILING_CLEARANCE = 1.5;
     protected static final int SAFETY_SCAN = 14;
     protected static final double OBSTACLE_LOOK_AHEAD = 7.5;

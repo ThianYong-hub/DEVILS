@@ -20,7 +20,7 @@ import java.util.Map;
 
 public final class MapIconManager {
     public static final String ICONS_FOLDER = "devils-addon/icons";
-    public static final String DEFAULT_PING_ICON_PATH = "assets/devils-addon/textures/gui/devils_ping_icon_white.png";
+    public static final String DEFAULT_PING_ICON_PATH = "assets/devils-addon/textures/gui/devils_map_icon.png";
     public static final String DEFAULT_MAP_ICON_PATH = "assets/devils-addon/textures/gui/devils_map_icon.png";
     public static final String DEFAULT_EMBEDDED_ICON_PATH = DEFAULT_PING_ICON_PATH;
     private static final int TARGET_ICON_TEXTURE_SIZE = 128;

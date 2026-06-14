@@ -36,8 +36,8 @@ public class ModAutoUpdater extends Module {
     private static final DateTimeFormatter LOG_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter LOG_FILE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final String RUNTIME_LOADER = "fabric";
-    private static final String DEFAULT_EXCLUDED_IDS = "devils-addon,xaerominimap,xaeroworldmap,chesttracker,meteor-client,mioloader";
-    private static final String DEFAULT_EXCLUDED_FILE_TOKENS = "devils-addon,xaerominimap,xaero-world-map,xaeroworldmap,chesttracker,meteor-client,mioloader";
+    private static final String DEFAULT_EXCLUDED_IDS = "devils-addon,meteor-client,mioloader";
+    private static final String DEFAULT_EXCLUDED_FILE_TOKENS = "devils-addon,meteor-client,mioloader";
 
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final SettingGroup sgFilters = settings.createGroup("Filters");

@@ -112,6 +112,7 @@ public class AutoLogin extends Module {
     }
 
     private void tryScheduleAutoLogin(String message) {
+        if (mc.isInSingleplayer() || mc.getCurrentServerEntry() == null) return;
         String username = currentUsername();
         String server = currentServerKey();
         AutoLoginProfile profile = profileStore.findMatchingProfile(username, server);

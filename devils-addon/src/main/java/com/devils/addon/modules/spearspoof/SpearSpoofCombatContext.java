@@ -14,7 +14,7 @@ import java.util.Locale;
 
 abstract class SpearSpoofCombatContext {
     protected static final int ROTATE_PRIORITY = 80;
-    protected static final int RMB_RECHARGE_RELEASE_TICKS = 1;
+    protected static final int RMB_RECHARGE_RELEASE_TICKS = 4;
     protected static final long FORCED_USE_INTERACT_RETRY_MS = 90L;
     protected static final long STRIKE_INTERVAL_MS = 90L;
     protected static final double ENFORCED_MIN_RANGE = 0.40;
@@ -187,7 +187,7 @@ abstract class SpearSpoofCombatContext {
     }
 
     protected void triggerWindupRestart(long now) {
-        runtime.windupRestartTicks = Math.max(runtime.windupRestartTicks, 2);
+        runtime.windupRestartTicks = Math.max(runtime.windupRestartTicks, 4);
         runtime.useStartedAtMs = 0;
         runtime.lastForcedUseInteractMs = 0L;
         runtime.rechargeRebuildUntilMs = Math.max(runtime.rechargeRebuildUntilMs, now + RECHARGE_REBUILD_MS);

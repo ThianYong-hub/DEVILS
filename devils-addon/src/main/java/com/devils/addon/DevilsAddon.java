@@ -9,7 +9,6 @@ import com.devils.addon.modules.AutoCev;
 import com.devils.addon.modules.AutoLogin;
 import com.devils.addon.modules.AutoPearl;
 import com.devils.addon.modules.AutoWasp;
-import com.devils.addon.modules.ChestTrackerModule;
 import com.devils.addon.modules.ClipModules;
 import com.devils.addon.modules.DiscordRPC;
 import com.devils.addon.modules.JoinWatcher;
@@ -65,7 +64,6 @@ public class DevilsAddon extends MeteorAddon {
         StashMoverStrictRuntimeValidation.install();
         StashMoverTargetedRuntimeValidation.install();
         AddonModulesConfig.init();
-        CrashGuard.logXaeroState();
         registerTrackerPlayersSettingFactory();
         registerModules();
         registerCommands();
@@ -100,7 +98,6 @@ public class DevilsAddon extends MeteorAddon {
         modules.add(new MaceSpoof());
         modules.add(new SpearSpoof());
         modules.add(new NukerPlus());
-        modules.add(new ChestTrackerModule());
         modules.add(new StashMover());
     }
 

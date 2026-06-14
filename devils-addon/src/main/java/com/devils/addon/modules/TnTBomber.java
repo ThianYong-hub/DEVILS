@@ -160,6 +160,11 @@ public class TnTBomber extends Module {
     }
 
     private void tickPlaceTnt() {
+        if (target != null && target.getBoundingBox().intersects(mc.player.getBoundingBox())) {
+            error("Target BoundingBox intersects with Player! Aborting to prevent suicide.");
+            toggle();
+            return;
+        }
         // Repair box if any blocks are missing
         BlockPos repairPos = findBrokenBoxBlock();
         if (repairPos != null) {

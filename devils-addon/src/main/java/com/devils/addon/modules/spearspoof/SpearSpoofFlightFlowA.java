@@ -24,7 +24,7 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
 
         boolean hasSnapshot = runtime.lastKnownTargetSeenAtMs > 0L
             && (now - runtime.lastKnownTargetSeenAtMs) <= LOST_TARGET_FOLLOW_MS;
-        if (onlyWhileElytra.get() && !gliding && !inLiquid) {
+        if (module.isActive() && !gliding && !inLiquid && onlyWhileElytra.get()) {
             if (!hasSnapshot) {
                 applyIdleBrake(event);
                 return;
@@ -316,6 +316,7 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
     protected Vec3d applyAutoWaspAvoidLanding(Vec3d targetPos, LivingEntity target) {
         if (target == null || module.client().world == null) return targetPos;
         if (target instanceof PlayerEntity) return targetPos;
+        if (isSmallTarget(target)) return targetPos;
 
         double d = target.getBoundingBox().getLengthX() / 2.0;
         for (Direction dir : DirectionAccessor.meteor$getHorizontal()) {

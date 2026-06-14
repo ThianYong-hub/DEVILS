@@ -64,6 +64,7 @@ public class AutoPearl extends Module {
     public final AutoPearlTrajectory.EscapeHelper escapeHelper = new AutoPearlTrajectory.EscapeHelper(this);
 
     public PlayerEntity target;
+    private Box cachedTargetBox;
     private int tickTimer;
     private boolean waitingForTeleport;
     private Vec3d posBeforeThrow;
