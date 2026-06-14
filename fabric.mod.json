@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "devils-addon",
-  "version": "${version}",
+  "version": "0.0.60",
   "name": "Devils",
   "description": "Anarchy-focused Meteor Client addon with combat, stash, ping, and utility tools.",
   "icon": "assets/devils-addon/icon.png",
