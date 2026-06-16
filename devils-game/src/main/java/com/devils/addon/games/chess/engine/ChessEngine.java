@@ -78,16 +78,8 @@ public final class ChessEngine implements AutoCloseable {
     public boolean init() {
         if (initialized.get()) return true;
 
-        if (!NativeLoader.load()) {
-            DevilsGameAddon.LOG.warn("[ChessEngine] Native library unavailable: {}", NativeLoader.getLoadError());
-            return false;
-        }
-
         try {
-            String workDir = NativeLoader.getExtractionDir() != null
-                ? NativeLoader.getExtractionDir().toAbsolutePath().toString()
-                : null;
-            StockfishBridge.init(workDir);
+            StockfishBridge.init(null);
         } catch (Exception e) {
             DevilsGameAddon.LOG.error("[ChessEngine] Failed to init Stockfish bridge", e);
             return false;
@@ -236,12 +228,7 @@ public final class ChessEngine implements AutoCloseable {
         StockfishBridge.sendCommand("setoption name Hash value " + hashMb);
         StockfishBridge.sendCommand("setoption name Threads value " + threads);
 
-        // Point Stockfish to the extracted NNUE network file
-        String nnueFile = NativeLoader.findNnueFile();
-        if (nnueFile != null) {
-            StockfishBridge.sendCommand("setoption name EvalFile value " + nnueFile);
-        }
-
+        // Stockfish 16+ has built-in NNUE; no external EvalFile needed.
         StockfishBridge.sendCommand("setoption name Skill Level value " + skillLevel);
         StockfishBridge.sendCommand("setoption name Move Overhead value " + moveOverhead);
         StockfishBridge.sendCommand("setoption name MultiPV value " + multiPv);
@@ -279,7 +266,7 @@ public final class ChessEngine implements AutoCloseable {
     private void readerLoop() {
         try {
             while (running.get() && StockfishBridge.isRunning()) {
-                String line = StockfishBridge.readLine();
+                String line = StockfishBridge.readLine(1000);
                 if (line == null) break;
                 lineQueue.offer(line);
                 processLine(line);

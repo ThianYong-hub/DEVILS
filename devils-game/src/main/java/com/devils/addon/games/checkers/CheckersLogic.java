@@ -54,14 +54,6 @@ public final class CheckersLogic {
         return generateLegalMoves(position);
     }
 
-    public static String randomScriptMove(String state, Random random) {
-        return scriptMove(state, random, 2);
-    }
-
-    public static String scriptMove(String state, Random random, int level) {
-        return CheckersScriptBot.chooseMove(state, random, level);
-    }
-
     public static ApplyResult applyMove(String state, String moveText) {
         Position position = parseOrInitial(state);
         Move requested = parseMove(moveText);

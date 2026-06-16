@@ -17,7 +17,6 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 public final class CheckersGameScreen extends Screen {
     public enum Mode {
-        SCRIPT,
         SYNC
     }
     private static final int DARK_BG = 0xEF101A12;
@@ -48,7 +47,7 @@ public final class CheckersGameScreen extends Screen {
     public CheckersGameScreen(Screen parent, Mode mode) {
         super(Text.literal("Checkers"));
         this.parent = parent;
-        this.mode = mode == null ? Mode.SCRIPT : mode;
+        this.mode = mode == null ? Mode.SYNC : mode;
     }
     @Override
     public void tick() {
@@ -214,7 +213,7 @@ public final class CheckersGameScreen extends Screen {
         context.fill(board.x, panelY, board.x + 1, panelY + panelH, PANEL_BORDER);
         context.fill(board.x + board.size - 1, panelY, board.x + board.size, panelY + panelH, PANEL_BORDER);
         context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 14, 0xFFFFFFFF);
-        String modeText = mode == Mode.SYNC ? "Mode: Game Sync" : "Mode: Script";
+        String modeText = "Mode: Game Sync";
         context.drawTextWithShadow(textRenderer, Text.literal(modeText), board.x + 10, panelY + 8, 0xFFDFF8E3);
         String turnText = "Turn: " + (CheckersLogic.isWhiteTurn(boardState) ? "White" : "Black");
         context.drawTextWithShadow(textRenderer, Text.literal(turnText), board.x + 10, panelY + 22, 0xFFDFF8E3);
@@ -225,20 +224,12 @@ public final class CheckersGameScreen extends Screen {
             String you = session.localWhite() ? "You: White" : "You: Black";
             context.drawTextWithShadow(textRenderer, Text.literal(you), board.x + 10, panelY + 52, 0xFFBDEEC8);
             context.drawTextWithShadow(textRenderer, Text.literal("Opponent: " + safe(session.opponentName())), board.x + 130, panelY + 52, 0xFFBDEEC8);
-        } else if (mode == Mode.SCRIPT) {
-            context.drawTextWithShadow(textRenderer, Text.literal("Play White vs script (Black)."), board.x + 10, panelY + 52, 0xFFBDEEC8);
         }
         int btnY = panelY + 64;
         if (mode == Mode.SYNC) {
             addButton(context, board.x + 10, btnY, 132, 20, "Leave Match", () -> {
                 runtime.leaveSession(GameType.CHECKERS);
                 close();
-            });
-        } else {
-            addButton(context, board.x + 10, btnY, 132, 20, "Restart", () -> {
-                boardState = CheckersLogic.initialState();
-                statusText = "";
-                stagedPath.clear();
             });
         }
         addButton(context, board.x + board.size - 132 - 10, btnY, 132, 20, "Back", this::close);
@@ -326,27 +317,6 @@ public final class CheckersGameScreen extends Screen {
             if (!result.ok()) statusText = "Move rejected: " + result.error();
             else statusText = "Move sent: " + encoded;
             return;
-        }
-        CheckersLogic.ApplyResult applied = CheckersLogic.applyMove(boardState, encoded);
-        if (!applied.ok()) {
-            statusText = "Illegal move.";
-            return;
-        }
-        boardState = applied.state();
-        if (!applied.winner().isBlank()) {
-            statusText = "Winner: " + applied.winner();
-            return;
-        }
-        String botMove = CheckersLogic.randomScriptMove(boardState, random);
-        if (botMove.isBlank()) {
-            statusText = "Script has no legal move.";
-            return;
-        }
-        CheckersLogic.ApplyResult botApplied = CheckersLogic.applyMove(boardState, botMove);
-        if (botApplied.ok()) {
-            boardState = botApplied.state();
-            if (!botApplied.winner().isBlank()) statusText = "Winner: " + botApplied.winner();
-            else statusText = "Script move: " + botMove;
         }
     }
     private List<Coord> collectHints(List<Move> legal) {

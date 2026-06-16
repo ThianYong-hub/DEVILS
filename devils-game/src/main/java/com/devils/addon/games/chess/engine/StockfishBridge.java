@@ -1,73 +1,188 @@
 package com.devils.addon.games.chess.engine;
 
+import java.io.*;
+import java.nio.file.Path;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+
 /**
- * JNI bridge to the Stockfish chess engine.
+ * ProcessBuilder bridge to the Stockfish chess engine.
  * <p>
- * Communication model: Stockfish runs its UCI loop on a background thread inside
- * the native library. Java sends commands via {@link #sendCommand} and reads
- * responses via {@link #readLine}. Stdin/stdout are redirected to in-memory pipes.
+ * Communication model: Stockfish runs as a child process. Java sends commands via
+ * stdin and reads responses from stdout.
  * <p>
  * Lifecycle:
  * <ol>
- *   <li>{@link NativeLoader#load()} — extracts and loads the shared library</li>
- *   <li>{@link #init(String)} — starts the Stockfish UCI loop on a native thread</li>
+ *   <li>{@link #init(String)} — starts the Stockfish process</li>
  *   <li>{@link #sendCommand} / {@link #readLine} — UCI dialogue</li>
- *   <li>{@link #shutdown()} — sends "quit" and joins the native thread</li>
+ *   <li>{@link #shutdown()} — sends "quit" and waits for process exit</li>
  * </ol>
- * <p>
- * Thread safety: all native methods are internally synchronized on the native side.
- * {@link #readLine()} blocks until a line is available or the engine shuts down.
  */
 public final class StockfishBridge {
 
+    private static final String LOG_PREFIX = "[StockfishBridge]";
+
+    private static volatile Process process;
+    private static volatile BufferedWriter stdin;
+    private static volatile BlockingQueue<String> outputQueue;
+    private static volatile Thread readerThread;
+    private static volatile boolean running;
+
     private StockfishBridge() {}
 
-    // ─── Native methods ───────────────────────────────────────────────────────
-
     /**
-     * Initializes the Stockfish engine.
-     * <p>
-     * Starts a background thread running the UCI loop. Stdin/stdout are captured
-     * via internal pipes so that {@link #sendCommand} and {@link #readLine} can
-     * communicate with the engine.
+     * Initializes the Stockfish engine by launching stockfish.exe as a subprocess.
      *
      * @param workDir working directory path (where NNUE files reside); may be null
-     *                to use the current directory
-     * @throws IllegalStateException if the engine is already running
+     * @throws Exception if the engine fails to start
      */
-    public static native void init(String workDir);
+    public static synchronized void init(String workDir) throws Exception {
+        if (running) {
+            shutdown();
+        }
+
+        String stockfishPath = NativeLoader.getStockfishPath();
+        if (stockfishPath == null || stockfishPath.isEmpty()) {
+            throw new IllegalStateException(LOG_PREFIX + " Stockfish executable not found.");
+        }
+
+        ProcessBuilder pb = new ProcessBuilder(stockfishPath);
+        if (workDir != null) {
+            pb.directory(new File(workDir));
+        }
+        pb.redirectErrorStream(false);
+
+        process = pb.start();
+        stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), "UTF-8"));
+        outputQueue = new LinkedBlockingQueue<>();
+
+        // Start reader thread
+        running = true;
+        readerThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), "UTF-8"))) {
+                String line;
+                while (running && (line = reader.readLine()) != null) {
+                    outputQueue.offer(line);
+                }
+            } catch (IOException e) {
+                if (running) {
+                    System.err.println(LOG_PREFIX + " Reader error: " + e.getMessage());
+                }
+            } finally {
+                outputQueue.offer("__ENGINE_EXITED__");
+            }
+        }, "stockfish-process-reader");
+        readerThread.setDaemon(true);
+        readerThread.start();
+
+        // Wait for UCI handshake
+        Thread.sleep(200);
+        sendCommand("uci");
+
+        // Read lines until we get "uciok"
+        String line;
+        while ((line = readLine(5000)) != null) {
+            if ("uciok".equals(line)) {
+                break;
+            }
+        }
+
+        sendCommand("isready");
+        while ((line = readLine(5000)) != null) {
+            if ("readyok".equals(line)) {
+                break;
+            }
+        }
+
+        System.out.println(LOG_PREFIX + " Stockfish process started (pid=" + process.pid() + ")");
+    }
 
     /**
-     * Sends a UCI command to the engine.
-     * <p>
-     * The command is written to the engine's redirected stdin. A trailing newline
-     * is appended automatically if not present.
+     * Sends a command to the Stockfish engine.
      *
-     * @param command the UCI command string, e.g. "uci", "position startpos", "go depth 20"
+     * @param command UCI command string
      * @throws IllegalStateException if the engine is not running
      */
-    public static native void sendCommand(String command);
+    public static synchronized void sendCommand(String command) {
+        if (!running || stdin == null) {
+            throw new IllegalStateException(LOG_PREFIX + " Engine is not running");
+        }
+        try {
+            stdin.write(command);
+            stdin.newLine();
+            stdin.flush();
+        } catch (IOException e) {
+            throw new IllegalStateException(LOG_PREFIX + " Failed to send command: " + command, e);
+        }
+    }
 
     /**
-     * Reads one line from the engine's redirected stdout.
-     * <p>
-     * This method blocks until a complete line is available. Returns null if the
-     * engine has shut down and the pipe is empty.
+     * Reads the next line from the Stockfish engine.
      *
-     * @return a line of engine output, or null if EOF
+     * @param timeoutMs maximum time to wait for a line in milliseconds
+     * @return the line read, or null if timed out or engine exited
      */
-    public static native String readLine();
+    public static String readLine(long timeoutMs) {
+        if (!running || outputQueue == null) {
+            return null;
+        }
+        try {
+            String line = outputQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
+            if ("__ENGINE_EXITED__".equals(line)) {
+                running = false;
+                return null;
+            }
+            return line;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
 
     /**
-     * Returns true if the engine process is still running and can accept commands.
+     * Shuts down the Stockfish engine process.
      */
-    public static native boolean isRunning();
+    public static synchronized void shutdown() {
+        running = false;
 
-    /**
-     * Sends "quit" to the engine and waits for the background thread to finish.
-     * <p>
-     * Safe to call multiple times. After this call, {@link #init(String)} may be
-     * called again to restart.
-     */
-    public static native void shutdown();
+        // Send quit command
+        if (stdin != null) {
+            try {
+                stdin.write("quit");
+                stdin.newLine();
+                stdin.flush();
+                stdin.close();
+            } catch (Exception ignored) {}
+            stdin = null;
+        }
+
+        // Wait for process to exit
+        if (process != null && process.isAlive()) {
+            try {
+                process.waitFor(3, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            if (process.isAlive()) {
+                process.destroyForcibly();
+            }
+            process = null;
+        }
+
+        // Interrupt reader thread
+        if (readerThread != null) {
+            readerThread.interrupt();
+            readerThread = null;
+        }
+
+        outputQueue = null;
+        System.out.println(LOG_PREFIX + " Stockfish process shut down");
+    }
+
+    /** Returns true if the engine process is running. */
+    public static boolean isRunning() {
+        return running && process != null && process.isAlive();
+    }
 }
