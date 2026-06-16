@@ -141,6 +141,15 @@ public final class ChessEngine implements AutoCloseable {
         StockfishBridge.sendCommand(goCmd.toString());
         System.err.println("[ChessEngine] >> " + goCmd + " (depth=" + depth + ", movetime=" + movetime + ", defaultDepth=" + defaultDepth + ")");
 
+        // Safety timeout: if bestmove not received within 60s, fail the future
+        long timeoutMs = Math.max(movetime, defaultDepth * 2000L) + 30000L;
+        future.orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+              .exceptionally(ex -> {
+                  System.err.println("[ChessEngine] TIMEOUT after " + timeoutMs + "ms — no bestmove received");
+                  StockfishBridge.sendCommand("stop");
+                  return null;
+              });
+
         return future;
     }
 
@@ -271,10 +280,15 @@ public final class ChessEngine implements AutoCloseable {
         System.err.println("[ChessEngine] readerLoop STARTED, running=" + running.get() + " sfRunning=" + StockfishBridge.isRunning());
         try {
             while (running.get() && StockfishBridge.isRunning()) {
-                String line = StockfishBridge.readLine(1000);
+                String line = StockfishBridge.readLine(2000);
                 if (line == null) {
-                    System.err.println("[ChessEngine] readerLoop: readLine returned null (timeout or exit)");
-                    break;
+                    // Timeout or engine exited — check if engine is still alive
+                    if (!StockfishBridge.isRunning()) {
+                        System.err.println("[ChessEngine] readerLoop: engine exited, breaking");
+                        break;
+                    }
+                    // Engine alive but no output yet — continue waiting
+                    continue;
                 }
                 System.err.println("[ChessEngine] << " + line);
                 lineQueue.offer(line);
