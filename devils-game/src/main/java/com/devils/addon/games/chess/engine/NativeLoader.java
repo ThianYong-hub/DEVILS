@@ -146,20 +146,27 @@ public final class NativeLoader {
 
     private static void extractNnueFiles(String platformKey, Path targetDir) throws IOException {
         // NNUE files are stored at /native/{platformKey}/nn-*.nnue
-        // We scan the known default NNUE name from Stockfish
         String[] knownNnue = {
             "nn-1111cefa1111.nnue",    // Default big net
             "nn-37f18f62d772.nnue"     // Default small net
         };
 
+        boolean extractedFromJar = false;
         for (String nnue : knownNnue) {
             String path = "/native/" + platformKey + "/" + nnue;
             try (InputStream is = NativeLoader.class.getResourceAsStream(path)) {
                 if (is != null) {
                     Files.copy(is, targetDir.resolve(nnue), StandardCopyOption.REPLACE_EXISTING);
                     DevilsGameAddon.LOG.info("[Stockfish] Extracted NNUE: {}", nnue);
+                    extractedFromJar = true;
                 }
             }
+        }
+
+        // Fallback: if no NNUE files were found in the JAR, download them
+        if (!extractedFromJar) {
+            DevilsGameAddon.LOG.info("[Stockfish] No bundled NNUE files found, attempting download...");
+            NnueDownloader.ensureNnueFiles(targetDir);
         }
     }
 
