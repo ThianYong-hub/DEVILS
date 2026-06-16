@@ -20,6 +20,7 @@ import org.lwjgl.glfw.GLFW;
 public final class ChessOverlay extends Module {
     public enum PlayMode {
         SCRIPT,
+        STOCKFISH,
         SYNC
     }
 
@@ -43,6 +44,33 @@ public final class ChessOverlay extends Module {
         .min(1)
         .sliderRange(1, 7)
         .visible(() -> mode.get() == PlayMode.SCRIPT)
+        .build()
+    );
+    private final Setting<Integer> sfDepth = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-depth")
+        .description("Stockfish search depth (higher = stronger but slower).")
+        .defaultValue(15)
+        .min(1)
+        .sliderRange(1, 30)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
+        .build()
+    );
+    private final Setting<Integer> sfSkill = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-skill")
+        .description("Stockfish skill level (0 = weakest, 20 = full strength).")
+        .defaultValue(20)
+        .min(0)
+        .sliderRange(0, 20)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
+        .build()
+    );
+    private final Setting<Integer> sfHash = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-hash")
+        .description("Hash table size in MB for Stockfish.")
+        .defaultValue(128)
+        .min(1)
+        .sliderRange(1, 1024)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
         .build()
     );
     private final Setting<Boolean> pinned = sgGeneral.add(new BoolSetting.Builder()
@@ -103,12 +131,14 @@ public final class ChessOverlay extends Module {
         ensureWindowInitialized();
         GameLaunchCoordinator.activateExclusive(ChessOverlay.class);
         session.setScriptLevel(scriptLevel.get());
+        session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
         session.onActivate(mode.get());
         GamesCursorController.acquire(client());
     }
 
     @Override
     public void onDeactivate() {
+        session.shutdownEngine();
         window.stopInteraction();
         GamesCursorController.release(client());
     }
@@ -118,6 +148,7 @@ public final class ChessOverlay extends Module {
         GameCrashGuard.run(this, "chessOverlayTick", () -> {
             if (!isActive()) return;
             session.setScriptLevel(scriptLevel.get());
+            session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
             session.onTick(mode.get());
             GamesCursorController.update(client());
         });

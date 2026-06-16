@@ -17,6 +17,7 @@ final class ChessScriptBot {
 
     static String chooseMove(String fen, Random random, int rawLevel) {
         int level = clamp(rawLevel, 1, 7);
+
         Profile profile = Profile.forLevel(level);
 
         ChessCore.ChessState root = ChessCore.parseFenOrInitial(fen, ChessLogic.INITIAL_FEN);
@@ -31,7 +32,12 @@ final class ChessScriptBot {
         int pvKey = 0;
 
         for (int depth = 1; depth <= profile.maxDepth; depth++) {
-            RootSearchResult current = searchRoot(root, legal, depth, guess, pvKey, previousRootScores, profile, ctx);
+            RootSearchResult current;
+            if (depth >= 5 && profile.useTable) {
+                current = aspirationSearch(root, legal, depth, guess, pvKey, previousRootScores, profile, ctx);
+            } else {
+                current = searchRoot(root, legal, depth, guess, pvKey, previousRootScores, profile, ctx);
+            }
             if (current == null || current.ranked.isEmpty()) break;
             lastCompleted = current;
             guess = current.bestScore;
@@ -47,60 +53,56 @@ final class ChessScriptBot {
         return lastCompleted.ranked.get(pick).move.toUci();
     }
 
-    private static RootSearchResult searchRoot(
+    private static RootSearchResult aspirationSearch(
         ChessCore.ChessState root,
         List<ChessLogic.Move> legal,
         int depth,
         int guess,
-        int pvKey,
-        Map<Integer, Integer> previousRootScores,
+        int pv,
+        Map<Integer, Integer> prevScores,
         Profile profile,
         SearchContext ctx
     ) {
-        if (profile.useAspiration && depth >= 3) {
-            int delta = 36 + depth * 10;
-            int alpha = Math.max(-MATE_SCORE, guess - delta);
-            int beta = Math.min(MATE_SCORE, guess + delta);
-            int loops = 0;
-            while (loops++ < 5 && !ctx.stop()) {
-                RootSearchResult attempt = rootWindow(root, legal, depth, alpha, beta, pvKey, previousRootScores, profile, ctx);
-                if (attempt == null) return null;
-                if (attempt.bestScore <= alpha) {
-                    alpha = Math.max(-MATE_SCORE, alpha - delta * 2);
-                    delta *= 2;
-                    continue;
-                }
-                if (attempt.bestScore >= beta) {
-                    beta = Math.min(MATE_SCORE, beta + delta * 2);
-                    delta *= 2;
-                    continue;
-                }
-                return attempt;
+        int delta = 45;
+        int alpha = guess - delta;
+        int beta = guess + delta;
+
+        RootSearchResult result = null;
+        for (int attempt = 0; attempt < 5; attempt++) {
+            result = searchRoot(root, legal, depth, alpha, beta, pv, prevScores, profile, ctx);
+            if (result == null || result.ranked.isEmpty()) return result;
+
+            int score = result.bestScore;
+            if (score <= alpha) {
+                alpha = Math.max(score - delta, -MATE_SCORE);
+                beta = (alpha + beta) / 2;
+            } else if (score >= beta) {
+                beta = Math.min(score + delta, MATE_SCORE);
+                alpha = (alpha + beta) / 2;
+            } else {
+                return result;
             }
+            delta += delta + delta / 2;
         }
-        return rootWindow(root, legal, depth, -MATE_SCORE, MATE_SCORE, pvKey, previousRootScores, profile, ctx);
+        return result;
     }
 
-    private static RootSearchResult rootWindow(
+    private static RootSearchResult searchRoot(
         ChessCore.ChessState root,
         List<ChessLogic.Move> legal,
         int depth,
         int alpha,
         int beta,
-        int pvKey,
-        Map<Integer, Integer> previousRootScores,
+        int pv,
+        Map<Integer, Integer> prevScores,
         Profile profile,
         SearchContext ctx
     ) {
-        long hash = ChessScriptHeuristics.stateHash(root);
-        TTEntry tt = profile.useTable ? ctx.table.get(hash) : null;
-        int ttKey = tt == null ? 0 : tt.bestMoveKey;
+        int pvKey = pv;
+        int guess = alpha;
 
-        ArrayList<ChessLogic.Move> ordered = new ArrayList<>(legal);
-        ordered.sort((a, b) -> Integer.compare(
-            rootOrderScore(root, b, ttKey, pvKey, previousRootScores, ctx),
-            rootOrderScore(root, a, ttKey, pvKey, previousRootScores, ctx)
-        ));
+        List<ChessLogic.Move> ordered = orderRootMoves(legal, prevScores, pvKey);
+        if (ordered.isEmpty()) return null;
 
         int bestScore = -MATE_SCORE;
         ChessLogic.Move bestMove = ordered.get(0);
@@ -140,6 +142,19 @@ final class ChessScriptBot {
         return new RootSearchResult(bestMove, bestScore, scored, map);
     }
 
+    private static RootSearchResult searchRoot(
+        ChessCore.ChessState root,
+        List<ChessLogic.Move> legal,
+        int depth,
+        int guess,
+        int pv,
+        Map<Integer, Integer> prevScores,
+        Profile profile,
+        SearchContext ctx
+    ) {
+        return searchRoot(root, legal, depth, -MATE_SCORE, MATE_SCORE, pv, prevScores, profile, ctx);
+    }
+
     private static int search(
         ChessCore.ChessState state,
         int depth,
@@ -164,55 +179,99 @@ final class ChessScriptBot {
         if (cached != null && cached.depth >= searchDepth) {
             if (cached.flag == FLAG_EXACT) return cached.score;
             if (cached.flag == FLAG_LOWER) alpha = Math.max(alpha, cached.score);
-            else beta = Math.min(beta, cached.score);
+            else if (cached.flag == FLAG_UPPER) beta = Math.min(beta, cached.score);
             if (alpha >= beta) return cached.score;
         }
 
-        if (profile.useNullMove && searchDepth >= 4 && !inCheck && hasNonPawnMaterial(state, state.whiteToMove)) {
-            ChessCore.ChessState nullState = state.copy();
-            if (!nullState.whiteToMove) nullState.fullmoveNumber++;
-            nullState.whiteToMove = !nullState.whiteToMove;
-            nullState.epX = -1;
-            nullState.epY = -1;
-            nullState.halfmoveClock++;
-            int reduction = 2 + (searchDepth / 4);
-            int nullScore = -search(nullState, searchDepth - 1 - reduction, -beta, -beta + 1, ply + 1, profile, ctx);
-            if (nullScore >= beta) return nullScore;
+        boolean pvNode = beta - alpha > 1;
+
+        // Null move pruning
+        if (profile.nullMove && !inCheck && !pvNode && depth >= 3) {
+            int nonPawn = countNonPawnPieces(state);
+            if (nonPawn > 1) {
+                int R = 3 + depth / 6;
+                ChessCore.ChessState next = state.copy();
+                next.whiteToMove = !next.whiteToMove;
+                next.epX = -1;
+                next.epY = -1;
+                int score = -search(next, depth - R - 1, -beta, -beta + 1, ply + 1, profile, ctx);
+                if (score >= beta) return beta;
+            }
         }
 
-        List<ChessLogic.Move> legal = ChessCore.generateLegalMoves(state);
-        if (legal.isEmpty()) return inCheck ? (-MATE_SCORE + ply) : 0;
+        // Razoring — at low depth, if static eval is far below alpha, go to quiescence
+        if (profile.futilityPruning && !inCheck && !pvNode && depth <= 3) {
+            int staticEval = ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
+            int margin = 120 * depth;
+            if (staticEval + margin <= alpha) {
+                int qScore = quiescence(state, alpha, beta, 0, profile, ctx, inCheck);
+                if (qScore <= alpha) return qScore;
+            }
+        }
 
-        orderMoves(state, legal, ply, ttMove, ctx);
+        List<ChessLogic.Move> moves = ChessCore.generateLegalMoves(state);
+        if (moves.isEmpty()) return inCheck ? -MATE_SCORE + ply : 0;
+
+        List<ChessLogic.Move> ordered = orderMoves(state, moves, ply, ttMove, ctx);
+        int best = -MATE_SCORE - 1;
+        ChessLogic.Move bestMove = ordered.get(0);
         int originalAlpha = alpha;
-        int best = -MATE_SCORE;
-        ChessLogic.Move bestMove = legal.get(0);
         int moveIndex = 0;
+        boolean improving = !inCheck && depth >= 2 && ply >= 2 &&
+                ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight) >=
+                ctx.evalStack[ply - 2];
+        ctx.evalStack[ply] = ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
 
-        for (ChessLogic.Move move : legal) {
-            if (ctx.stop()) break;
+        for (ChessLogic.Move move : ordered) {
+            if (ctx.hitNode(profile)) break;
             moveIndex++;
+            boolean tactical = ChessScriptHeuristics.isTactical(state, move);
+            char piece = state.board[move.fromY()][move.fromX()];
+            boolean givesCheck = moveGivesCheck(state, move);
+
+            // Futility pruning
+            if (profile.futilityPruning && !inCheck && !tactical && !givesCheck && !pvNode && depth <= 6 && moveIndex > 1) {
+                int staticEval = ctx.evalStack[ply];
+                int fMargin = 50 + 70 * depth;
+                if (!improving) fMargin += 30;
+                if (staticEval + fMargin <= alpha) {
+                    continue;
+                }
+            }
+
+            // Late move pruning
+            if (!inCheck && !tactical && !pvNode && depth <= 4 && moveIndex > 3 + depth * depth) {
+                continue;
+            }
+
+            // SEE pruning at low depth
+            if (!inCheck && depth <= 2 && !tactical && moveIndex > 4) {
+                continue;
+            }
 
             ChessCore.ChessState next = state.copy();
             ChessCore.applyUnchecked(next, move);
 
-            boolean tactical = ChessScriptHeuristics.isTactical(state, move);
+            // Late Move Reductions
             int reduction = 0;
-            if (profile.useLmr && searchDepth >= 3 && moveIndex > 3 && !inCheck && !tactical) {
-                reduction = 1;
+            if (depth >= 3 && moveIndex > 1 && !tactical) {
+                reduction = (int) (0.77 + Math.log(depth) * Math.log(moveIndex) * 0.52);
+                if (!improving) reduction++;
+                if (inCheck) reduction--;
+                if (reduction < 0) reduction = 0;
                 if (searchDepth >= 6 && moveIndex > 8) reduction++;
             }
 
             int score;
             if (moveIndex == 1) {
-                score = -search(next, searchDepth - 1, -beta, -alpha, ply + 1, profile, ctx);
+                score = -search(next, depth - 1, -beta, -alpha, ply + 1, profile, ctx);
             } else {
-                score = -search(next, searchDepth - 1 - reduction, -alpha - 1, -alpha, ply + 1, profile, ctx);
+                score = -search(next, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, profile, ctx);
                 if (reduction > 0 && score > alpha) {
-                    score = -search(next, searchDepth - 1, -alpha - 1, -alpha, ply + 1, profile, ctx);
+                    score = -search(next, depth - 1, -alpha - 1, -alpha, ply + 1, profile, ctx);
                 }
                 if (score > alpha && score < beta) {
-                    score = -search(next, searchDepth - 1, -beta, -alpha, ply + 1, profile, ctx);
+                    score = -search(next, depth - 1, -beta, -alpha, ply + 1, profile, ctx);
                 }
             }
 
@@ -246,60 +305,127 @@ final class ChessScriptBot {
         SearchContext ctx,
         boolean inCheck
     ) {
-        int standPat = ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
-        if (standPat >= beta) return standPat;
-        if (standPat > alpha) alpha = standPat;
-        if (qDepth <= 0) return alpha;
-        if (ctx.hitNode(profile)) return alpha;
+        if (ctx.hitNode(profile)) return ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
 
-        List<ChessLogic.Move> legal = ChessCore.generateLegalMoves(state);
-        if (legal.isEmpty()) return inCheck ? -MATE_SCORE + 1 : 0;
+        if (qDepth <= 0 && !inCheck) {
+            int standPat = ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
+            if (standPat >= beta) return standPat;
+            alpha = Math.max(alpha, standPat);
+        }
 
-        orderMoves(state, legal, 0, 0, ctx);
-        for (ChessLogic.Move move : legal) {
-            if (!inCheck && !ChessScriptHeuristics.isTactical(state, move)) continue;
+        List<ChessLogic.Move> moves = ChessCore.generateLegalMoves(state);
+        if (moves.isEmpty()) return inCheck ? -MATE_SCORE + 1 : 0;
+
+        List<ChessLogic.Move> ordered;
+        if (inCheck) {
+            ordered = orderMoves(state, moves, 0, 0, ctx);
+        } else {
+            ordered = new ArrayList<>();
+            for (ChessLogic.Move m : moves) {
+                if (ChessScriptHeuristics.isTactical(state, m)) {
+                    ordered.add(m);
+                }
+            }
+            ordered.sort((a, b) -> {
+                int sa = qCaptureScore(state, a);
+                int sb = qCaptureScore(state, b);
+                return Integer.compare(sb, sa);
+            });
+        }
+
+        for (ChessLogic.Move move : ordered) {
+            if (ctx.hitNode(profile)) break;
+            if (!inCheck) {
+                // Delta pruning
+                int delta = ChessScriptHeuristics.pieceValue(state.board[move.toY()][move.toX()]) + 220;
+                if (move.promotion() != 0) delta += 780;
+                int stand = ChessScriptHeuristics.evaluateForSideToMove(state, profile.mobilityWeight);
+                if (stand + delta <= alpha) continue;
+
+                // SEE-based pruning for losing captures
+                if (qDepth <= 0) {
+                    int seeVal = estimateSEE(state, move);
+                    if (seeVal < 0) continue;
+                }
+            }
+
             ChessCore.ChessState next = state.copy();
             ChessCore.applyUnchecked(next, move);
-            int score = -quiescence(next, -beta, -alpha, qDepth - 1, profile, ctx, ChessCore.isInCheck(next, next.whiteToMove));
+            int score = -quiescence(next, -beta, -alpha, qDepth - 1, profile, ctx, false);
             if (score >= beta) return score;
-            if (score > alpha) alpha = score;
+            alpha = Math.max(alpha, score);
         }
         return alpha;
     }
 
-    private static boolean hasNonPawnMaterial(ChessCore.ChessState state, boolean white) {
+    private static int estimateSEE(ChessCore.ChessState state, ChessLogic.Move move) {
+        char attacker = state.board[move.fromY()][move.fromX()];
+        char victim = state.board[move.toY()][move.toX()];
+        if (victim == '.') return 0;
+        return ChessScriptHeuristics.pieceValue(victim) - ChessScriptHeuristics.pieceValue(attacker) / 2;
+    }
+
+    private static int qCaptureScore(ChessCore.ChessState state, ChessLogic.Move move) {
+        char target = state.board[move.toY()][move.toX()];
+        char piece = state.board[move.fromY()][move.fromX()];
+        int score = 0;
+        if (target != '.') score += 10 * ChessScriptHeuristics.pieceValue(target) - ChessScriptHeuristics.pieceValue(piece);
+        if (move.promotion() != 0) score += ChessScriptHeuristics.pieceValue(move.promotion());
+        return score;
+    }
+
+    private static int countNonPawnPieces(ChessCore.ChessState state) {
+        int count = 0;
         for (int y = 0; y < 8; y++) {
             for (int x = 0; x < 8; x++) {
                 char p = state.board[y][x];
-                if (p == '.' || Character.isUpperCase(p) != white) continue;
                 char t = Character.toLowerCase(p);
-                if (t != 'k' && t != 'p') return true;
+                if (t != '.' && t != 'p' && t != 'k') count++;
             }
         }
-        return false;
+        return count;
     }
 
-    private static void orderMoves(ChessCore.ChessState state, List<ChessLogic.Move> moves, int ply, int ttMoveKey, SearchContext ctx) {
-        moves.sort((a, b) -> Integer.compare(
-            moveOrderScore(state, b, ply, ttMoveKey, ctx),
-            moveOrderScore(state, a, ply, ttMoveKey, ctx)
-        ));
+    private static boolean moveGivesCheck(ChessCore.ChessState state, ChessLogic.Move move) {
+        ChessCore.ChessState next = state.copy();
+        ChessCore.applyUnchecked(next, move);
+        return ChessCore.isInCheck(next, next.whiteToMove);
     }
 
-    private static int rootOrderScore(
+    private static List<ChessLogic.Move> orderMoves(
         ChessCore.ChessState state,
-        ChessLogic.Move move,
+        List<ChessLogic.Move> moves,
+        int ply,
         int ttMoveKey,
-        int pvKey,
-        Map<Integer, Integer> previousRootScores,
         SearchContext ctx
     ) {
-        int key = moveKey(move);
-        int score = moveOrderScore(state, move, 0, ttMoveKey, ctx);
-        if (key == pvKey) score += 1_500_000;
-        Integer prev = previousRootScores.get(key);
-        if (prev != null) score += prev;
-        return score;
+        List<ChessLogic.Move> ordered = new ArrayList<>(moves);
+        ordered.sort((a, b) -> {
+            int sa = moveOrderScore(state, a, ply, ttMoveKey, ctx);
+            int sb = moveOrderScore(state, b, ply, ttMoveKey, ctx);
+            return Integer.compare(sb, sa);
+        });
+        return ordered;
+    }
+
+    private static List<ChessLogic.Move> orderRootMoves(
+        List<ChessLogic.Move> moves,
+        Map<Integer, Integer> prevScores,
+        int pvKey
+    ) {
+        List<ChessLogic.Move> ordered = new ArrayList<>(moves);
+        ordered.sort((a, b) -> {
+            int ka = moveKey(a);
+            int kb = moveKey(b);
+            int sa = 0;
+            int sb = 0;
+            if (ka == pvKey) sa += 10_000_000;
+            if (kb == pvKey) sb += 10_000_000;
+            sa += prevScores.getOrDefault(ka, 0);
+            sb += prevScores.getOrDefault(kb, 0);
+            return Integer.compare(sb, sa);
+        });
+        return ordered;
     }
 
     private static int moveOrderScore(ChessCore.ChessState state, ChessLogic.Move move, int ply, int ttMoveKey, SearchContext ctx) {
@@ -318,6 +444,12 @@ final class ChessScriptBot {
         if (ply < ctx.killers.length) {
             if (key == ctx.killers[ply][0]) score += 1_600;
             else if (key == ctx.killers[ply][1]) score += 900;
+        }
+
+        // Counter-move heuristic
+        int cmKey = ctx.counterMoveKey;
+        if (cmKey != 0 && key == ctx.counterMoves.getOrDefault(cmKey, 0)) {
+            score += 1_200;
         }
 
         int from = move.fromY() * 8 + move.fromX();
@@ -368,10 +500,13 @@ final class ChessScriptBot {
 
     private static final class SearchContext {
         private final long deadlineNs;
-        private final int[][] killers = new int[96][2];
+        private final int[][] killers = new int[256][2];
         private final int[][][] history = new int[2][64][64];
         private final Map<Long, TTEntry> table;
+        private final int[] evalStack = new int[256];
+        private final Map<Integer, Integer> counterMoves = new HashMap<>();
         private final long[] pathHashes = new long[256];
+        private int counterMoveKey;
         private long nodes;
         private boolean outOfBudget;
 
@@ -395,59 +530,92 @@ final class ChessScriptBot {
             return outOfBudget;
         }
 
-        private void recordCutoff(boolean whiteToMove, int ply, ChessLogic.Move move, int depth) {
-            int key = moveKey(move);
-            if (ply < killers.length && key != killers[ply][0]) {
-                killers[ply][1] = killers[ply][0];
-                killers[ply][0] = key;
-            }
-            int from = move.fromY() * 8 + move.fromX();
-            int to = move.toY() * 8 + move.toX();
-            int side = whiteToMove ? 0 : 1;
-            int bonus = depth * depth * 3;
-            history[side][from][to] = Math.min(60_000, history[side][from][to] + bonus);
-        }
-
         private void push(long hash, int ply) {
-            if (ply >= 0 && ply < pathHashes.length) pathHashes[ply] = hash;
+            pathHashes[ply] = hash;
         }
 
         private boolean isRepetition(long hash, int ply, int halfmoveClock) {
-            if (ply < 2) return false;
-            int minPly = Math.max(0, ply - Math.max(4, halfmoveClock));
+            if (halfmoveClock == 0) return false;
+            int minPly = Math.max(0, ply - halfmoveClock);
             for (int i = ply - 2; i >= minPly; i -= 2) {
                 if (pathHashes[i] == hash) return true;
             }
             return false;
         }
+
+        private void recordCutoff(boolean whiteToMove, int ply, ChessLogic.Move move, int depth) {
+            int key = moveKey(move);
+            int side = whiteToMove ? 0 : 1;
+            if (ply < killers.length) {
+                if (key != killers[ply][0]) {
+                    killers[ply][1] = killers[ply][0];
+                    killers[ply][0] = key;
+                }
+            }
+            int from = move.fromY() * 8 + move.fromX();
+            int to = move.toY() * 8 + move.toX();
+            history[side][from][to] += depth * depth;
+            counterMoveKey = key;
+        }
     }
 
-    private record Profile(
-        int maxDepth,
-        int maxNodes,
-        int maxMillis,
-        int qDepth,
-        int topChoices,
-        double exploreChance,
-        double blunderChance,
-        boolean useTable,
-        boolean useLmr,
-        boolean useAspiration,
-        boolean checkExtension,
-        boolean useNullMove,
-        int mobilityWeight
-    ) {
-        private static Profile forLevel(int level) {
+    private static final class Profile {
+        final int maxDepth;
+        final int maxMillis;
+        final long maxNodes;
+        final int mobilityWeight;
+        final boolean nullMove;
+        final boolean checkExtension;
+        final boolean futilityPruning;
+        final boolean useTable;
+        final int qDepth;
+        final int topChoices;
+        final double blunderChance;
+        final double exploreChance;
+
+        Profile(int maxDepth, int maxMillis, long maxNodes, int mobilityWeight,
+                boolean nullMove, boolean checkExtension, boolean futilityPruning,
+                boolean useTable, int qDepth, int topChoices,
+                double blunderChance, double exploreChance) {
+            this.maxDepth = maxDepth;
+            this.maxMillis = maxMillis;
+            this.maxNodes = maxNodes;
+            this.mobilityWeight = mobilityWeight;
+            this.nullMove = nullMove;
+            this.checkExtension = checkExtension;
+            this.futilityPruning = futilityPruning;
+            this.useTable = useTable;
+            this.qDepth = qDepth;
+            this.topChoices = topChoices;
+            this.blunderChance = blunderChance;
+            this.exploreChance = exploreChance;
+        }
+
+        static Profile forLevel(int level) {
             return switch (level) {
-                case 1 -> new Profile(1, 1_000, 120, 0, 10, 0.96, 0.62, false, false, false, false, false, 0);
-                case 2 -> new Profile(2, 6_000, 260, 1, 8, 0.70, 0.34, false, false, false, false, false, 0);
-                case 3 -> new Profile(3, 30_000, 560, 2, 5, 0.34, 0.15, false, false, true, false, false, 1);
-                case 4 -> new Profile(5, 130_000, 1_100, 3, 3, 0.10, 0.05, true, true, true, true, false, 1);
-                case 5 -> new Profile(7, 420_000, 2_300, 4, 2, 0.03, 0.01, true, true, true, true, true, 2);
-                case 6 -> new Profile(9, 1_500_000, 4_000, 5, 1, 0.0, 0.0, true, true, true, true, true, 2);
-                default -> new Profile(11, 4_500_000, 6_800, 6, 1, 0.0, 0.0, true, true, true, true, true, 3);
+                case 1 -> new Profile(1, 50, 2_000, 0,
+                        false, false, false, false, 0,
+                        6, 0.30, 0.20);
+                case 2 -> new Profile(2, 100, 5_000, 1,
+                        false, false, false, false, 0,
+                        5, 0.15, 0.12);
+                case 3 -> new Profile(3, 150, 25_000, 2,
+                        false, false, false, false, 1,
+                        4, 0.08, 0.06);
+                case 4 -> new Profile(5, 250, 100_000, 2,
+                        true, false, false, true, 2,
+                        3, 0.04, 0.04);
+                case 5 -> new Profile(7, 400, 300_000, 3,
+                        true, true, true, true, 3,
+                        2, 0.02, 0.02);
+                case 6 -> new Profile(9, 700, 800_000, 3,
+                        true, true, true, true, 4,
+                        2, 0.01, 0.01);
+                case 7 -> new Profile(11, 1500, 3_000_000, 4,
+                        true, true, true, true, 5,
+                        1, 0.0, 0.0);
+                default -> forLevel(4);
             };
         }
     }
 }
-
