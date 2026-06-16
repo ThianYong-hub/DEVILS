@@ -19,7 +19,6 @@ import org.lwjgl.glfw.GLFW;
 
 public final class ChessOverlay extends Module {
     public enum PlayMode {
-        SCRIPT,
         STOCKFISH,
         SYNC
     }
@@ -32,18 +31,9 @@ public final class ChessOverlay extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final Setting<PlayMode> mode = sgGeneral.add(new EnumSetting.Builder<PlayMode>()
         .name("mode")
-        .description("Play against script or Game Sync.")
-        .defaultValue(PlayMode.SCRIPT)
+        .description("Stockfish engine or Game Sync.")
+        .defaultValue(PlayMode.STOCKFISH)
         .visible(() -> false)
-        .build()
-    );
-    private final Setting<Integer> scriptLevel = sgGeneral.add(new IntSetting.Builder()
-        .name("script-level")
-        .description("Script strength level (1 = easy, 7 = master).")
-        .defaultValue(4)
-        .min(1)
-        .sliderRange(1, 7)
-        .visible(() -> mode.get() == PlayMode.SCRIPT)
         .build()
     );
     private final Setting<Integer> sfDepth = sgGeneral.add(new IntSetting.Builder()
@@ -122,7 +112,7 @@ public final class ChessOverlay extends Module {
     private boolean windowInitialized;
 
     public ChessOverlay() {
-        super(DevilsGameAddon.GAMES_CATEGORY, "chess", "Standalone chess launcher with script and game-sync modes.");
+        super(DevilsGameAddon.GAMES_CATEGORY, "chess", "Standalone chess launcher with Stockfish engine.");
         runInMainMenu = true;
     }
 
@@ -130,7 +120,6 @@ public final class ChessOverlay extends Module {
     public void onActivate() {
         ensureWindowInitialized();
         GameLaunchCoordinator.activateExclusive(ChessOverlay.class);
-        session.setScriptLevel(scriptLevel.get());
         session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
         session.onActivate(mode.get());
         GamesCursorController.acquire(client());
@@ -147,7 +136,6 @@ public final class ChessOverlay extends Module {
     private void onTick(TickEvent.Post event) {
         GameCrashGuard.run(this, "chessOverlayTick", () -> {
             if (!isActive()) return;
-            session.setScriptLevel(scriptLevel.get());
             session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
             session.onTick(mode.get());
             GamesCursorController.update(client());
