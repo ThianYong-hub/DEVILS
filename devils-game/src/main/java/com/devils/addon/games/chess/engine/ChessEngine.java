@@ -88,13 +88,13 @@ public final class ChessEngine implements AutoCloseable {
         initialized.set(true);
         running.set(true);
 
-        // Configure UCI options
-        sendUciOptions();
-
-        // Start reader thread
+        // Start reader thread BEFORE UCI handshake so lineQueue is fed
         readerThread = new Thread(this::readerLoop, "stockfish-reader");
         readerThread.setDaemon(true);
         readerThread.start();
+
+        // Configure UCI options (sends "uci" / "isready" and waits for responses)
+        sendUciOptions();
 
         DevilsGameAddon.LOG.info("[ChessEngine] Stockfish initialized");
         return true;

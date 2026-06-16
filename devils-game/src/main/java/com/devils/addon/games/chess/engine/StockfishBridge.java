@@ -51,7 +51,7 @@ public final class StockfishBridge {
         if (workDir != null) {
             pb.directory(new File(workDir));
         }
-        pb.redirectErrorStream(false);
+        pb.redirectErrorStream(true);
 
         process = pb.start();
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), "UTF-8"));
