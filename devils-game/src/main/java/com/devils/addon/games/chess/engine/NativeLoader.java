@@ -50,6 +50,30 @@ public final class NativeLoader {
     }
 
     /**
+     * Returns the absolute path to the first available NNUE file in the extraction
+     * directory, or {@code null} if none found.
+     * <p>
+     * Searches for files matching {@code nn-*.nnue} in the extraction directory.
+     */
+    public static String findNnueFile() {
+        Path dir = extractionDir;
+        if (dir == null) return null;
+        try {
+            var stream = Files.list(dir);
+            String nnuePath = stream
+                    .filter(p -> p.toString().endsWith(".nnue"))
+                    .findFirst()
+                    .map(Path::toAbsolutePath)
+                    .map(Path::toString)
+                    .orElse(null);
+            stream.close();
+            return nnuePath;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
      * Loads the native library. Safe to call multiple times; only the first call has effect.
      *
      * @return true if the library is now loaded

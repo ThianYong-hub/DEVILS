@@ -235,6 +235,13 @@ public final class ChessEngine implements AutoCloseable {
 
         StockfishBridge.sendCommand("setoption name Hash value " + hashMb);
         StockfishBridge.sendCommand("setoption name Threads value " + threads);
+
+        // Point Stockfish to the extracted NNUE network file
+        String nnueFile = NativeLoader.findNnueFile();
+        if (nnueFile != null) {
+            StockfishBridge.sendCommand("setoption name EvalFile value " + nnueFile);
+        }
+
         StockfishBridge.sendCommand("setoption name Skill Level value " + skillLevel);
         StockfishBridge.sendCommand("setoption name Move Overhead value " + moveOverhead);
         StockfishBridge.sendCommand("setoption name MultiPV value " + multiPv);
