@@ -229,13 +229,30 @@ final class ChessOverlaySession {
             pendingStockfishFuture = null;
             String reason = t.getCause() != null ? t.getCause().getMessage() : t.getMessage();
             statusText = "Stockfish calculation failed: " + reason;
-            // Log full exception to stdout for debugging (same pattern as StockfishBridge)
-            System.out.println("[ChessOverlaySession] Stockfish turn failed: " + reason);
-            t.printStackTrace();
+            System.err.println("[ChessOverlaySession] Stockfish turn EXCEPTION: " + reason);
+            System.err.println("[ChessOverlaySession] Exception class: " + t.getClass().getName());
+            t.printStackTrace(System.err);
+            return;
+        }
+        // Check if future completed exceptionally BEFORE clearing reference
+        if (result == null) {
+            if (pendingStockfishFuture.isCompletedExceptionally()) {
+                try { pendingStockfishFuture.join(); } catch (Exception ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    statusText = "Stockfish calculation failed: " + cause.getMessage();
+                    System.err.println("[ChessOverlaySession] Stockfish future exceptionally: " + cause);
+                    cause.printStackTrace(System.err);
+                }
+            } else {
+                statusText = "Stockfish returned no move.";
+                System.err.println("[ChessOverlaySession] getNow(null) returned null — future was " +
+                    (pendingStockfishFuture.isDone() ? "DONE" : "PENDING") + " requestId=" + botRequestId);
+            }
+            pendingStockfishFuture = null;
             return;
         }
         pendingStockfishFuture = null;
-        if (result == null || result.requestId != botRequestId) return;
+        if (result.requestId != botRequestId) return;
         if (!result.fenSnapshot.equals(boardFen)) return;
         if (result.bestMove == null || result.bestMove.isBlank()) {
             statusText = "Stockfish has no legal move.";

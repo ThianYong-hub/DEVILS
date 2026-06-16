@@ -64,11 +64,13 @@ public final class StockfishBridge {
                     new InputStreamReader(process.getInputStream(), "UTF-8"))) {
                 String line;
                 while (running && (line = reader.readLine()) != null) {
+                    System.err.println(LOG_PREFIX + " [readerThread] << " + line);
                     outputQueue.offer(line);
                 }
+                System.err.println(LOG_PREFIX + " [readerThread] Stream ended (line=" + line + ")");
             } catch (IOException e) {
                 if (running) {
-                    System.err.println(LOG_PREFIX + " Reader error: " + e.getMessage());
+                    System.err.println(LOG_PREFIX + " [readerThread] Error: " + e.getMessage());
                 }
             } finally {
                 outputQueue.offer("__ENGINE_EXITED__");
@@ -107,13 +109,16 @@ public final class StockfishBridge {
      */
     public static synchronized void sendCommand(String command) {
         if (!running || stdin == null) {
+            System.err.println(LOG_PREFIX + " REJECTED command (engine not running): " + command);
             throw new IllegalStateException(LOG_PREFIX + " Engine is not running");
         }
         try {
+            System.err.println(LOG_PREFIX + " >> " + command);
             stdin.write(command);
             stdin.newLine();
             stdin.flush();
         } catch (IOException e) {
+            System.err.println(LOG_PREFIX + " FAILED to send: " + command + " error=" + e.getMessage());
             throw new IllegalStateException(LOG_PREFIX + " Failed to send command: " + command, e);
         }
     }
@@ -131,6 +136,7 @@ public final class StockfishBridge {
         try {
             String line = outputQueue.poll(timeoutMs, TimeUnit.MILLISECONDS);
             if ("__ENGINE_EXITED__".equals(line)) {
+                System.err.println(LOG_PREFIX + " Engine EXITED signal received");
                 running = false;
                 return null;
             }
