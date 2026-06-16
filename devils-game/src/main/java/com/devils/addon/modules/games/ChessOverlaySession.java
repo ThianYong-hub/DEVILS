@@ -227,7 +227,11 @@ final class ChessOverlaySession {
             result = pendingStockfishFuture.getNow(null);
         } catch (Throwable t) {
             pendingStockfishFuture = null;
-            statusText = "Stockfish calculation failed.";
+            String reason = t.getCause() != null ? t.getCause().getMessage() : t.getMessage();
+            statusText = "Stockfish calculation failed: " + reason;
+            // Log full exception to stdout for debugging (same pattern as StockfishBridge)
+            System.out.println("[ChessOverlaySession] Stockfish turn failed: " + reason);
+            t.printStackTrace();
             return;
         }
         pendingStockfishFuture = null;
