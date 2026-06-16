@@ -8,20 +8,10 @@ import com.devils.addon.games.chess.engine.ChessEngine;
 import com.devils.addon.games.sync.MiniGamesSyncRuntime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 final class ChessOverlaySession {
-    private static final ExecutorService BOT_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "devils-chess-script");
-        t.setDaemon(true);
-        return t;
-    });
-
     private final MiniGamesSyncRuntime runtime = MiniGamesSyncRuntime.get();
-    private final Random random = new Random();
     private final ArrayList<ChessLogic.Move> selectedMoves = new ArrayList<>();
 
     private String boardFen = ChessLogic.initialFen();
@@ -29,19 +19,13 @@ final class ChessOverlaySession {
     private int selectedX = -1;
     private int selectedY = -1;
     private boolean flipView;
-    private boolean scriptPlayerWhite = true;
-    private int scriptLevel = 4;
+    private boolean whiteToMove = true;
     private long botRequestId;
-    private CompletableFuture<BotResult> pendingBotFuture;
 
     private ChessEngine stockfishEngine;
     private int sfDepth = 15;
     private int sfSkill = 20;
     private int sfHash = 128;
-
-    void setScriptLevel(int level) {
-        scriptLevel = Math.max(1, Math.min(7, level));
-    }
 
     void setStockfishConfig(int depth, int skill, int hash) {
         this.sfDepth = Math.max(1, Math.min(30, depth));
@@ -53,21 +37,15 @@ final class ChessOverlaySession {
         clearSelection();
         statusText = "";
         botRequestId++;
-        pendingBotFuture = null;
         if (mode == ChessOverlay.PlayMode.STOCKFISH) {
             initEngine();
             boardFen = ChessLogic.initialFen();
-            if (!scriptPlayerWhite) scheduleStockfishTurn();
-        } else if (mode == ChessOverlay.PlayMode.SCRIPT) {
-            boardFen = ChessLogic.initialFen();
-            if (!scriptPlayerWhite) scheduleScriptTurn();
         }
     }
 
     void onTick(ChessOverlay.PlayMode mode) {
         if (mode == ChessOverlay.PlayMode.SYNC) runtime.tick();
         else if (mode == ChessOverlay.PlayMode.STOCKFISH) processStockfishTurn();
-        else processScriptTurn();
     }
 
     SessionView prepare(ChessOverlay.PlayMode mode) {
@@ -102,11 +80,11 @@ final class ChessOverlaySession {
     }
 
     void toggleViewSide(ChessOverlay.PlayMode mode) {
-        if (mode == ChessOverlay.PlayMode.SCRIPT || mode == ChessOverlay.PlayMode.STOCKFISH) {
-            scriptPlayerWhite = !scriptPlayerWhite;
+        if (mode == ChessOverlay.PlayMode.STOCKFISH) {
+            whiteToMove = !whiteToMove;
             flipView = false;
             onActivate(mode);
-            statusText = "Side switched to " + (scriptPlayerWhite ? "White" : "Black") + ". Game reset.";
+            statusText = "Side switched to " + (whiteToMove ? "White" : "Black") + ". Game reset.";
             return;
         }
         flipView = !flipView;
@@ -115,7 +93,7 @@ final class ChessOverlaySession {
     boolean resolveOrientation(ChessOverlay.PlayMode mode, SessionView session) {
         boolean whiteBottom = mode == ChessOverlay.PlayMode.SYNC
             ? session == null || !session.active() || session.localWhite()
-            : scriptPlayerWhite;
+            : whiteToMove;
         return flipView ? !whiteBottom : whiteBottom;
     }
 
@@ -153,7 +131,7 @@ final class ChessOverlaySession {
                 return;
             }
         } else {
-            localWhite = scriptPlayerWhite;
+            localWhite = whiteToMove;
             if (ChessLogic.isWhiteTurn(boardFen) != localWhite) return;
         }
 
@@ -201,52 +179,7 @@ final class ChessOverlaySession {
             return;
         }
 
-        if (mode == ChessOverlay.PlayMode.STOCKFISH) {
-            scheduleStockfishTurn();
-        } else {
-            scheduleScriptTurn();
-        }
-    }
-
-    private void scheduleScriptTurn() {
-        if (pendingBotFuture != null && !pendingBotFuture.isDone()) return;
-        long requestId = ++botRequestId;
-        String fenSnapshot = boardFen;
-        int levelSnapshot = scriptLevel;
-        long seed = random.nextLong();
-        statusText = "Script L" + levelSnapshot + " thinking...";
-        pendingBotFuture = CompletableFuture.supplyAsync(
-            () -> new BotResult(requestId, fenSnapshot, levelSnapshot, ChessLogic.scriptMove(fenSnapshot, new Random(seed), levelSnapshot)),
-            BOT_EXECUTOR
-        );
-    }
-
-    private void processScriptTurn() {
-        if (pendingBotFuture == null || !pendingBotFuture.isDone()) return;
-        BotResult result;
-        try {
-            result = pendingBotFuture.getNow(null);
-        } catch (Throwable t) {
-            pendingBotFuture = null;
-            statusText = "Script calculation failed.";
-            return;
-        }
-        pendingBotFuture = null;
-        if (result == null || result.requestId != botRequestId) return;
-        if (!result.fenSnapshot.equals(boardFen)) return;
-        if (result.move.isBlank()) {
-            statusText = "Script has no legal move.";
-            return;
-        }
-        ChessLogic.ApplyResult botApplied = ChessLogic.applyMove(boardFen, result.move);
-        if (!botApplied.ok()) {
-            statusText = "Script move rejected.";
-            return;
-        }
-        boardFen = botApplied.fen();
-        statusText = botApplied.winner().isBlank()
-            ? "Script L" + result.level + " move: " + result.move
-            : "Winner: " + botApplied.winner();
+        scheduleStockfishTurn();
     }
 
     // --- Stockfish engine integration ---
@@ -392,9 +325,6 @@ final class ChessOverlaySession {
     }
 
     record BoardCoord(int x, int y) {
-    }
-
-    private record BotResult(long requestId, String fenSnapshot, int level, String move) {
     }
 
     private record StockfishBotResult(long requestId, String fenSnapshot, String bestMove, int depth, int score) {
