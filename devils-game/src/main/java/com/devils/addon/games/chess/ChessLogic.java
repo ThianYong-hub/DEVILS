@@ -40,12 +40,14 @@ public final class ChessLogic {
         return ChessCore.generateLegalMoves(state);
     }
 
-    public static String randomScriptMove(String fen, Random random) {
-        return scriptMove(fen, random, 2);
-    }
-
-    public static String scriptMove(String fen, Random random, int level) {
-        return ChessScriptBot.chooseMove(fen, random, level);
+    /**
+     * Returns a random legal move in UCI format for the given position.
+     * Used as a fallback when Stockfish is not available.
+     */
+    public static String randomLegalMove(String fen, Random random) {
+        List<Move> moves = legalMoves(fen);
+        if (moves.isEmpty()) return null;
+        return moves.get(random.nextInt(moves.size())).toUci();
     }
 
     public static ApplyResult applyMove(String fen, String uciMove) {

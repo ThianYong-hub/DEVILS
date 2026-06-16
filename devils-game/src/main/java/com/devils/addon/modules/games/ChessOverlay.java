@@ -19,7 +19,7 @@ import org.lwjgl.glfw.GLFW;
 
 public final class ChessOverlay extends Module {
     public enum PlayMode {
-        SCRIPT,
+        STOCKFISH,
         SYNC
     }
 
@@ -31,18 +31,36 @@ public final class ChessOverlay extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
     private final Setting<PlayMode> mode = sgGeneral.add(new EnumSetting.Builder<PlayMode>()
         .name("mode")
-        .description("Play against script or Game Sync.")
-        .defaultValue(PlayMode.SCRIPT)
+        .description("Stockfish engine or Game Sync.")
+        .defaultValue(PlayMode.STOCKFISH)
         .visible(() -> false)
         .build()
     );
-    private final Setting<Integer> scriptLevel = sgGeneral.add(new IntSetting.Builder()
-        .name("script-level")
-        .description("Script strength level (1 = easy, 7 = master).")
-        .defaultValue(4)
+    private final Setting<Integer> sfDepth = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-depth")
+        .description("Stockfish search depth (higher = stronger but slower).")
+        .defaultValue(15)
         .min(1)
-        .sliderRange(1, 7)
-        .visible(() -> mode.get() == PlayMode.SCRIPT)
+        .sliderRange(1, 30)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
+        .build()
+    );
+    private final Setting<Integer> sfSkill = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-skill")
+        .description("Stockfish skill level (0 = weakest, 20 = full strength).")
+        .defaultValue(20)
+        .min(0)
+        .sliderRange(0, 20)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
+        .build()
+    );
+    private final Setting<Integer> sfHash = sgGeneral.add(new IntSetting.Builder()
+        .name("stockfish-hash")
+        .description("Hash table size in MB for Stockfish.")
+        .defaultValue(128)
+        .min(1)
+        .sliderRange(1, 1024)
+        .visible(() -> mode.get() == PlayMode.STOCKFISH)
         .build()
     );
     private final Setting<Boolean> pinned = sgGeneral.add(new BoolSetting.Builder()
@@ -94,7 +112,7 @@ public final class ChessOverlay extends Module {
     private boolean windowInitialized;
 
     public ChessOverlay() {
-        super(DevilsGameAddon.GAMES_CATEGORY, "chess", "Standalone chess launcher with script and game-sync modes.");
+        super(DevilsGameAddon.GAMES_CATEGORY, "chess", "Standalone chess launcher with Stockfish engine.");
         runInMainMenu = true;
     }
 
@@ -102,13 +120,14 @@ public final class ChessOverlay extends Module {
     public void onActivate() {
         ensureWindowInitialized();
         GameLaunchCoordinator.activateExclusive(ChessOverlay.class);
-        session.setScriptLevel(scriptLevel.get());
+        session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
         session.onActivate(mode.get());
         GamesCursorController.acquire(client());
     }
 
     @Override
     public void onDeactivate() {
+        session.shutdownEngine();
         window.stopInteraction();
         GamesCursorController.release(client());
     }
@@ -117,7 +136,7 @@ public final class ChessOverlay extends Module {
     private void onTick(TickEvent.Post event) {
         GameCrashGuard.run(this, "chessOverlayTick", () -> {
             if (!isActive()) return;
-            session.setScriptLevel(scriptLevel.get());
+            session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
             session.onTick(mode.get());
             GamesCursorController.update(client());
         });
@@ -137,7 +156,7 @@ public final class ChessOverlay extends Module {
     private void onRender2D(Render2DEvent event) {
         GameCrashGuard.run(this, "chessOverlayRender", () -> {
             if (!isActive()) return;
-            window.render(event.drawContext, client(), mode.get(), pinned.get(), session, scriptLevel.get());
+            window.render(event.drawContext, client(), mode.get(), pinned.get(), session);
         });
     }
 
@@ -151,10 +170,8 @@ public final class ChessOverlay extends Module {
                 client(),
                 mode.get(),
                 pinned.get(),
-                scriptLevel.get(),
                 this::setPinned,
                 this::setMode,
-                this::setScriptLevel,
                 () -> GameLaunchCoordinator.launchNext(GameLaunchCoordinator.Entry.CHESS),
                 GameLaunchCoordinator::closeAll,
                 session
@@ -189,12 +206,6 @@ public final class ChessOverlay extends Module {
 
     private void setMode(PlayMode value) {
         mode.set(value);
-        session.setScriptLevel(scriptLevel.get());
-    }
-
-    private void setScriptLevel(int value) {
-        scriptLevel.set(clamp(value, 1, 7));
-        session.setScriptLevel(scriptLevel.get());
     }
 
     private static int clamp(int value, int min, int max) {

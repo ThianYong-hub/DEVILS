@@ -301,7 +301,7 @@ final class CheckersOverlaySession {
         botMoveAtMs = System.currentTimeMillis() + BOT_DELAY_MS;
         statusText = "Script L" + levelSnapshot + " thinking...";
         pendingBotFuture = CompletableFuture.supplyAsync(
-            () -> new BotResult(requestId, snapshot, levelSnapshot, CheckersLogic.scriptMove(snapshot, new Random(seed), levelSnapshot)),
+            () -> new BotResult(requestId, snapshot, levelSnapshot, pickRandomLegalMove(snapshot, new Random(seed))),
             BOT_EXECUTOR
         );
     }
@@ -372,6 +372,25 @@ final class CheckersOverlaySession {
     private static boolean containsCoord(List<Coord> list, Coord value) {
         for (Coord c : list) if (c.x() == value.x() && c.y() == value.y()) return true;
         return false;
+    }
+
+    /**
+     * Pick a random legal move from the current position. Simple random-bot fallback.
+     */
+    private static String pickRandomLegalMove(String state, Random rng) {
+        List<CheckersLogic.Move> moves = CheckersLogic.legalMoves(state);
+        if (moves == null || moves.isEmpty()) return null;
+        CheckersLogic.Move m = moves.get(rng.nextInt(moves.size()));
+        StringBuilder sb = new StringBuilder();
+        String sep = m.capture() ? ":" : "-";
+        List<CheckersLogic.Coord> path = m.path();
+        for (int i = 0; i < path.size(); i++) {
+            if (i > 0) sb.append(sep);
+            CheckersLogic.Coord c = path.get(i);
+            sb.append((char)('a' + c.x()));
+            sb.append(8 - c.y());
+        }
+        return sb.toString();
     }
 
     record AnimatedPiece(char piece, float x, float y, int toX, int toY) {

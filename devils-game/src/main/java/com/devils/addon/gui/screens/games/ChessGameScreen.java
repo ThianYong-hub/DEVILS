@@ -15,7 +15,6 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 public final class ChessGameScreen extends Screen {
     public enum Mode {
-        SCRIPT,
         SYNC
     }
     private static final int DARK_BG = 0xEF0D1421;
@@ -58,7 +57,7 @@ public final class ChessGameScreen extends Screen {
     public ChessGameScreen(Screen parent, Mode mode) {
         super(Text.literal("Chess"));
         this.parent = parent;
-        this.mode = mode == null ? Mode.SCRIPT : mode;
+        this.mode = mode == null ? Mode.SYNC : mode;
     }
     @Override
     public void tick() {
@@ -218,7 +217,7 @@ public final class ChessGameScreen extends Screen {
         context.fill(board.x, panelY, board.x + 1, panelY + panelH, PANEL_BORDER);
         context.fill(board.x + board.size - 1, panelY, board.x + board.size, panelY + panelH, PANEL_BORDER);
         context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 14, 0xFFFFFFFF);
-        String modeText = mode == Mode.SYNC ? "Mode: Game Sync" : "Mode: Script";
+        String modeText = "Mode: Game Sync";
         context.drawTextWithShadow(textRenderer, Text.literal(modeText), board.x + 10, panelY + 8, 0xFFE5EEFF);
         String turnText = "Turn: " + (ChessLogic.isWhiteTurn(boardFen) ? "White" : "Black");
         context.drawTextWithShadow(textRenderer, Text.literal(turnText), board.x + 10, panelY + 22, 0xFFE5EEFF);
@@ -229,22 +228,12 @@ public final class ChessGameScreen extends Screen {
             String you = session.localWhite() ? "You: White" : "You: Black";
             context.drawTextWithShadow(textRenderer, Text.literal(you), board.x + 10, panelY + 52, 0xFFC5D9FF);
             context.drawTextWithShadow(textRenderer, Text.literal("Opponent: " + safe(session.opponentName())), board.x + 130, panelY + 52, 0xFFC5D9FF);
-        } else if (mode == Mode.SCRIPT) {
-            context.drawTextWithShadow(textRenderer, Text.literal("Play White vs script (Black)."), board.x + 10, panelY + 52, 0xFFC5D9FF);
         }
         int btnY = panelY + 64;
-        if (mode == Mode.SYNC) {
-            addButton(context, board.x + 10, btnY, 132, 20, "Leave Match", () -> {
-                runtime.leaveSession(GameType.CHESS);
-                close();
-            });
-        } else {
-            addButton(context, board.x + 10, btnY, 132, 20, "Restart", () -> {
-                boardFen = ChessLogic.initialFen();
-                statusText = "";
-                clearSelection();
-            });
-        }
+        addButton(context, board.x + 10, btnY, 132, 20, "Leave Match", () -> {
+            runtime.leaveSession(GameType.CHESS);
+            close();
+        });
         addButton(context, board.x + board.size - 132 - 10, btnY, 132, 20, "Back", this::close);
     }
     @Override
@@ -319,27 +308,6 @@ public final class ChessGameScreen extends Screen {
             if (!result.ok()) statusText = "Move rejected: " + result.error();
             else statusText = "Move sent: " + move;
             return;
-        }
-        ChessLogic.ApplyResult applied = ChessLogic.applyMove(boardFen, move);
-        if (!applied.ok()) {
-            statusText = "Illegal move.";
-            return;
-        }
-        boardFen = applied.fen();
-        if (!applied.winner().isBlank()) {
-            statusText = "Winner: " + applied.winner();
-            return;
-        }
-        String botMove = ChessLogic.randomScriptMove(boardFen, random);
-        if (botMove.isBlank()) {
-            statusText = "Script has no legal move.";
-            return;
-        }
-        ChessLogic.ApplyResult botApplied = ChessLogic.applyMove(boardFen, botMove);
-        if (botApplied.ok()) {
-            boardFen = botApplied.fen();
-            if (!botApplied.winner().isBlank()) statusText = "Winner: " + botApplied.winner();
-            else statusText = "Script move: " + botMove;
         }
     }
     private void selectPiece(int x, int y, List<ChessLogic.Move> legal) {

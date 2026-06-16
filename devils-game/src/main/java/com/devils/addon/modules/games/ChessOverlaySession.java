@@ -4,23 +4,14 @@ import com.devils.addon.games.MiniGamesContracts.GameType;
 import com.devils.addon.games.MiniGamesContracts.MoveSubmitResult;
 import com.devils.addon.games.MiniGamesContracts.SessionView;
 import com.devils.addon.games.chess.ChessLogic;
+import com.devils.addon.games.chess.engine.ChessEngine;
 import com.devils.addon.games.sync.MiniGamesSyncRuntime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 final class ChessOverlaySession {
-    private static final ExecutorService BOT_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "devils-chess-script");
-        t.setDaemon(true);
-        return t;
-    });
-
     private final MiniGamesSyncRuntime runtime = MiniGamesSyncRuntime.get();
-    private final Random random = new Random();
     private final ArrayList<ChessLogic.Move> selectedMoves = new ArrayList<>();
 
     private String boardFen = ChessLogic.initialFen();
@@ -28,29 +19,33 @@ final class ChessOverlaySession {
     private int selectedX = -1;
     private int selectedY = -1;
     private boolean flipView;
-    private boolean scriptPlayerWhite = true;
-    private int scriptLevel = 4;
+    private boolean whiteToMove = true;
     private long botRequestId;
-    private CompletableFuture<BotResult> pendingBotFuture;
 
-    void setScriptLevel(int level) {
-        scriptLevel = Math.max(1, Math.min(7, level));
+    private ChessEngine stockfishEngine;
+    private int sfDepth = 15;
+    private int sfSkill = 20;
+    private int sfHash = 128;
+
+    void setStockfishConfig(int depth, int skill, int hash) {
+        this.sfDepth = Math.max(1, Math.min(30, depth));
+        this.sfSkill = Math.max(0, Math.min(20, skill));
+        this.sfHash = Math.max(1, Math.min(1024, hash));
     }
 
     void onActivate(ChessOverlay.PlayMode mode) {
         clearSelection();
         statusText = "";
         botRequestId++;
-        pendingBotFuture = null;
-        if (mode == ChessOverlay.PlayMode.SCRIPT) {
+        if (mode == ChessOverlay.PlayMode.STOCKFISH) {
+            initEngine();
             boardFen = ChessLogic.initialFen();
-            if (!scriptPlayerWhite) scheduleScriptTurn();
         }
     }
 
     void onTick(ChessOverlay.PlayMode mode) {
         if (mode == ChessOverlay.PlayMode.SYNC) runtime.tick();
-        else processScriptTurn();
+        else if (mode == ChessOverlay.PlayMode.STOCKFISH) processStockfishTurn();
     }
 
     SessionView prepare(ChessOverlay.PlayMode mode) {
@@ -85,11 +80,11 @@ final class ChessOverlaySession {
     }
 
     void toggleViewSide(ChessOverlay.PlayMode mode) {
-        if (mode == ChessOverlay.PlayMode.SCRIPT) {
-            scriptPlayerWhite = !scriptPlayerWhite;
+        if (mode == ChessOverlay.PlayMode.STOCKFISH) {
+            whiteToMove = !whiteToMove;
             flipView = false;
             onActivate(mode);
-            statusText = "Side switched to " + (scriptPlayerWhite ? "White" : "Black") + ". Game reset.";
+            statusText = "Side switched to " + (whiteToMove ? "White" : "Black") + ". Game reset.";
             return;
         }
         flipView = !flipView;
@@ -98,7 +93,7 @@ final class ChessOverlaySession {
     boolean resolveOrientation(ChessOverlay.PlayMode mode, SessionView session) {
         boolean whiteBottom = mode == ChessOverlay.PlayMode.SYNC
             ? session == null || !session.active() || session.localWhite()
-            : scriptPlayerWhite;
+            : whiteToMove;
         return flipView ? !whiteBottom : whiteBottom;
     }
 
@@ -136,7 +131,7 @@ final class ChessOverlaySession {
                 return;
             }
         } else {
-            localWhite = scriptPlayerWhite;
+            localWhite = whiteToMove;
             if (ChessLogic.isWhiteTurn(boardFen) != localWhite) return;
         }
 
@@ -184,48 +179,94 @@ final class ChessOverlaySession {
             return;
         }
 
-        scheduleScriptTurn();
+        scheduleStockfishTurn();
     }
 
-    private void scheduleScriptTurn() {
-        if (pendingBotFuture != null && !pendingBotFuture.isDone()) return;
+    // --- Stockfish engine integration ---
+
+    private void initEngine() {
+        if (stockfishEngine != null) return;
+        stockfishEngine = new ChessEngine();
+        try {
+            stockfishEngine.init();
+            stockfishEngine.setSkillLevel(sfSkill);
+            stockfishEngine.setHashMb(sfHash);
+        } catch (Exception e) {
+            statusText = "Stockfish init failed: " + e.getMessage();
+            stockfishEngine = null;
+        }
+    }
+
+    void shutdownEngine() {
+        if (stockfishEngine != null) {
+            stockfishEngine.close();
+            stockfishEngine = null;
+        }
+    }
+
+    private CompletableFuture<StockfishBotResult> pendingStockfishFuture;
+
+    private void scheduleStockfishTurn() {
+        if (stockfishEngine == null) {
+            statusText = "Stockfish engine not available.";
+            return;
+        }
+        if (pendingStockfishFuture != null && !pendingStockfishFuture.isDone()) return;
         long requestId = ++botRequestId;
         String fenSnapshot = boardFen;
-        int levelSnapshot = scriptLevel;
-        long seed = random.nextLong();
-        statusText = "Script L" + levelSnapshot + " thinking...";
-        pendingBotFuture = CompletableFuture.supplyAsync(
-            () -> new BotResult(requestId, fenSnapshot, levelSnapshot, ChessLogic.scriptMove(fenSnapshot, new Random(seed), levelSnapshot)),
-            BOT_EXECUTOR
-        );
+        int depthSnapshot = sfDepth;
+        statusText = "Stockfish D" + depthSnapshot + " thinking...";
+        pendingStockfishFuture = stockfishEngine.getBestMove(fenSnapshot, depthSnapshot, 0)
+            .thenApply(result -> new StockfishBotResult(requestId, fenSnapshot, result.bestMove(), result.depth(), result.score()));
     }
 
-    private void processScriptTurn() {
-        if (pendingBotFuture == null || !pendingBotFuture.isDone()) return;
-        BotResult result;
+    private void processStockfishTurn() {
+        if (pendingStockfishFuture == null || !pendingStockfishFuture.isDone()) return;
+        StockfishBotResult result;
         try {
-            result = pendingBotFuture.getNow(null);
+            result = pendingStockfishFuture.getNow(null);
         } catch (Throwable t) {
-            pendingBotFuture = null;
-            statusText = "Script calculation failed.";
+            pendingStockfishFuture = null;
+            String reason = t.getCause() != null ? t.getCause().getMessage() : t.getMessage();
+            statusText = "Stockfish calculation failed: " + reason;
+            System.err.println("[ChessOverlaySession] Stockfish turn EXCEPTION: " + reason);
+            System.err.println("[ChessOverlaySession] Exception class: " + t.getClass().getName());
+            t.printStackTrace(System.err);
             return;
         }
-        pendingBotFuture = null;
-        if (result == null || result.requestId != botRequestId) return;
+        // Check if future completed exceptionally BEFORE clearing reference
+        if (result == null) {
+            if (pendingStockfishFuture.isCompletedExceptionally()) {
+                try { pendingStockfishFuture.join(); } catch (Exception ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    statusText = "Stockfish calculation failed: " + cause.getMessage();
+                    System.err.println("[ChessOverlaySession] Stockfish future exceptionally: " + cause);
+                    cause.printStackTrace(System.err);
+                }
+            } else {
+                statusText = "Stockfish returned no move.";
+                System.err.println("[ChessOverlaySession] getNow(null) returned null — future was " +
+                    (pendingStockfishFuture.isDone() ? "DONE" : "PENDING") + " requestId=" + botRequestId);
+            }
+            pendingStockfishFuture = null;
+            return;
+        }
+        pendingStockfishFuture = null;
+        if (result.requestId != botRequestId) return;
         if (!result.fenSnapshot.equals(boardFen)) return;
-        if (result.move.isBlank()) {
-            statusText = "Script has no legal move.";
+        if (result.bestMove == null || result.bestMove.isBlank()) {
+            statusText = "Stockfish has no legal move.";
             return;
         }
-        ChessLogic.ApplyResult botApplied = ChessLogic.applyMove(boardFen, result.move);
-        if (!botApplied.ok()) {
-            statusText = "Script move rejected.";
+        ChessLogic.ApplyResult applied = ChessLogic.applyMove(boardFen, result.bestMove);
+        if (!applied.ok()) {
+            statusText = "Stockfish move rejected: " + result.bestMove;
             return;
         }
-        boardFen = botApplied.fen();
-        statusText = botApplied.winner().isBlank()
-            ? "Script L" + result.level + " move: " + result.move
-            : "Winner: " + botApplied.winner();
+        boardFen = applied.fen();
+        statusText = applied.winner().isBlank()
+            ? "Stockfish D" + result.depth + " score:" + result.score + " move: " + result.bestMove
+            : "Winner: " + applied.winner();
     }
 
     List<BoardCoord> collectCaptureTargets(char[][] board, List<ChessLogic.Move> legal) {
@@ -307,7 +348,7 @@ final class ChessOverlaySession {
     record BoardCoord(int x, int y) {
     }
 
-    private record BotResult(long requestId, String fenSnapshot, int level, String move) {
+    private record StockfishBotResult(long requestId, String fenSnapshot, String bestMove, int depth, int score) {
     }
 }
 
