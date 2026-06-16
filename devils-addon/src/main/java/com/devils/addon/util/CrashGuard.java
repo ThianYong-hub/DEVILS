@@ -1,9 +1,6 @@
 package com.devils.addon.util;
 
-import com.devils.addon.DevilsAddon;
 import meteordevelopment.meteorclient.systems.modules.Module;
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.ModContainer;
 import net.fabricmc.loader.api.entrypoint.PreLaunchEntrypoint;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Filter;
@@ -15,28 +12,15 @@ import org.apache.logging.log4j.core.filter.AbstractFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Path;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
 public final class CrashGuard implements PreLaunchEntrypoint {
     private static final Logger LOG = LoggerFactory.getLogger("Devils/CrashGuard");
     private static final long LOG_COOLDOWN_MS = 5_000L;
     private static final Map<String, Long> lastLogByContext = new ConcurrentHashMap<>();
-    private static final Map<String, String> EXPECTED_XAERO_VERSIONS = new LinkedHashMap<>();
     private static volatile boolean logFiltersInstalled = false;
-
-    static {
-        EXPECTED_XAERO_VERSIONS.put("xaerominimap", "25.3.10");
-        EXPECTED_XAERO_VERSIONS.put("xaeroworldmap", "1.40.11");
-        EXPECTED_XAERO_VERSIONS.put("xaeroplus", "2.30.9");
-    }
 
     public CrashGuard() {
     }
@@ -69,12 +53,6 @@ public final class CrashGuard implements PreLaunchEntrypoint {
         }
     }
 
-    public static void logXaeroState() {
-        logXaeroMod("xaerominimap", "Xaero Minimap");
-        logXaeroMod("xaeroworldmap", "Xaero WorldMap");
-        logXaeroMod("xaeroplus", "XaeroPlus");
-    }
-
     private static void log(Module module, String context, Throwable t) {
         String moduleName = module != null ? module.name : "unknown-module";
         String key = moduleName + "#" + context;
@@ -87,82 +65,6 @@ public final class CrashGuard implements PreLaunchEntrypoint {
         }
     }
 
-    private static void logXaeroMod(String modId, String display) {
-        Optional<ModContainer> optional = FabricLoader.getInstance().getModContainer(modId);
-        if (optional.isEmpty()) {
-            DevilsAddon.LOG.warn("[Devils/Xaero] {} is not loaded.", display);
-            return;
-        }
-
-        ModContainer container = optional.get();
-        boolean assimilated = isAssimilatedProvidedMod(modId, container);
-        String version = assimilated
-            ? EXPECTED_XAERO_VERSIONS.getOrDefault(modId, container.getMetadata().getVersion().getFriendlyString())
-            : container.getMetadata().getVersion().getFriendlyString();
-        String origins = stringifyOrigins(container);
-        boolean embedded = isEmbeddedMod(container) || isEmbeddedOrigin(origins);
-        String expected = EXPECTED_XAERO_VERSIONS.getOrDefault(modId, "");
-        String source = assimilated ? "assimilated" : embedded ? "embedded" : "external";
-
-        DevilsAddon.LOG.info(
-            "[Devils/Xaero] {} loaded: version={} source={} origin={}",
-            display,
-            version,
-            source,
-            origins
-        );
-
-        if (!expected.isBlank() && !version.startsWith(expected)) {
-            DevilsAddon.LOG.warn(
-                "[Devils/Xaero] {} version mismatch. Loaded={}, expected={} for Devils sync bridge.",
-                display,
-                version,
-                expected
-            );
-        }
-
-        if (!assimilated && !embedded) {
-            DevilsAddon.LOG.warn(
-                "[Devils/Xaero] External {} detected. Fabric resolves root mods before nested jars; remove standalone {} jar to force embedded Devils stack.",
-                display,
-                display
-            );
-        }
-    }
-
-    private static boolean isAssimilatedProvidedMod(String modId, ModContainer container) {
-        if (container == null || modId == null) return false;
-        return "devils-addon".equalsIgnoreCase(container.getMetadata().getId()) && EXPECTED_XAERO_VERSIONS.containsKey(modId);
-    }
-
-    private static String stringifyOrigins(ModContainer container) {
-        try {
-            List<Path> paths = container.getOrigin().getPaths();
-            if (paths == null || paths.isEmpty()) return "unknown";
-            return paths.stream()
-                .map(path -> path == null ? "" : path.toAbsolutePath().normalize().toString())
-                .collect(Collectors.joining(";"));
-        } catch (Throwable ignored) {
-            return "unknown";
-        }
-    }
-
-    private static boolean isEmbeddedOrigin(String origins) {
-        String value = origins == null ? "" : origins.toLowerCase(Locale.ROOT);
-        return value.contains("meta-inf/jars") || value.contains("meta-inf\\jars");
-    }
-
-    private static boolean isEmbeddedMod(ModContainer container) {
-        if (container == null) return false;
-        try {
-            Optional<ModContainer> parent = container.getContainingMod();
-            if (parent.isEmpty()) return false;
-            String parentId = parent.get().getMetadata().getId();
-            return "devils-addon".equalsIgnoreCase(parentId);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
 }
 
 final class EarlyLogSpamFilter {
