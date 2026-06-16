@@ -156,7 +156,7 @@ public final class ChessOverlay extends Module {
     private void onRender2D(Render2DEvent event) {
         GameCrashGuard.run(this, "chessOverlayRender", () -> {
             if (!isActive()) return;
-            window.render(event.drawContext, client(), mode.get(), pinned.get(), session, scriptLevel.get());
+            window.render(event.drawContext, client(), mode.get(), pinned.get(), session);
         });
     }
 
@@ -170,10 +170,8 @@ public final class ChessOverlay extends Module {
                 client(),
                 mode.get(),
                 pinned.get(),
-                scriptLevel.get(),
                 this::setPinned,
                 this::setMode,
-                this::setScriptLevel,
                 () -> GameLaunchCoordinator.launchNext(GameLaunchCoordinator.Entry.CHESS),
                 GameLaunchCoordinator::closeAll,
                 session
@@ -208,12 +206,6 @@ public final class ChessOverlay extends Module {
 
     private void setMode(PlayMode value) {
         mode.set(value);
-        session.setScriptLevel(scriptLevel.get());
-    }
-
-    private void setScriptLevel(int value) {
-        scriptLevel.set(clamp(value, 1, 7));
-        session.setScriptLevel(scriptLevel.get());
     }
 
     private static int clamp(int value, int min, int max) {

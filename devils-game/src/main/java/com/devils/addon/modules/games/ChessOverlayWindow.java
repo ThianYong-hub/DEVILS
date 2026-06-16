@@ -3,7 +3,7 @@ import com.devils.addon.games.MiniGamesContracts.SessionView;
 import com.devils.addon.games.chess.ChessLogic;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
+
 import meteordevelopment.meteorclient.events.meteor.MouseClickEvent;
 import meteordevelopment.meteorclient.utils.misc.input.KeyAction;
 import net.minecraft.client.MinecraftClient;
@@ -81,7 +81,7 @@ final class ChessOverlayWindow {
         dragging = false;
         resizing = false;
     }
-    void render(DrawContext context, MinecraftClient mc, ChessOverlay.PlayMode mode, boolean pinned, ChessOverlaySession session, int scriptLevel) {
+    void render(DrawContext context, MinecraftClient mc, ChessOverlay.PlayMode mode, boolean pinned, ChessOverlaySession session) {
         if (!shouldRender(mc, pinned)) return;
         int mouseX = scaledMouseX(mc); int mouseY = scaledMouseY(mc);
         updateWindowTransform(mc, mouseX, mouseY);
@@ -93,14 +93,14 @@ final class ChessOverlayWindow {
         session.refreshSelection(legal);
         List<ChessOverlaySession.BoardCoord> captureTargets = session.collectCaptureTargets(matrix, legal);
         context.fill(l.x, l.y, l.x + l.w, l.y + l.h, DARK_BG);
-        drawHeader(context, mc.textRenderer, l, mode, pinned, whiteBottom, scriptLevel);
+        drawHeader(context, mc.textRenderer, l, mode, pinned, whiteBottom);
         drawBoard(context, mc.textRenderer, l, whiteBottom, captureTargets, session.hasSelection(), session.selectedX(), session.selectedY());
         drawMoveHints(context, l, whiteBottom, matrix, session.selectedMoves(), session);
         drawPieces(context, l, whiteBottom, matrix);
         drawFooter(context, mc.textRenderer, l, mode, syncSession, session.statusText(), session.boardFen());
         drawResizeHandle(context, l, mouseX, mouseY);
     }
-    boolean onMouse(MouseClickEvent event, MinecraftClient mc, ChessOverlay.PlayMode mode, boolean pinned, int scriptLevel, Consumer<Boolean> setPinned, Consumer<ChessOverlay.PlayMode> setMode, IntConsumer setScriptLevel, Runnable cycleGame, Runnable closeOverlay, ChessOverlaySession session) {
+    boolean onMouse(MouseClickEvent event, MinecraftClient mc, ChessOverlay.PlayMode mode, boolean pinned, Consumer<Boolean> setPinned, Consumer<ChessOverlay.PlayMode> setMode, Runnable cycleGame, Runnable closeOverlay, ChessOverlaySession session) {
         if (!shouldRender(mc, pinned)) return false;
         int mouseX = scaledMouseX(mc);
         int mouseY = scaledMouseY(mc);
@@ -116,17 +116,7 @@ final class ChessOverlayWindow {
         int titleW = mc != null && mc.textRenderer != null ? mc.textRenderer.getWidth("Chess") : 34;
         if (inside(mouseX, mouseY, l.x + 6, l.y + 2, titleW + 2, l.btnH)) { cycleGame.run(); return true; }
         if (inside(mouseX, mouseY, l.modeX, l.modeY, l.btnW, l.btnH)) {
-            if (mode == ChessOverlay.PlayMode.SCRIPT) {
-                if (event.button() == 0) {
-                    setScriptLevel.accept(scriptLevel >= 7 ? 1 : scriptLevel + 1);
-                } else {
-                    setMode.accept(ChessOverlay.PlayMode.SYNC);
-                    session.onActivate(ChessOverlay.PlayMode.SYNC);
-                }
-            } else {
-                setMode.accept(ChessOverlay.PlayMode.SCRIPT);
-                session.onActivate(ChessOverlay.PlayMode.SCRIPT);
-            }
+            session.onActivate(mode);
             return true;
         }
         if (inside(mouseX, mouseY, l.sideX, l.sideY, l.btnW, l.btnH)) {
@@ -170,13 +160,13 @@ final class ChessOverlayWindow {
         session.clearSelection();
         return true;
     }
-    private void drawHeader(DrawContext context, TextRenderer tr, Layout l, ChessOverlay.PlayMode mode, boolean pinned, boolean whiteBottom, int scriptLevel) {
+    private void drawHeader(DrawContext context, TextRenderer tr, Layout l, ChessOverlay.PlayMode mode, boolean pinned, boolean whiteBottom) {
         context.fill(l.x, l.y, l.x + l.w, l.y + l.headerH, HEADER_BG);
         context.fill(l.x, l.y, l.x + l.w, l.y + 1, HEADER_BORDER);
         context.fill(l.x, l.y + l.headerH - 1, l.x + l.w, l.y + l.headerH, HEADER_BORDER);
         context.drawTextWithShadow(tr, "Chess", l.x + 6, l.y + 4, 0xFFFFFFFF);
         drawHeaderButton(context, tr, l.pinX, l.pinY, l.btnW, l.btnH, pinned ? "Unpin" : "Pin");
-        String modeText = mode == ChessOverlay.PlayMode.SCRIPT ? ("L" + scriptLevel) : "Sync";
+        String modeText = "Stockfish";
         drawHeaderButton(context, tr, l.modeX, l.modeY, l.btnW, l.btnH, modeText);
         drawHeaderButton(context, tr, l.sideX, l.sideY, l.btnW, l.btnH, whiteBottom ? "White" : "Black");
         drawHeaderButton(context, tr, l.resetX, l.resetY, l.btnW, l.btnH, "Reset");
@@ -317,15 +307,13 @@ final class ChessOverlayWindow {
         context.fill(l.panelX, l.panelY, l.panelX + l.panelW, l.panelY + l.panelH, PANEL_BG);
         context.fill(l.panelX, l.panelY, l.panelX + l.panelW, l.panelY + 1, PANEL_BORDER);
         context.fill(l.panelX, l.panelY + l.panelH - 1, l.panelX + l.panelW, l.panelY + l.panelH, PANEL_BORDER);
-        context.drawTextWithShadow(tr, "Mode: " + (mode == ChessOverlay.PlayMode.SYNC ? "Game Sync" : "Script"), l.panelX + 8, l.panelY + 7, 0xFFE9F2FF);
+        context.drawTextWithShadow(tr, "Mode: Stockfish", l.panelX + 8, l.panelY + 7, 0xFFE9F2FF);
         context.drawTextWithShadow(tr, "Turn: " + (ChessLogic.isWhiteTurn(boardFen) ? "White" : "Black"), l.panelX + 8, l.panelY + 20, 0xFFE9F2FF);
         if (statusText != null && !statusText.isBlank()) context.drawTextWithShadow(tr, statusText, l.panelX + 8, l.panelY + 35, 0xFFFFE7A4);
-        if (mode == ChessOverlay.PlayMode.SYNC && session != null && session.active()) {
+        if (session != null && session.active()) {
             String side = session.localWhite() ? "You: White" : "You: Black";
             context.drawTextWithShadow(tr, side, l.panelX + 8, l.panelY + 50, 0xFFC6DEFF);
             context.drawTextWithShadow(tr, "Opp: " + safe(session.opponentName()), l.panelX + 116, l.panelY + 50, 0xFFC6DEFF);
-        } else if (mode == ChessOverlay.PlayMode.SCRIPT) {
-            context.drawTextWithShadow(tr, "Play White vs script (Black).", l.panelX + 8, l.panelY + 50, 0xFFC6DEFF);
         }
     }
     private void drawResizeHandle(DrawContext context, Layout l, int mouseX, int mouseY) {
