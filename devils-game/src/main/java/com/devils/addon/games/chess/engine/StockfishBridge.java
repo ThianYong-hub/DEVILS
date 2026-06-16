@@ -67,7 +67,7 @@ public final class StockfishBridge {
                     System.err.println(LOG_PREFIX + " [readerThread] << " + line);
                     outputQueue.offer(line);
                 }
-                System.err.println(LOG_PREFIX + " [readerThread] Stream ended (line=" + line + ")");
+                System.err.println(LOG_PREFIX + " [readerThread] Stream ended");
             } catch (IOException e) {
                 if (running) {
                     System.err.println(LOG_PREFIX + " [readerThread] Error: " + e.getMessage());
