@@ -2,7 +2,6 @@ package com.devils.addon.util.smoke;
 
 import com.devils.addon.modules.NukerPlus;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import net.minecraft.client.MinecraftClient;
 
 public final class AssimilatedInteractionChecks {
 
@@ -17,11 +16,6 @@ public final class AssimilatedInteractionChecks {
         } catch (Throwable t) {
             return SmokeCheckResult.fail("nukerplus-acceleration", t.getClass().getSimpleName() + ": " + t.getMessage());
         }
-    }
-
-    public static SmokeCheckResult chestTrackerLocalSettingsPayloadFlow() {
-        // ChestTracker integration removed — module is now standalone
-        return SmokeCheckResult.pass("chesttracker-local-settings", "ChestTracker integration removed (no external dep)");
     }
 
     public static SmokeCheckResult searchablesFlow() {
@@ -44,15 +38,5 @@ public final class AssimilatedInteractionChecks {
         } catch (Throwable t) {
             return SmokeCheckResult.fail("yacl-option-lifecycle", t.getClass().getSimpleName() + ": " + t.getMessage());
         }
-    }
-
-    public static SmokeCheckResult xaeroRefreshHookFlow() {
-        // Xaero integration removed — no external dependency
-        return SmokeCheckResult.pass("xaero-refresh-hook", "Xaero integration removed (no external dep)");
-    }
-
-    public static SmokeCheckResult xaeroPlusSettingLifecycle() {
-        // XaeroPlus integration removed — no external dependency
-        return SmokeCheckResult.pass("xaero-plus-settings", "XaeroPlus integration removed (no external dep)");
     }
 }
