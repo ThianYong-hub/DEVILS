@@ -16,16 +16,16 @@
 
 Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
-Current addon build (`0.0.60`)
-Current game build (`0.0.4`)
+Current addon build (`0.0.61`)
+Current game build (`0.0.5`)
 
 ## What Is In Here
 
-- `devils-addon` - main Meteor addon. Combat, movement, stash tools, pings, ChestTracker/Xaero glue, SyncHub settings.
+- `devils-addon` - main Meteor addon. Combat, movement, stash tools, pings, SyncHub settings.
 - `devils-game` - optional extra jar with dumb little game overlays.
 - `SyncHub` - tiny Python server for sharing module data between clients.
 - `devils-shared` - shared Java bits used by both jars.
-- `chesttracker-port` and `tools` - local build glue. Ugly, but it works.
+- `tools` - local build glue. Ugly, but it works.
 
 This repo vendors/assimilates a few mod resources. If GitHub spits out a tiny addon jar without the `META-INF/devils-addon/mixins/*.json` files, that build is broken. The Gradle build and Actions now check that so it should fail before release instead of crashing Minecraft.
 
@@ -105,10 +105,7 @@ Utility/team:
 Integrations:
 
 - `sync-hub` - shared SyncHub settings.
-- `chest-tracker` - bundled ChestTracker runtime and sync.
 - `mod-auto-updater` - Modrinth/GitHub jar mover.
-- Xaero stuff - minimap/worldmap/XaeroPlus glue and marker sync.
-
 ## StashMover Notes
 
 Two account setup:
@@ -215,6 +212,20 @@ If that file is missing, the action fails. No more "release looked fine but Fabr
 
 ## Credits
 
-Built on Fabric, Meteor Client, Fabric API, Xaero Minimap/World Map/XaeroPlus, ChestTracker, WhereIsIt, Searchables, YACL, JackFredLib and a bunch of Gradle-resolved libs.
+Built on Fabric, Meteor Client, Fabric API, SyncHub, YACL, JackFredLib and a bunch of Gradle-resolved libs.
 
 Root license is GPL-3.0. Some bundled/source-native stuff has its own license text, keep those notices with public builds.
+
+## Changelog
+
+### v0.0.61 (addon) / v0.0.5 (game)
+
+- Removed dead code: Xaero map integration, ChestTracker, WhereIsIt dependencies (~620 lines, 5 files)
+- Removed orphan root skeleton, audit temp files, JVM crash log, about.html artifact
+- Cleaned up agent artifacts (.mimo-rules.md, patch.py)
+- JAR reduced from ~15-25MB → 3.6MB (removed unused transitive dependencies)
+- 106 tests passing, 0 failures, 2 skipped
+
+### v0.0.60
+
+- Previous stable release.
