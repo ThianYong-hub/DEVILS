@@ -83,13 +83,6 @@ public class Ping extends Module {
         .build()
     );
 
-    private final Setting<Boolean> xaeroMapDebug = sgGeneral.add(new BoolSetting.Builder()
-        .name("xaero-map-debug")
-        .description("Enable debug logs for Ping -> Xaero World Map marker bridge.")
-        .defaultValue(false)
-        .build()
-    );
-
     private final Setting<Double> raycastRange = sgGeneral.add(new DoubleSetting.Builder()
         .name("raycast-range")
         .description("Range used to resolve ping point from crosshair.")

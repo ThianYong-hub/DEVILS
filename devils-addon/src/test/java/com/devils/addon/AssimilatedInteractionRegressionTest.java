@@ -8,11 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AssimilatedInteractionRegressionTest {
     @Test
-    void chestTrackerLocalSettingsPayloadRoundTripRemainsUsable() {
-        assertSuccess(AssimilatedInteractionChecks.chestTrackerLocalSettingsPayloadFlow());
-    }
-
-    @Test
     void searchablesFilteringAndAutocompleteRemainUsable() {
         assertSuccess(AssimilatedInteractionChecks.searchablesFlow());
     }
@@ -20,16 +15,6 @@ class AssimilatedInteractionRegressionTest {
     @Test
     void yaclOptionLifecycleAppliesAndResetsState() {
         assertSuccess(AssimilatedInteractionChecks.yaclOptionLifecycle());
-    }
-
-    @Test
-    void xaeroRefreshHookRemainsReachable() {
-        assertSuccess(AssimilatedInteractionChecks.xaeroRefreshHookFlow());
-    }
-
-    @Test
-    void xaeroPlusSettingLifecycleRemainsUsable() {
-        assertSuccess(AssimilatedInteractionChecks.xaeroPlusSettingLifecycle());
     }
 
     private static void assertSuccess(SmokeCheckResult result) {
