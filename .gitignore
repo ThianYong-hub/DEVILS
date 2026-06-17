@@ -181,3 +181,6 @@ devils-addon/sounds/
 devils-addon/usercache.json
 devils-addon/xaero/
 devils-addon/XaeroWaypoints_BACKUP*/
+
+# Protected agent memory (never commit)
+MIMO.md
