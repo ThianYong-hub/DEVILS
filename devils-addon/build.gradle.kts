@@ -47,9 +47,7 @@ val stashMoverLiveWorldName = (findProperty("stashMoverLiveWorldName") as String
 val gameArchivesBaseName = properties["game_archives_base_name"] as String
 
 val minecraftVersion = properties["minecraft_version"] as String
-val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
-val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
-val xaeroPlusVersion = properties["xaeroplus_version"] as String
+
 val sourceNativeModDependencies = listOf<String>()
 val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
 val sourceNativeBuildRoot = rootProject.file("local-source-native/Source Native Build")
@@ -267,13 +265,6 @@ repositories {
         }
     }
     maven {
-        name = "Xaero Maven"
-        url = uri("https://maven.2b2t.vc/xaero")
-        content {
-            includeGroup("xaero.lib")
-        }
-    }
-    maven {
         name = "2b2t Releases"
         url = uri("https://maven.2b2t.vc/releases")
     }
@@ -324,13 +315,6 @@ repositories {
         url = uri("https://maven.misterpemodder.com/libs-release/")
         content {
             includeGroupAndSubgroups("com.misterpemodder")
-        }
-    }
-    maven {
-        name = "JackFredMaven"
-        url = uri("https://maven.jackf.red/releases/")
-        content {
-            includeGroupAndSubgroups("red.jackf.jackfredlib")
         }
     }
 }
@@ -422,30 +406,11 @@ tasks {
     }
 
     val generateThirdPartyNotices by registering {
-        fun firstExisting(vararg candidates: File): File? = candidates.firstOrNull { it.isFile }
-
-        val chestTrackerLicense = firstExisting(
-            rootProject.file("local-source-native/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
-            sourceNativeBuildRoot.resolve("chesttracker-port-embedded/LICENSE_devils-addon-chesttracker"),
-            sourceNativeBuildRoot.resolve("jackfredlib/LICENSE_jackfredlib")
-        )
-        val whereIsItLicense = firstExisting(sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null"))
-        val xaeroHudNotice = firstExisting(sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud"))
-        val xaeroPlusLicense = firstExisting(
-            rootProject.file("local-source-native/Source Github/XaeroPlus-2.30.9/LICENSE"),
-            sourceNativeBuildRoot.resolve("xaeroplus-fabric/LICENSE")
-        )
-        val sqliteLicense = firstExisting(sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE"))
         val soundlibsLgpl = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/LGPL-2.1.txt")
         val soundlibsJorbis = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/jorbis-COPYING.LIB")
         val soundlibsVorbisSpi = file("src/main/thirdparty-audio/resources/META-INF/licenses/soundlibs/vorbisspi-LICENSE.txt")
 
         inputs.files(listOfNotNull(
-            chestTrackerLicense,
-            whereIsItLicense,
-            xaeroHudNotice,
-            xaeroPlusLicense,
-            sqliteLicense,
             soundlibsLgpl,
             soundlibsJorbis,
             soundlibsVorbisSpi
@@ -479,21 +444,8 @@ tasks {
                 Source metadata path:
                 - local-source-native/Source Native Build/yet-another-config-lib/fabric.mod.json
 
-                The local source snapshot used for this build does not include a separate standalone license text,
-                so the LGPL-3.0 text bundled below for the JackFred/ChestTracker/WhereIsIt family also covers this component.
-            """.trimIndent()
-
-            val xaeroNotice = """
-                XaeroLib, Xaero's Minimap and Xaero's World Map are marked "All Rights Reserved"
-                in the local source metadata used for this build.
-
-                Metadata paths:
-                - local-source-native/Source Native Build/xaerolib-fabric/fabric.mod.json
-                - local-source-native/Source Native Build/xaeros-minimap-fabric/fabric.mod.json
-                - local-source-native/Source Native Build/xaeros-world-map-fabric/fabric.mod.json
-
-                Bundled notice text:
-                ${readOrNotice(xaeroHudNotice, "Xaero notice unavailable in clean checkout", "The source-native Xaero notice file was not present; upstream metadata marks the bundled Xaero components as All Rights Reserved.")}
+                The local source snapshot used for this build does not include a separate standalone license text.
+                YetAnotherConfigLib is LGPL-3.0-or-later; see the upstream repository for the full license.
             """.trimIndent()
 
             outputFile.writeText(
@@ -503,30 +455,9 @@ tasks {
                     appendLine("This build intentionally keeps a single root LICENSE for Devils-Addon and consolidates third-party notice material here.")
                     appendLine("Source-native incorporated components remain subject to their upstream license terms.")
                     appendLine()
-                    append(section("ChestTracker, JackFredLib, WhereIsIt family - LGPL notice", readOrNotice(chestTrackerLicense, "LGPL notice unavailable in clean checkout", "The source-native ChestTracker/JackFredLib license file was not present; upstream metadata identifies the JackFred/ChestTracker/WhereIsIt family as LGPL licensed.")))
-                    append(section("WhereIsIt bundled license text as found in local source basis", readOrNotice(whereIsItLicense, "WhereIsIt license unavailable in clean checkout", "The source-native WhereIsIt license file was not present in this checkout.")))
                     append(section("Searchables - metadata notice", searchablesMitNotice))
                     append(section("YetAnotherConfigLib - metadata notice", yaclLgplNotice))
-                    append(section("Xaero family notice", xaeroNotice))
-                    if (xaeroPlusLicense != null) {
-                        append(section("XaeroPlus - MIT", read(xaeroPlusLicense)))
-                    } else {
-                        append(
-                            section(
-                                "XaeroPlus - metadata notice",
-                                """
-                                XaeroPlus is declared as MIT-licensed in the local source metadata used for this build.
-
-                                Metadata path:
-                                - local-source-native/Source Native Build/xaeroplus-fabric/fabric.mod.json
-
-                                The local source snapshot used for this build does not include a separate standalone upstream LICENSE file,
-                                so this consolidated notice keeps the declared license identifier and source path.
-                                """.trimIndent()
-                            )
-                        )
-                    }
-                    append(section("sqlite-jdbc payload inside source-native XaeroPlus tree - Apache-2.0", readOrNotice(sqliteLicense, "sqlite-jdbc license unavailable in clean checkout", "The source-native sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
+                    append(section("sqlite-jdbc - Apache-2.0", readOrNotice(null, "sqlite-jdbc license unavailable in clean checkout", "The source-native sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
                     append(section("Soundlibs - LGPL-2.1", read(soundlibsLgpl)))
                     append(section("Soundlibs - jorbis notice", read(soundlibsJorbis)))
                     append(section("Soundlibs - vorbisspi notice", read(soundlibsVorbisSpi)))
@@ -657,14 +588,8 @@ tasks {
         val smokeRunDir = layout.projectDirectory.dir("run-assimilated-smoke").asFile
         val latestClientLog = smokeRunDir.resolve("logs/latest.log")
         val runtimeArtifacts = listOf(
-            "config/chesttracker.json5",
-            "config/whereisit.json5",
             "config/yacl.json5",
-            "config/xaero/minimap/client.cfg",
-            "config/xaero/world-map/client.cfg",
-            "config/xaero/lib/client.cfg",
             "devils-addon/modules.json",
-            "devils-addon/chesttracker/module-settings.json"
         )
 
         doLast {
@@ -686,7 +611,6 @@ tasks {
                     || line.contains("- devils-addon ")
                     || line.contains("Initializing Devils Addon")
                     || line.contains("Initializing Meteor Client")
-                    || line.contains("Loading Xaero's World Map - Stage 2/2")
                     || line.contains("Sound engine started")
                     || line.contains("Stopping!")
             }
@@ -856,7 +780,6 @@ tasks {
             val staleEvidencePaths = listOf(
                 smokeRunDir.resolve("config"),
                 smokeRunDir.resolve("devils-addon"),
-                smokeRunDir.resolve("xaero"),
                 smokeRunDir.resolve("logs/latest.log")
             )
 
