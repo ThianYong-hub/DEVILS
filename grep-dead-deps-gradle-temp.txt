@@ -1,0 +1,54 @@
+﻿C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:50:val xaeroMinimapVersion = properties["xaero_minimap_version"] as String
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:51:val xaeroWorldMapVersion = properties["xaero_worldmap_version"] as String
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:52:val xaeroPlusVersion = properties["xaeroplus_version"] as String
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:108:"yacl-128x.png",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:270:name = "Xaero Maven"
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:271:url = uri("https://maven.2b2t.vc/xaero")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:273:includeGroup("xaero.lib")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:304:includeGroupAndSubgroups("com.blamejared.searchables")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:333:includeGroupAndSubgroups("red.jackf.jackfredlib")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:427:val chestTrackerLicense = firstExisting(
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:428:rootProject.file("local-source-native/Source Github/ChestTracker-v2.8.1+1.21.11/LICENSE"),
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:429:sourceNativeBuildRoot.resolve("chesttracker-port-embedded/LICENSE_devils-addon-chesttracker"),
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:430:sourceNativeBuildRoot.resolve("jackfredlib/LICENSE_jackfredlib")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:432:val whereIsItLicense = firstExisting(sourceNativeBuildRoot.resolve("where-is-it-port/LICENSE_null"))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:433:val xaeroHudNotice = firstExisting(sourceNativeBuildRoot.resolve("xaeros-minimap-fabric/LICENSE_xaerohud"))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:434:val xaeroPlusLicense = firstExisting(
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:435:rootProject.file("local-source-native/Source Github/XaeroPlus-2.30.9/LICENSE"),
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:436:sourceNativeBuildRoot.resolve("xaeroplus-fabric/LICENSE")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:438:val sqliteLicense = firstExisting(sourceNativeBuildRoot.resolve("xaeroplus-fabric/META-INF/LICENSE"))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:444:chestTrackerLicense,
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:445:whereIsItLicense,
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:446:xaeroHudNotice,
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:447:xaeroPlusLicense,
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:468:val searchablesMitNotice = """
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:469:Searchables is declared as MIT-licensed in the local source metadata.
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:471:- local-source-native/Source Native Build/searchables-fabric/fabric.mod.json
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:477:val yaclLgplNotice = """
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:483:so the LGPL-3.0 text bundled below for the JackFred/ChestTracker/WhereIsIt family also covers this component.
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:486:val xaeroNotice = """
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:487:XaeroLib, Xaero's Minimap and Xaero's World Map are marked "All Rights Reserved"
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:491:- local-source-native/Source Native Build/xaerolib-fabric/fabric.mod.json
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:492:- local-source-native/Source Native Build/xaeros-minimap-fabric/fabric.mod.json
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:493:- local-source-native/Source Native Build/xaeros-world-map-fabric/fabric.mod.json
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:496:${readOrNotice(xaeroHudNotice, "Xaero notice unavailable in clean checkout", "The source-native Xaero notice file was not present; upstream metadata marks the bundled Xaero components as All Rights Reserved.")}
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:506:append(section("ChestTracker, JackFredLib, WhereIsIt family - LGPL notice", readOrNotice(chestTrackerLicense, "LGPL notice unavailable in clean checkout", "The source-native ChestTracker/JackFredLib license file was not present; upstream metadata identifies the JackFred/ChestTracker/WhereIsIt family as LGPL licensed.")))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:507:append(section("WhereIsIt bundled license text as found in local source basis", readOrNotice(whereIsItLicense, "WhereIsIt license unavailable in clean checkout", "The source-native WhereIsIt license file was not present in this checkout.")))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:508:append(section("Searchables - metadata notice", searchablesMitNotice))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:509:append(section("YetAnotherConfigLib - metadata notice", yaclLgplNotice))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:510:append(section("Xaero family notice", xaeroNotice))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:511:if (xaeroPlusLicense != null) {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:512:append(section("XaeroPlus - MIT", read(xaeroPlusLicense)))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:516:"XaeroPlus - metadata notice",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:518:XaeroPlus is declared as MIT-licensed in the local source metadata used for this build.
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:521:- local-source-native/Source Native Build/xaeroplus-fabric/fabric.mod.json
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:529:append(section("sqlite-jdbc payload inside source-native XaeroPlus tree - Apache-2.0", readOrNotice(sqliteLicense, "sqlite-jdbc license unavailable in clean checkout", "The source-native sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:660:"config/chesttracker.json5",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:661:"config/whereisit.json5",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:662:"config/yacl.json5",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:663:"config/xaero/minimap/client.cfg",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:664:"config/xaero/world-map/client.cfg",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:665:"config/xaero/lib/client.cfg",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:667:"devils-addon/chesttracker/module-settings.json"
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:689:|| line.contains("Loading Xaero's World Map - Stage 2/2")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\build.gradle.kts:859:smokeRunDir.resolve("xaero"),

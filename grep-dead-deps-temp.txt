@@ -1,0 +1,55 @@
+﻿C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\modules\modupdater\ModAutoUpdaterEngine.java:622:return new SourceSpec(SourceProvider.MODRINTH, "yacl", null);
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\modules\Ping.java:86:private final Setting<Boolean> xaeroMapDebug = sgGeneral.add(new BoolSetting.Builder()
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\modules\Ping.java:87:.name("xaero-map-debug")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\modules\Ping.java:88:.description("Enable debug logs for Ping -> Xaero World Map marker bridge.")
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:22:public static SmokeCheckResult chestTrackerLocalSettingsPayloadFlow() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:23:// ChestTracker integration removed — module is now standalone
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:24:return SmokeCheckResult.pass("chesttracker-local-settings", "ChestTracker integration removed (no external dep)");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:27:public static SmokeCheckResult searchablesFlow() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:30:return SmokeCheckResult.pass("searchables-flow", "PingMarkerController reachable");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:32:return SmokeCheckResult.fail("searchables-flow", "PingMarkerController class not found");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:34:return SmokeCheckResult.fail("searchables-flow", t.getClass().getSimpleName() + ": " + t.getMessage());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:38:public static SmokeCheckResult yaclOptionLifecycle() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:40:Class.forName("dev.isxander.yacl3.api.Option");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:41:return SmokeCheckResult.pass("yacl-option-lifecycle", "YACL3 Option class reachable");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:43:return SmokeCheckResult.pass("yacl-option-lifecycle", "YACL3 not present (optional)");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:45:return SmokeCheckResult.fail("yacl-option-lifecycle", t.getClass().getSimpleName() + ": " + t.getMessage());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:49:public static SmokeCheckResult xaeroRefreshHookFlow() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:50:// Xaero integration removed — no external dependency
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:51:return SmokeCheckResult.pass("xaero-refresh-hook", "Xaero integration removed (no external dep)");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:54:public static SmokeCheckResult xaeroPlusSettingLifecycle() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:55:// XaeroPlus integration removed — no external dependency
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\AssimilatedInteractionChecks.java:56:return SmokeCheckResult.pass("xaero-plus-settings", "XaeroPlus integration removed (no external dep)");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\smoke\InputRuntimeValidation.java:10:* External mod integrations (ChestTracker, Xaero) removed to prevent crashes
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:32:private static final Map<String, String> EXPECTED_XAERO_VERSIONS = new LinkedHashMap<>();
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:36:EXPECTED_XAERO_VERSIONS.put("xaerominimap", "25.3.10");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:37:EXPECTED_XAERO_VERSIONS.put("xaeroworldmap", "1.40.11");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:38:EXPECTED_XAERO_VERSIONS.put("xaeroplus", "2.30.9");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:72:public static void logXaeroState() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:73:logXaeroMod("xaerominimap", "Xaero Minimap");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:74:logXaeroMod("xaeroworldmap", "Xaero WorldMap");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:75:logXaeroMod("xaeroplus", "XaeroPlus");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:90:private static void logXaeroMod(String modId, String display) {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:93:DevilsAddon.LOG.warn("[Devils/Xaero] {} is not loaded.", display);
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:100:? EXPECTED_XAERO_VERSIONS.getOrDefault(modId, container.getMetadata().getVersion().getFriendlyString())
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:104:String expected = EXPECTED_XAERO_VERSIONS.getOrDefault(modId, "");
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:108:"[Devils/Xaero] {} loaded: version={} source={} origin={}",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:117:"[Devils/Xaero] {} version mismatch. Loaded={}, expected={} for Devils sync bridge.",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:126:"[Devils/Xaero] External {} detected. Fabric resolves root mods before nested jars; remove standalone {} jar to force embedded Devils stack.",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\java\com\devils\addon\util\CrashGuard.java:135:return "devils-addon".equalsIgnoreCase(container.getMetadata().getId()) && EXPECTED_XAERO_VERSIONS.containsKey(modId);
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:2:"devils-addon.chesttracker.keybind.title": "ChestTracker Keybind",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:3:"devils-addon.chesttracker.keybind.instructions": "Press a key or mouse button. Esc cancels, Delete unbinds.",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:4:"devils-addon.chesttracker.keybind.current": "Current: %s",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:5:"devils-addon.chesttracker.keybind.button": "Open Key: %s",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:6:"devils-addon.chesttracker.keybind.listening": "Listening...",
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\main\resources\assets\devils-addon\lang\en_us.json:7:"devils-addon.chesttracker.keybind.reset": "Reset"
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:11:void chestTrackerLocalSettingsPayloadRoundTripRemainsUsable() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:12:assertSuccess(AssimilatedInteractionChecks.chestTrackerLocalSettingsPayloadFlow());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:16:void searchablesFilteringAndAutocompleteRemainUsable() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:17:assertSuccess(AssimilatedInteractionChecks.searchablesFlow());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:21:void yaclOptionLifecycleAppliesAndResetsState() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:22:assertSuccess(AssimilatedInteractionChecks.yaclOptionLifecycle());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:26:void xaeroRefreshHookRemainsReachable() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:27:assertSuccess(AssimilatedInteractionChecks.xaeroRefreshHookFlow());
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:31:void xaeroPlusSettingLifecycleRemainsUsable() {
+C:\Users\User\Downloads\Devils-Addon\devils-addon\src\test\java\com\devils\addon\AssimilatedInteractionRegressionTest.java:32:assertSuccess(AssimilatedInteractionChecks.xaeroPlusSettingLifecycle());
