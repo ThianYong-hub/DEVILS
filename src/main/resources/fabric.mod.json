@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "devils-addon",
+  "version": "${version}",
+  "name": "Devils",
+  "description": "Anarchy-focused Meteor Client addon with combat, stash, ping, and utility tools.",
+  "icon": "assets/devils-addon/icon.png",
+  "authors": [
+    "23XT",
+    "SOCKETLOST"
+  ],
+  "license": "GPL-3.0-only",
+  "contact": {
+    "sources": "https://github.com/ThianYong-hub/DEVILS"
+  },
+  "environment": "client",
+  "entrypoints": {
+    "preLaunch": [
+      "com.devils.addon.util.CrashGuard"
+    ],
+    "meteor": [
+      "com.devils.addon.DevilsAddon"
+    ]
+  },
+  "mixins": [
+    "META-INF/devils-addon/mixins/devils-addon.mixins.json"
+  ],
+  "accessWidener": "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener",
+  "depends": {
+    "java": ">=21",
+    "minecraft": "1.21.11",
+    "meteor-client": ">=0.5.8"
+  }
+}
