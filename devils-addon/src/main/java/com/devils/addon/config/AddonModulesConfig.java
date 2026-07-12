@@ -315,12 +315,15 @@ public final class AddonModulesConfig {
             root.add(ROOT_MODULES_KEY, modules);
 
             Path temp = Files.createTempFile(parent, "devils-modules-", ".tmp");
-            Files.writeString(temp, GSON.toJson(root), StandardCharsets.UTF_8);
-
             try {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+                Files.writeString(temp, GSON.toJson(root), StandardCharsets.UTF_8);
+                try {
+                    Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                } catch (AtomicMoveNotSupportedException ignored) {
+                    Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                Files.deleteIfExists(temp);
             }
         } catch (IOException e) {
             DevilsAddon.LOG.error("[Devils] Failed to write addon module config to {}.", path, e);

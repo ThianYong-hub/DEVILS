@@ -160,6 +160,7 @@ public class ModAutoUpdater extends Module {
     @EventHandler
     private void onOpenScreen(OpenScreenEvent event) {
         CrashGuard.run(this, "onOpenScreen", () -> {
+            if (!isActive()) return;
             if (startupCheckDone) return;
             if (!updateRerun.get()) return;
             if (event.screen == null) return;

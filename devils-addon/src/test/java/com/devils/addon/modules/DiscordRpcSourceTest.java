@@ -17,11 +17,13 @@ class DiscordRpcSourceTest {
 
         assertTrue(source.contains("FORCE_RECONNECT_TICKS = 600"));
         assertTrue(source.contains("restoreMeteorPresenceOnDeactivate"));
-        assertTrue(source.contains("ensureMeteorPresenceDisabled()"));
+        assertTrue(source.contains("ensureMeteorPresenceDisabled(boolean rememberForRestore)"));
         assertTrue(source.contains("restoreMeteorPresenceIfNeeded()"));
+        assertTrue(source.contains("ensureMeteorPresenceDisabled(true)"));
+        assertTrue(source.contains("ensureMeteorPresenceDisabled(false)"));
         assertTrue(source.contains("DiscordIPC.stop();"));
         assertTrue(source.contains("DiscordIPC.start(APP_ID"));
-        assertTrue(source.contains("if (ensureMeteorPresenceDisabled())"));
+        assertTrue(source.contains("if (ensureMeteorPresenceDisabled(false))"));
         assertTrue(source.contains("if (reconnectCounter >= FORCE_RECONNECT_TICKS)"));
     }
 }

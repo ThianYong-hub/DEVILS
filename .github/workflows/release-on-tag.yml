@@ -1,5 +1,8 @@
 name: Release From Tag
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -11,7 +14,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +26,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ inputs.tag }}
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Resolve Release Tag
         id: resolve_tag
@@ -31,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag_value="${{ inputs.tag }}"
+          tag_value="${{ inputs.tag || github.ref_name }}"
 
           if [[ ! "${tag_value}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Invalid release tag '${tag_value}'. Expected format vX.Y.Z."
@@ -47,6 +50,16 @@ jobs:
           set -euo pipefail
           addon_version="$(grep '^addon_version=' gradle.properties | cut -d= -f2)"
           game_version="$(grep '^game_version=' gradle.properties | cut -d= -f2)"
+          release_version="${{ steps.resolve_tag.outputs.release_tag }}"
+          release_version="${release_version#v}"
+          if [[ "${addon_version}" != "${release_version}" ]]; then
+            echo "::error::Release tag ${{ steps.resolve_tag.outputs.release_tag }} does not match addon_version=${addon_version}. Update gradle.properties before tagging."
+            exit 1
+          fi
+          if [[ "${game_version}" != "${release_version}" ]]; then
+            echo "::error::Release tag ${{ steps.resolve_tag.outputs.release_tag }} does not match game_version=${game_version}. Update gradle.properties before tagging."
+            exit 1
+          fi
           echo "addon_version=${addon_version}" >> "${GITHUB_OUTPUT}"
           echo "game_version=${game_version}" >> "${GITHUB_OUTPUT}"
 
@@ -62,8 +75,11 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Run tests
+      - name: Run Gradle tests
         run: ./gradlew --no-daemon test
+
+      - name: Run SyncHub tests
+        run: python3 -m unittest SyncHub.tests.test_sync_backend
 
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
@@ -83,23 +99,7 @@ jobs:
           jar_list="$(mktemp)"
           jar tf "${addon_asset}" > "${jar_list}"
           required_mixins=(
-            "META-INF/devils-addon/mixins/addon-template.mixins.json"
-            "META-INF/devils-addon/mixins/chesttracker.mixins.json"
-            "META-INF/devils-addon/mixins/whereisit.mixins.json"
-            "META-INF/devils-addon/mixins/searchables.mixins.json"
-            "META-INF/devils-addon/mixins/searchables.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/yacl.mixins.json"
-            "META-INF/devils-addon/mixins/yacl-fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerolib.mixins.json"
-            "META-INF/devils-addon/mixins/xaerolib.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerohud.mixins.json"
-            "META-INF/devils-addon/mixins/xaerohud.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerominimap.mixins.json"
-            "META-INF/devils-addon/mixins/xaerominimap.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroworldmap.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroworldmap.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroplus.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroplus-fabric.mixins.json"
+            "META-INF/devils-addon/mixins/devils-addon.mixins.json"
           )
           for path in "${required_mixins[@]}"; do
             grep -Fxq "${path}" "${jar_list}" || { echo "::error::Missing jar resource ${path}"; exit 1; }

@@ -12,6 +12,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -24,6 +26,11 @@ public final class AutoLoginSyncStreamController {
     private static final long SYNC_STREAM_RECONNECT_MS = 5_000;
     private static final long SYNC_STREAM_UNSUPPORTED_BACKOFF_MS = 300_000;
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
+    private static final ExecutorService STREAM_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "Devils-AutoLoginSyncStream");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final AutoLoginSyncCodec codec;
     private final BooleanSupplier verboseSupplier;
@@ -78,7 +85,7 @@ public final class AutoLoginSyncStreamController {
         syncStreamConnectionKey = connectionKey;
         int safeWaitMs = Math.max(1_000, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
-        syncStreamFuture = CompletableFuture.runAsync(() -> runStream(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, Math.max(-1, knownRevision), safeWaitMs, writerFormatter));
+        syncStreamFuture = CompletableFuture.runAsync(() -> runStream(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, Math.max(-1, knownRevision), safeWaitMs, writerFormatter), STREAM_EXECUTOR);
     }
 
     public void stop() {

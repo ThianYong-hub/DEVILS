@@ -245,15 +245,15 @@ public class JoinWatcher extends Module {
         if (command.isBlank()) return;
         if (mc.player == null || mc.player.networkHandler == null) return;
 
-        ChatUtils.sendPlayerMsg(command);
-        if (!autoDisableSendAfterChat.get()) return;
-
         ArrayList<TrackerPlayerRule> currentRules = new ArrayList<>(trackerPlayers.get());
-        int targetIndex = findRuleIndexForDisable(currentRules, ruleIndex, ruleSnapshot);
+        int targetIndex = findRuleIndexForDelayedSend(currentRules, ruleIndex, ruleSnapshot, command);
         if (targetIndex < 0) return;
 
         TrackerPlayerRule currentRule = currentRules.get(targetIndex);
         if (!currentRule.sendEnabled()) return;
+
+        ChatUtils.sendPlayerMsg(command);
+        if (!autoDisableSendAfterChat.get()) return;
 
         currentRules.set(targetIndex, currentRule.withSendEnabled(false));
         trackerPlayers.set(currentRules);
@@ -277,6 +277,27 @@ public class JoinWatcher extends Module {
         }
 
         return -1;
+    }
+
+    private int findRuleIndexForDelayedSend(List<TrackerPlayerRule> rules, int preferredIndex, TrackerPlayerRule snapshot, String command) {
+        if (preferredIndex >= 0 && preferredIndex < rules.size()) {
+            TrackerPlayerRule candidate = rules.get(preferredIndex);
+            if (isSameDelayedSendRule(candidate, snapshot, command)) return preferredIndex;
+        }
+
+        for (int i = 0; i < rules.size(); i++) {
+            if (isSameDelayedSendRule(rules.get(i), snapshot, command)) return i;
+        }
+
+        return -1;
+    }
+
+    private boolean isSameDelayedSendRule(TrackerPlayerRule candidate, TrackerPlayerRule snapshot, String command) {
+        return candidate.playerName().equals(snapshot.playerName())
+            && candidate.eventMode() == snapshot.eventMode()
+            && candidate.chatDelayMs() == snapshot.chatDelayMs()
+            && candidate.commandText().trim().equals(command)
+            && candidate.sendEnabled();
     }
 
     private void cleanupCompletedDelayedSends() {

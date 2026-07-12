@@ -150,7 +150,7 @@ public class TnTBomber extends Module {
                 return;
             }
 
-            ensureHotbar(obsidian);
+            if (!ensureHotbar(obsidian)) return;
             BlockUtils.place(pos, obsidian.isHotbar() ? obsidian : InvUtils.findInHotbar(Items.OBSIDIAN),
                 rotate.get(), rotate.get() ? ROTATE_PRIORITY : 0, swingHand.get(), true, swapMode.get() != SwapMode.Normal);
             return;
@@ -175,7 +175,7 @@ public class TnTBomber extends Module {
                 return;
             }
 
-            ensureHotbar(obsidian);
+            if (!ensureHotbar(obsidian)) return;
             BlockUtils.place(repairPos, obsidian.isHotbar() ? obsidian : InvUtils.findInHotbar(Items.OBSIDIAN),
                 rotate.get(), rotate.get() ? ROTATE_PRIORITY : 0, swingHand.get(), true, swapMode.get() != SwapMode.Normal);
             return;
@@ -199,7 +199,7 @@ public class TnTBomber extends Module {
             return;
         }
 
-        ensureHotbar(tnt);
+        if (!ensureHotbar(tnt)) return;
         BlockUtils.place(tntPos, tnt.isHotbar() ? tnt : InvUtils.findInHotbar(Items.TNT),
             rotate.get(), rotate.get() ? ROTATE_PRIORITY : 0, swingHand.get(), true, swapMode.get() != SwapMode.Normal);
         stage = Stage.Ignite;
@@ -218,8 +218,9 @@ public class TnTBomber extends Module {
             return;
         }
 
-        ensureHotbar(igniter);
+        if (!ensureHotbar(igniter)) return;
         FindItemResult hotbarIgniter = igniter.isHotbar() ? igniter : InvUtils.findInHotbar(item -> item.getItem() instanceof FlintAndSteelItem);
+        if (!hotbarIgniter.found()) return;
         igniteBlock(tntPos, hotbarIgniter);
         // TNT becomes entity immediately, skip boxing and go straight to next TNT
         stage = Stage.PlaceTnt;
@@ -322,11 +323,12 @@ public class TnTBomber extends Module {
         });
     }
 
-    private void ensureHotbar(FindItemResult item) {
-        if (swapMode.get() != SwapMode.SilentInt || item.isHotbar()) return;
+    private boolean ensureHotbar(FindItemResult item) {
+        if (swapMode.get() != SwapMode.SilentInt || item.isHotbar()) return true;
         int safeSlot = findSafeHotbarSlot();
-        if (safeSlot == -1) return;
+        if (safeSlot == -1) return false;
         InvUtils.move().from(item.slot()).toHotbar(safeSlot);
+        return true;
     }
 
     private int findSafeHotbarSlot() {

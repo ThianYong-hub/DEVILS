@@ -795,7 +795,6 @@ tasks {
         doFirst {
             val smokeRunDir = layout.projectDirectory.dir("run-stashmover-targeted").asFile
             val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("saves"),
                 smokeRunDir.resolve("config"),
                 smokeRunDir.resolve("devils-addon"),
                 smokeRunDir.resolve("logs/latest.log")
@@ -868,7 +867,6 @@ tasks {
         doFirst {
             val smokeRunDir = layout.projectDirectory.dir("run-nukerplus-damage-time").asFile
             val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("saves"),
                 smokeRunDir.resolve("config"),
                 smokeRunDir.resolve("devils-addon"),
                 smokeRunDir.resolve("logs/latest.log")

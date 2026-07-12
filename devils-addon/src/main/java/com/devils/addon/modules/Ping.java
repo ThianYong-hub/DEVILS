@@ -217,10 +217,10 @@ public class Ping extends Module {
     }
 
     private void handleBindEvent(boolean isKey, int value, int modifiers, KeyAction action, Object eventRef) {
-        if (!keybind.matches(isKey, value, modifiers)) return;
+        if (!isActive() || !keybind.matches(isKey, value, modifiers)) return;
         if (eventRef instanceof KeyEvent keyEvent) keyEvent.setCancelled(true);
         if (eventRef instanceof MouseClickEvent mouseEvent) mouseEvent.setCancelled(true);
-        if (action != KeyAction.Press || !isActive() || client().currentScreen != null) return;
+        if (action != KeyAction.Press || client().currentScreen != null) return;
         markerController.createPingFromCrosshair();
     }
 

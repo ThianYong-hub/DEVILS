@@ -100,12 +100,14 @@ public class AutoAnvilRename extends Module {
         ScreenHandler handler = mc.player.currentScreenHandler;
         if (!(handler instanceof AnvilScreenHandler anvil)) return;
 
+        if (anvil.slots.size() <= 2) return;
+
         ticks++;
         if (ticks < clickDelay.get()) return;
         ticks = 0;
 
         if (!anvil.getCursorStack().isEmpty()) {
-            for (int i = 3; i < 39; i++) {
+            for (int i = 3; i < Math.min(39, anvil.slots.size()); i++) {
                 if (anvil.getSlot(i).getStack().isEmpty()) {
                     mc.interactionManager.clickSlot(anvil.syncId, i, 0, SlotActionType.PICKUP, mc.player);
                     return;
@@ -169,7 +171,7 @@ public class AutoAnvilRename extends Module {
         stuckCycles = 0;
         renameMismatchCycles = 0;
 
-        for (int i = 3; i < 39; i++) {
+        for (int i = 3; i < Math.min(39, anvil.slots.size()); i++) {
             ItemStack stack = anvil.getSlot(i).getStack();
             if (stack.isEmpty()) continue;
             if (!passesFilters(stack, targetName)) continue;

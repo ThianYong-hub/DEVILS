@@ -1660,18 +1660,25 @@ final class ModAutoUpdaterEngine {
             Path sourceParent = source.toAbsolutePath().normalize().getParent();
             Path normalizedTargetDir = targetModsDir.toAbsolutePath().normalize();
             boolean sourceEqualsTarget = sourceParent != null && sourceParent.equals(normalizedTargetDir);
-            if (source.equals(destination)) {
-                moveToBackupOrDelete(source, backupDir);
-                moveWithReplace(temp, destination);
-                return;
-            }
+            LinkedHashMap<Path, Path> rollbackFiles = new LinkedHashMap<>();
 
-            if (Files.exists(currentTargetVersion) && !currentTargetVersion.equals(destination)) {
-                moveToBackupOrDelete(currentTargetVersion, backupDir);
+            try {
+                if (source.equals(destination)) {
+                    moveToBackupForRollback(source, backupDir, request.workspaceDir, rollbackFiles);
+                    moveWithReplace(temp, destination);
+                    return;
+                }
+
+                if (Files.exists(currentTargetVersion) && !currentTargetVersion.equals(destination)) {
+                    moveToBackupForRollback(currentTargetVersion, backupDir, request.workspaceDir, rollbackFiles);
+                }
+                if (Files.exists(destination)) moveToBackupForRollback(destination, backupDir, request.workspaceDir, rollbackFiles);
+                if (sourceEqualsTarget && Files.exists(source)) moveToBackupForRollback(source, backupDir, request.workspaceDir, rollbackFiles);
+                moveWithReplace(temp, destination);
+            } catch (Exception e) {
+                rollbackBackups(rollbackFiles);
+                throw e;
             }
-            if (Files.exists(destination)) moveToBackupOrDelete(destination, backupDir);
-            if (sourceEqualsTarget && Files.exists(source)) moveToBackupOrDelete(source, backupDir);
-            moveWithReplace(temp, destination);
         } finally {
             tryDelete(temp);
         }
@@ -1754,9 +1761,7 @@ final class ModAutoUpdaterEngine {
 
             if (destination.getParent() != null) Files.createDirectories(destination.getParent());
             if (Files.exists(destination)) {
-                long sourceSize = safeSize(source);
-                long destinationSize = safeSize(destination);
-                if (sourceSize > 0 && sourceSize == destinationSize) return true;
+                if (filesHaveSameContent(source, destination)) return true;
                 moveToBackupOrDelete(destination, backupDir);
             }
 
@@ -1802,6 +1807,30 @@ final class ModAutoUpdaterEngine {
             return;
         }
 
+        Files.move(file, nextBackupPath(file, backupDir), StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void moveToBackupForRollback(
+        Path file,
+        Path backupDir,
+        Path workspaceDir,
+        Map<Path, Path> rollbackFiles
+    ) throws IOException {
+        if (!Files.exists(file)) return;
+
+        Path target;
+        if (backupDir == null) {
+            Files.createDirectories(workspaceDir);
+            target = Files.createTempFile(workspaceDir, file.getFileName().toString() + "-rollback-", ".jar");
+            Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            target = nextBackupPath(file, backupDir);
+            Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
+        }
+        rollbackFiles.put(file, target);
+    }
+
+    private static Path nextBackupPath(Path file, Path backupDir) throws IOException {
         Files.createDirectories(backupDir);
         Path target = backupDir.resolve(file.getFileName().toString());
         int index = 1;
@@ -1809,7 +1838,29 @@ final class ModAutoUpdaterEngine {
             target = backupDir.resolve(file.getFileName().toString() + "." + index + ".bak");
             index++;
         }
-        Files.move(file, target, StandardCopyOption.REPLACE_EXISTING);
+        return target;
+    }
+
+    private static void rollbackBackups(Map<Path, Path> rollbackFiles) {
+        ArrayList<Map.Entry<Path, Path>> entries = new ArrayList<>(rollbackFiles.entrySet());
+        for (int i = entries.size() - 1; i >= 0; i--) {
+            Map.Entry<Path, Path> entry = entries.get(i);
+            try {
+                Path original = entry.getKey();
+                Path backup = entry.getValue();
+                if (!Files.exists(backup) || Files.exists(original)) continue;
+                if (original.getParent() != null) Files.createDirectories(original.getParent());
+                Files.move(backup, original, StandardCopyOption.REPLACE_EXISTING);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private static boolean filesHaveSameContent(Path first, Path second) throws IOException {
+        long firstSize = Files.size(first);
+        long secondSize = Files.size(second);
+        if (firstSize != secondSize) return false;
+        return Files.mismatch(first, second) == -1L;
     }
 
     private static void tryDelete(Path path) {

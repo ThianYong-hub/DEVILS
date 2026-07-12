@@ -42,7 +42,7 @@ MODULE_ALIASES = {
     "auto_login": "auto-login",
 }
 
-CORE_SENSITIVE_MODULES = {"auto-login", "ping", }
+CORE_SENSITIVE_MODULES = {"auto-login", "ping", "chest-tracker"}
 GAME_MODULES = {"mini-games"}
 SYNC_DOMAIN_DEFAULT = "default"
 SYNC_DOMAIN_CORE = "core-sensitive"
@@ -51,7 +51,7 @@ SYNC_DOMAIN_GAMES = "games"
 ENCRYPTED_PROFILE_USERNAME = "__devils_e2e__"
 ENCRYPTED_PROFILE_PASSWORD_PREFIXES = ("devils-e2e:v1:", "devils-e2e:v2:")
 ENCRYPTED_MODULES = {"auto-login", "ping", }
-PROTECTED_EMPTY_OVERWRITE_MODULES = {"auto-login", }
+PROTECTED_EMPTY_OVERWRITE_MODULES = {"auto-login", "chest-tracker"}
 
 IGNORE_TRACEBACK_ERRORS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
 IGNORE_TRACEBACK_ERRNOS = {32, 54, 104}
@@ -815,6 +815,21 @@ class SyncStore:
                 pass
         tmp.replace(path)
 
+    def _load_json_with_backup(self, path: Path) -> dict[str, Any] | None:
+        bak = path.with_suffix(path.suffix + ".bak")
+        for candidate in (path, bak):
+            if not candidate.exists():
+                continue
+            try:
+                raw = json.loads(candidate.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    if candidate == bak:
+                        self._save_json_atomic(path, raw)
+                    return raw
+            except Exception:
+                continue
+        return None
+
     def _normalize_ns(self, raw: dict[str, Any], namespace: str) -> dict[str, Any]:
         canonical, module, _ = split_namespace(namespace)
         ns = make_namespace_state(canonical)
@@ -829,16 +844,8 @@ class SyncStore:
         return ns
 
     def _load_meta_state(self) -> dict[str, Any]:
-        if not self.state_file.exists():
-            state = default_meta_state()
-            self._save_json_atomic(self.state_file, state)
-            return state
-
-        try:
-            raw = json.loads(self.state_file.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                raise ValueError("bad-root")
-        except Exception:
+        raw = self._load_json_with_backup(self.state_file)
+        if raw is None:
             state = default_meta_state()
             self._save_json_atomic(self.state_file, state)
             return state
@@ -884,13 +891,10 @@ class SyncStore:
                         self._save_json_atomic(file_path, self._normalize_ns(raw, canonical))
                 except Exception:
                     pass
-        if not file_path.exists():
-            return None
-        try:
-            raw = json.loads(file_path.read_text(encoding="utf-8"))
-            if not isinstance(raw, dict):
-                raise ValueError("bad-ns")
-        except Exception:
+        raw = self._load_json_with_backup(file_path)
+        if raw is None:
+            if not file_path.exists() and not file_path.with_suffix(file_path.suffix + ".bak").exists():
+                return None
             ns = make_namespace_state(canonical)
             self._save_json_atomic(file_path, ns)
             return ns
@@ -1046,6 +1050,10 @@ class SyncStore:
                 checksum = canonical_profiles_checksum(current_profiles)
                 return PushResult(canonical, current_revision, current_profiles, checksum, True, False, '', self._last_event_id())
 
+            if base_revision != current_revision:
+                if module not in GAME_MODULES:
+                    checksum = canonical_profiles_checksum(current_profiles)
+                    return PushResult(canonical, current_revision, current_profiles, checksum, False, True, 'revision-mismatch', self._last_event_id())
 
                 merged_profiles = normalize_profiles(current_profiles + normalized, canonical)
                 if is_empty_overwrite_protected(canonical, current_profiles, merged_profiles, allow_empty_overwrite):
@@ -1070,7 +1078,7 @@ class SyncStore:
                         'revision': ns['revision'],
                         'profilesCount': len(merged_profiles),
                         'checksum': checksum,
-                        'staleBaseAccepted': base_revision != current_revision,
+                        'staleBaseAccepted': True,
                     },
                 )
 
@@ -1079,10 +1087,6 @@ class SyncStore:
                 self._save_meta()
                 self.cond.notify_all()
                 return PushResult(canonical, int_value(ns['revision'], 0), merged_profiles, checksum, True, False, '', self._last_event_id())
-
-            if base_revision != current_revision:
-                checksum = canonical_profiles_checksum(current_profiles)
-                return PushResult(canonical, current_revision, current_profiles, checksum, False, True, 'revision-mismatch', self._last_event_id())
 
             if is_empty_overwrite_protected(canonical, current_profiles, normalized, allow_empty_overwrite):
                 checksum = canonical_profiles_checksum(current_profiles)

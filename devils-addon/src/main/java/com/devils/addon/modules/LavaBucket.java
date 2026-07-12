@@ -89,8 +89,10 @@ public class LavaBucket extends Module {
         timer = 0;
 
         if (mc.player != null && InvUtils.find(Items.BUCKET).count() == 0) {
-            error("No empty buckets in inventory.");
-            toggle();
+            if (!dropLava.get() || InvUtils.find(Items.LAVA_BUCKET).count() == 0) {
+                error("No empty buckets in inventory.");
+                toggle();
+            }
         }
     }
 

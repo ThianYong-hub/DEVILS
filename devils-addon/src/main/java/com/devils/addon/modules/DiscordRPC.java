@@ -43,6 +43,7 @@ public class DiscordRPC extends Module {
         lastWasInMainMenu = true;
         restoreMeteorPresenceOnDeactivate = false;
 
+        ensureMeteorPresenceDisabled(true);
         forceReconnect();
     }
 
@@ -98,7 +99,7 @@ public class DiscordRPC extends Module {
         tickCounter++;
         reconnectCounter++;
 
-        if (ensureMeteorPresenceDisabled()) {
+        if (ensureMeteorPresenceDisabled(false)) {
             tickCounter = 0;
             reconnectCounter = 0;
             forceReconnect();
@@ -118,10 +119,10 @@ public class DiscordRPC extends Module {
         }
     }
 
-    private boolean ensureMeteorPresenceDisabled() {
+    private boolean ensureMeteorPresenceDisabled(boolean rememberForRestore) {
         DiscordPresence meteorPresence = Modules.get().get(DiscordPresence.class);
         if (meteorPresence != null && meteorPresence.isActive()) {
-            restoreMeteorPresenceOnDeactivate = true;
+            if (rememberForRestore) restoreMeteorPresenceOnDeactivate = true;
             meteorPresence.toggle();
             return true;
         }
@@ -140,7 +141,7 @@ public class DiscordRPC extends Module {
     }
 
     private void forceReconnect() {
-        ensureMeteorPresenceDisabled();
+        ensureMeteorPresenceDisabled(false);
         DiscordIPC.stop();
 
         DiscordIPC.start(APP_ID, () -> {

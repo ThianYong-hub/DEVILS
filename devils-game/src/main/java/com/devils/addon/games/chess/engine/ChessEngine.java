@@ -110,15 +110,13 @@ public final class ChessEngine implements AutoCloseable {
      */
     public CompletableFuture<BestMoveResult> getBestMove(String fen, int depth, int movetime) {
         if (!running.get()) {
-            System.err.println("[ChessEngine] getBestMove REJECTED: engine not running");
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Engine is not running"));
         }
 
         if (pendingFuture != null && !pendingFuture.isDone()) {
             // Cancel previous search
-            System.err.println("[ChessEngine] Cancelling previous search before new request");
-            StockfishBridge.sendCommand("stop");
+            stopSearch();
             if (pendingFuture != null) {
                 pendingFuture.completeExceptionally(new RuntimeException("Search cancelled by new request"));
             }
@@ -130,7 +128,6 @@ public final class ChessEngine implements AutoCloseable {
 
         String positionCmd = "position fen " + fen;
         StockfishBridge.sendCommand(positionCmd);
-        System.err.println("[ChessEngine] >> " + positionCmd);
 
         StringBuilder goCmd = new StringBuilder("go");
         if (depth > 0) goCmd.append(" depth ").append(depth);
@@ -139,14 +136,13 @@ public final class ChessEngine implements AutoCloseable {
             goCmd.append(" depth ").append(defaultDepth);
         }
         StockfishBridge.sendCommand(goCmd.toString());
-        System.err.println("[ChessEngine] >> " + goCmd + " (depth=" + depth + ", movetime=" + movetime + ", defaultDepth=" + defaultDepth + ")");
 
         // Safety timeout: if bestmove not received within 60s, fail the future
         long timeoutMs = Math.max(movetime, defaultDepth * 2000L) + 30000L;
         future.orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
               .exceptionally(ex -> {
-                  System.err.println("[ChessEngine] TIMEOUT after " + timeoutMs + "ms — no bestmove received");
-                  StockfishBridge.sendCommand("stop");
+                  DevilsGameAddon.LOG.warn("[ChessEngine] Timed out after {}ms without bestmove", timeoutMs);
+                  stopSearch();
                   return null;
               });
 
@@ -164,8 +160,12 @@ public final class ChessEngine implements AutoCloseable {
      * Stop current search (if any) and wait for result.
      */
     public void stopSearch() {
-        if (running.get()) {
-            StockfishBridge.sendCommand("stop");
+        if (running.get() && StockfishBridge.isRunning()) {
+            try {
+                StockfishBridge.sendCommand("stop");
+            } catch (IllegalStateException e) {
+                DevilsGameAddon.LOG.debug("[ChessEngine] Ignored stop after engine exit", e);
+            }
         }
     }
 
@@ -277,31 +277,24 @@ public final class ChessEngine implements AutoCloseable {
     }
 
     private void readerLoop() {
-        System.err.println("[ChessEngine] readerLoop STARTED, running=" + running.get() + " sfRunning=" + StockfishBridge.isRunning());
         try {
             while (running.get() && StockfishBridge.isRunning()) {
                 String line = StockfishBridge.readLine(2000);
                 if (line == null) {
-                    // Timeout or engine exited — check if engine is still alive
                     if (!StockfishBridge.isRunning()) {
-                        System.err.println("[ChessEngine] readerLoop: engine exited, breaking");
                         break;
                     }
-                    // Engine alive but no output yet — continue waiting
                     continue;
                 }
-                System.err.println("[ChessEngine] << " + line);
                 lineQueue.offer(line);
                 processLine(line);
             }
         } catch (Exception e) {
             if (running.get()) {
-                System.err.println("[ChessEngine] readerLoop EXCEPTION: " + e);
-                e.printStackTrace(System.err);
+                DevilsGameAddon.LOG.warn("[ChessEngine] Reader loop failed", e);
             }
         } finally {
             running.set(false);
-            System.err.println("[ChessEngine] readerLoop EXITED");
         }
     }
 
@@ -314,7 +307,6 @@ public final class ChessEngine implements AutoCloseable {
         if (bmMatcher.find()) {
             String bestMove = bmMatcher.group(1);
             String ponderMove = bmMatcher.group(2);
-            System.err.println("[ChessEngine] processLine: BEST MOVE FOUND: " + bestMove + " ponder=" + ponderMove);
 
             BestMoveAccumulator acc = currentAccumulator;
             BestMoveResult result = new BestMoveResult(

@@ -387,14 +387,12 @@ public final class MiniGamesSyncRuntime {
                             baseRevision,
                             payloadRows
                         );
-                        if (!push.ok()) {
-                            if (push.conflict()) {
-                                HashMap<String, PresenceRecord> conflictRows = push.rows().isEmpty() ? mergedRows : decodeRows(push.rows());
-                                conflictRows.put(local.deviceId, local.copy());
-                                result = SyncCycleResult.conflict(conflictRows, push.revision(), fingerprint, safe(push.error()));
-                            } else {
-                                result = SyncCycleResult.error("push-rejected:" + safe(push.error()));
-                            }
+                        if (push.conflict() || !push.applied()) {
+                            HashMap<String, PresenceRecord> conflictRows = push.rows().isEmpty() ? mergedRows : decodeRows(push.rows());
+                            conflictRows.put(local.deviceId, local.copy());
+                            result = SyncCycleResult.conflict(conflictRows, push.revision(), fingerprint, safe(push.error()));
+                        } else if (!push.ok()) {
+                            result = SyncCycleResult.error("push-rejected:" + safe(push.error()));
                         } else {
                             HashMap<String, PresenceRecord> appliedRows = push.rows().isEmpty() ? mergedRows : decodeRows(push.rows());
                             appliedRows.put(local.deviceId, local.copy());

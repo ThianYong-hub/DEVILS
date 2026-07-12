@@ -1,3 +1,5 @@
+import java.nio.charset.StandardCharsets
+
 plugins {
     id("fabric-loom") version "1.14.10"
     java
@@ -80,11 +82,36 @@ dependencies {
 }
 
 tasks {
+    val validateGamesRecoverySmoke by registering {
+        val runtimeSmokeLog = rootProject.file("codex log/runtime-smoke.log")
+
+        doLast {
+            check(runtimeSmokeLog.isFile) {
+                "Devils Game recovery smoke log was not produced at ${runtimeSmokeLog.absolutePath}"
+            }
+
+            val lines = runtimeSmokeLog.readLines(StandardCharsets.UTF_8)
+            check(lines.any { it.contains("RESULT PASS") }) {
+                "Devils Game recovery smoke did not report PASS. See ${runtimeSmokeLog.absolutePath}"
+            }
+        }
+    }
+
     named("runGamesRecoverySmoke") {
         doFirst {
             val smokeRunDir = layout.projectDirectory.dir("run-devils-game-smoke").asFile
-            if (smokeRunDir.exists()) smokeRunDir.deleteRecursively()
+            val staleEvidencePaths = listOf(
+                smokeRunDir.resolve("config"),
+                smokeRunDir.resolve("devils-game"),
+                smokeRunDir.resolve("logs/latest.log")
+            )
+
+            staleEvidencePaths.forEach { path ->
+                if (path.isDirectory) path.deleteRecursively()
+                else path.delete()
+            }
         }
+        finalizedBy(validateGamesRecoverySmoke)
     }
 
     processResources {

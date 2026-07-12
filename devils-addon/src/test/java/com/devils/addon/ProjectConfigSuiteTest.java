@@ -25,6 +25,10 @@ class ProjectConfigSuiteTest {
         assertTrue(rootBuild.contains("include(\"devils-game\")") || readRepoFile("settings.gradle.kts").contains("include(\"devils-game\")"));
         assertTrue(rootBuild.contains("include(\"devils-shared\")") || readRepoFile("settings.gradle.kts").contains("include(\"devils-shared\")"));
         assertTrue(rootBuild.contains("collectReleaseArtifacts"));
+        assertTrue(rootBuild.contains("DEVILS_ADDON_VERSION"));
+        assertTrue(rootBuild.contains("DEVILS_GAME_VERSION"));
+        assertTrue(rootBuild.contains("addon_version_override"));
+        assertTrue(rootBuild.contains("game_version_override"));
         assertTrue(rootBuild.contains("from(project(\":devils-addon\").layout.buildDirectory.dir(\"libs\"))"));
         assertTrue(rootBuild.contains("from(project(\":devils-game\").layout.buildDirectory.dir(\"libs\"))"));
         assertTrue(rootBuild.contains(":devils-shared:build"));
@@ -324,6 +328,7 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("name: Build Pull Request Artifacts"));
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
+        assertTrue(workflow.contains("python3 -m unittest SyncHub.tests.test_sync_backend"));
         assertTrue(workflow.contains("Check addon jar contents"));
         assertTrue(workflow.contains("name: Upload Artifact"));
         assertFalse(workflow.contains("softprops/action-gh-release"));
@@ -335,6 +340,7 @@ class ProjectConfigSuiteTest {
         assertTrue(workflow.contains("name: Publish Development Build"));
         assertTrue(workflow.contains("java-version: 21"));
         assertTrue(workflow.contains("./gradlew --no-daemon test"));
+        assertTrue(workflow.contains("python3 -m unittest SyncHub.tests.test_sync_backend"));
         assertTrue(workflow.contains("Check addon jar contents"));
         assertTrue(workflow.contains("branches-ignore:"));
         assertTrue(workflow.contains("- main"));
@@ -344,7 +350,7 @@ class ProjectConfigSuiteTest {
     }
 
     @Test
-    void releaseAutomationWorkflowsKeepDispatchOnlyFlow() throws IOException {
+    void releaseAutomationWorkflowsKeepTagPushFlow() throws IOException {
         String autoPatch = readWorkflow("release-auto-patch.yml");
         String releaseOnTag = readWorkflow("release-on-tag.yml");
         String manualTag = readWorkflow("release-manual-tag.yml");
@@ -357,21 +363,28 @@ class ProjectConfigSuiteTest {
         assertTrue(autoPatch.contains("attempts=10"));
         assertTrue(autoPatch.contains("actions: write"));
         assertTrue(autoPatch.contains("github.token"));
-        assertTrue(autoPatch.contains("Trigger Release Workflow"));
+        assertTrue(autoPatch.contains("game_version={version}"));
+        assertTrue(autoPatch.contains("Current game build (`{version}`)"));
+        assertTrue(autoPatch.contains("chore(release): prepare"));
+        assertFalse(autoPatch.contains("Trigger Release Workflow"));
 
         assertTrue(releaseOnTag.contains("name: Release From Tag"));
+        assertTrue(releaseOnTag.contains("push:"));
+        assertTrue(releaseOnTag.contains("tags:"));
+        assertTrue(releaseOnTag.contains("- \"v*\""));
         assertTrue(releaseOnTag.contains("workflow_dispatch"));
         assertTrue(releaseOnTag.contains("inputs:"));
         assertTrue(releaseOnTag.contains("tag:"));
-        assertFalse(releaseOnTag.contains("push:"));
-        assertTrue(releaseOnTag.contains("ref: ${{ inputs.tag }}"));
+        assertTrue(releaseOnTag.contains("ref: ${{ inputs.tag || github.ref_name }}"));
         assertTrue(releaseOnTag.contains("id: module_versions"));
+        assertTrue(releaseOnTag.contains("does not match game_version"));
         assertTrue(releaseOnTag.contains("id: verify_assets"));
         assertTrue(releaseOnTag.contains("addon_asset=${addon_asset}"));
         assertTrue(releaseOnTag.contains("game_asset=${game_asset}"));
         assertTrue(releaseOnTag.contains("Generate release notes"));
         assertTrue(releaseOnTag.contains("softprops/action-gh-release@v2"));
         assertTrue(releaseOnTag.contains("body_path: RELEASE_NOTES.md"));
+        assertTrue(releaseOnTag.contains("python3 -m unittest SyncHub.tests.test_sync_backend"));
         assertTrue(releaseOnTag.contains("steps.verify_assets.outputs.addon_asset"));
         assertTrue(releaseOnTag.contains("steps.verify_assets.outputs.game_asset"));
 
@@ -383,7 +396,10 @@ class ProjectConfigSuiteTest {
         assertTrue(manualTag.contains("Auto PATCH mode selected"));
         assertTrue(manualTag.contains("group: release-tags"));
         assertTrue(manualTag.contains("actions: write"));
-        assertTrue(manualTag.contains("Trigger Release Workflow"));
+        assertTrue(manualTag.contains("game_version={version}"));
+        assertTrue(manualTag.contains("Current game build (`{version}`)"));
+        assertTrue(manualTag.contains("chore(release): prepare"));
+        assertFalse(manualTag.contains("Trigger Release Workflow"));
     }
 
     private static String readWorkflow(String fileName) throws IOException {

@@ -5,8 +5,19 @@ plugins {
 group = properties["maven_group"] as String
 version = properties["addon_version"] as String
 
-val addonVersion = properties["addon_version"] as String
-val gameVersion = properties["game_version"] as String
+fun resolvedVersion(envName: String, propertyName: String, fallbackName: String): String =
+    System.getenv(envName)
+        ?.removePrefix("v")
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: (findProperty(propertyName) as String?)
+            ?.removePrefix("v")
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        ?: (properties[fallbackName] as String)
+
+val addonVersion = resolvedVersion("DEVILS_ADDON_VERSION", "addon_version_override", "addon_version")
+val gameVersion = resolvedVersion("DEVILS_GAME_VERSION", "game_version_override", "game_version")
 
 val collectReleaseArtifacts by tasks.registering(Sync::class) {
     dependsOn(":devils-addon:build", ":devils-game:build")

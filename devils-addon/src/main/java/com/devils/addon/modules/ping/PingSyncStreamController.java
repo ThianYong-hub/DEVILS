@@ -10,8 +10,16 @@ import java.io.InputStreamReader;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class PingSyncStreamController {
+    private static final ExecutorService STREAM_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "Devils-PingSyncStream");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private final Ping module;
     private final PingSyncCodec codec;
     private final PingSyncProblemTracker problemTracker;
@@ -83,7 +91,7 @@ public final class PingSyncStreamController {
         int safeWaitMs = Math.max(50, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
         boolean useLegacyPath = syncStreamUseLegacyPath;
-        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, safeKnownRevision, safeWaitMs, useLegacyPath));
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, safeKnownRevision, safeWaitMs, useLegacyPath), STREAM_EXECUTOR);
     }
 
     public boolean consumePendingPullSignal(long lastKnownSyncRevision) {

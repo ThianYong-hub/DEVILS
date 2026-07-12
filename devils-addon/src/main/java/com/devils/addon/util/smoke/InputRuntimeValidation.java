@@ -38,7 +38,7 @@ public final class InputRuntimeValidation {
         if (client.world == null || client.player == null) return;
 
         // Validation passed — no external mod input hooks to verify
-        StrictRuntimeLogger.logHarness("INPUT", "PASS input validation completed (standalone mode).");
+        StrictRuntimeLogger.logHarness("INPUT", "RESULT PASS input validation completed (standalone mode).");
         completed = true;
     }
 }

@@ -33,7 +33,6 @@ public final class ChessOverlay extends Module {
         .name("mode")
         .description("Stockfish engine or Game Sync.")
         .defaultValue(PlayMode.STOCKFISH)
-        .visible(() -> false)
         .build()
     );
     private final Setting<Integer> sfDepth = sgGeneral.add(new IntSetting.Builder()
@@ -144,12 +143,14 @@ public final class ChessOverlay extends Module {
 
     @EventHandler
     private void onKey(KeyEvent event) {
-        if (!isActive() || event.action != meteordevelopment.meteorclient.utils.misc.input.KeyAction.Press) return;
-        if (mc.currentScreen instanceof WidgetScreen) return;
-        int key = event.key();
-        if (key == GLFW.GLFW_KEY_ESCAPE) {
-            GameLaunchCoordinator.closeAll();
-        }
+        GameCrashGuard.run(this, "chessOverlayKey", () -> {
+            if (!isActive() || event.action != meteordevelopment.meteorclient.utils.misc.input.KeyAction.Press) return;
+            if (mc.currentScreen instanceof WidgetScreen) return;
+            int key = event.key();
+            if (key == GLFW.GLFW_KEY_ESCAPE) {
+                GameLaunchCoordinator.closeAll();
+            }
+        });
     }
 
     @EventHandler

@@ -143,30 +143,26 @@ final class DoomSession {
         }
 
         Thread thread = runtimeThread;
+        boolean threadStillAlive = false;
         if (thread != null && thread.isAlive()) {
             try {
-                thread.join(1800L);
+                thread.join(120L);
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
-            if (thread.isAlive()) {
+            threadStillAlive = thread.isAlive();
+            if (threadStillAlive) {
                 forceEmbeddedExit();
                 thread.interrupt();
-                try {
-                    thread.join(800L);
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
             }
         }
 
-        stopEmbeddedAudio();
         running = false;
         starting = false;
         statusText = "DevilsDoom stopped.";
-        logText = "Runtime stopped.";
+        logText = threadStillAlive ? "Runtime stop requested." : "Runtime stopped.";
         releaseTexture(MinecraftClient.getInstance());
-        cleanupRuntimeHandles();
+        if (!threadStillAlive) cleanupRuntimeHandles();
     }
     void restart() {
         shutdown();

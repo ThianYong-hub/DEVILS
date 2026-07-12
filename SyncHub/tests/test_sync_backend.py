@@ -131,6 +131,43 @@ class TestSyncBackend(unittest.TestCase):
     def tearDown(self):
         self.harness.close()
 
+    def test_meta_state_recovers_from_backup_when_primary_is_missing(self):
+        self.harness.store._save_meta()
+        backup = self.harness.state_file.with_suffix(self.harness.state_file.suffix + ".bak")
+        backup.write_text(json.dumps({
+            "clients": {"device-a": {"seen": True}},
+            "events": [{"id": 1, "module": "ping"}],
+            "nextEventId": 2,
+            "updatedAt": 123,
+        }), encoding="utf-8")
+        self.harness.state_file.unlink()
+
+        restored = BACKEND.SyncStore(self.harness.state_file, self.harness.modules_dir, 500)
+
+        self.assertIn("device-a", restored.state["clients"])
+        self.assertEqual(2, restored.state["nextEventId"])
+        self.assertTrue(self.harness.state_file.exists())
+
+    def test_namespace_state_recovers_from_backup_when_primary_is_missing(self):
+        _, _, ns_file = self.harness.store._namespace_file("mini-games")
+        ns_file.parent.mkdir(parents=True, exist_ok=True)
+        backup = ns_file.with_suffix(ns_file.suffix + ".bak")
+        backup.write_text(json.dumps({
+            "namespace": "mini-games",
+            "revision": 7,
+            "profiles": [{"enabled": True, "username": "games-a", "server": "local", "password": "state"}],
+            "updatedAt": 123,
+        }), encoding="utf-8")
+        if ns_file.exists():
+            ns_file.unlink()
+
+        restored = self.harness.store._load_ns("mini-games")
+
+        self.assertIsNotNone(restored)
+        self.assertEqual(7, restored["revision"])
+        self.assertEqual("games-a", restored["profiles"][0]["username"])
+        self.assertTrue(ns_file.exists())
+
     def test_stream_routes_support_v1_legacy_and_trailing_slash(self):
         for path in (
             "/stream?deviceId=test-device&module=ping&knownRevision=-1&waitMs=1000",
@@ -250,6 +287,54 @@ class TestSyncBackend(unittest.TestCase):
 
         game_file = self.harness.modules_dir / "games" / "mini-games" / "mini-games.json"
         self.assertTrue(game_file.exists(), "mini-games namespace file is missing")
+
+    def test_stale_base_push_merges_profiles_instead_of_conflicting(self):
+        status, first_push = self.harness.post_json(
+            "/v1/games/sync/push",
+            {
+                "deviceId": "games-a",
+                "module": "mini-games",
+                "baseRevision": 0,
+                "profiles": [
+                    {
+                        "enabled": True,
+                        "username": "games-a",
+                        "server": "example.test",
+                        "mode": "LOGIN",
+                        "password": "{\"v\":1,\"deviceId\":\"games-a\",\"lastSeen\":1}",
+                        "delay": 0,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, status)
+        self.assertTrue(first_push.get("applied"))
+        self.assertEqual(1, first_push.get("revision"))
+
+        status, stale_push = self.harness.post_json(
+            "/v1/games/sync/push",
+            {
+                "deviceId": "games-b",
+                "module": "mini-games",
+                "baseRevision": 0,
+                "profiles": [
+                    {
+                        "enabled": True,
+                        "username": "games-b",
+                        "server": "example.test",
+                        "mode": "LOGIN",
+                        "password": "{\"v\":1,\"deviceId\":\"games-b\",\"lastSeen\":2}",
+                        "delay": 0,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, status)
+        self.assertTrue(stale_push.get("ok"))
+        self.assertTrue(stale_push.get("applied"))
+        self.assertFalse(stale_push.get("conflict"))
+        self.assertEqual(2, stale_push.get("revision"))
+        self.assertEqual({"games-a", "games-b"}, {p.get("username") for p in stale_push.get("profiles", [])})
 
     def test_route_domain_mismatch_is_rejected(self):
         with self.assertRaises(HTTPError) as ctx:

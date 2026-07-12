@@ -23,8 +23,11 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Run tests
+      - name: Run Gradle tests
         run: ./gradlew --no-daemon test
+
+      - name: Run SyncHub tests
+        run: python3 -m unittest SyncHub.tests.test_sync_backend
 
       - name: Build with Gradle
         run: ./gradlew --no-daemon build -x test
@@ -40,23 +43,7 @@ jobs:
           jar_list="$(mktemp)"
           jar tf "${addon_jar}" > "${jar_list}"
           required_mixins=(
-            "META-INF/devils-addon/mixins/addon-template.mixins.json"
-            "META-INF/devils-addon/mixins/chesttracker.mixins.json"
-            "META-INF/devils-addon/mixins/whereisit.mixins.json"
-            "META-INF/devils-addon/mixins/searchables.mixins.json"
-            "META-INF/devils-addon/mixins/searchables.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/yacl.mixins.json"
-            "META-INF/devils-addon/mixins/yacl-fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerolib.mixins.json"
-            "META-INF/devils-addon/mixins/xaerolib.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerohud.mixins.json"
-            "META-INF/devils-addon/mixins/xaerohud.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaerominimap.mixins.json"
-            "META-INF/devils-addon/mixins/xaerominimap.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroworldmap.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroworldmap.fabric.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroplus.mixins.json"
-            "META-INF/devils-addon/mixins/xaeroplus-fabric.mixins.json"
+            "META-INF/devils-addon/mixins/devils-addon.mixins.json"
           )
           for path in "${required_mixins[@]}"; do
             grep -Fxq "${path}" "${jar_list}" || { echo "::error::Missing jar resource ${path}"; exit 1; }

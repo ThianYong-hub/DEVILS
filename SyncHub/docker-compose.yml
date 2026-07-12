@@ -20,7 +20,7 @@ services:
       SYNC_TLS_KEY_FILE: ${SYNC_TLS_KEY_FILE:-}
       SYNC_TLS_MIN_VERSION: ${SYNC_TLS_MIN_VERSION:-TLSv1_3}
     ports:
-      - "${SYNC_BIND_IP:-0.0.0.0}:${SYNC_EXPOSE_PORT:-7878}:7878"
+      - "${SYNC_BIND_IP:-127.0.0.1}:${SYNC_EXPOSE_PORT:-7878}:7878"
     volumes:
       - "${SYNC_DATA_DIR:-./data}:/data"
     healthcheck:

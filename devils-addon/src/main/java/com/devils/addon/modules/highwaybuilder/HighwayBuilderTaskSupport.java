@@ -66,10 +66,12 @@ final class InventoryJunkDropper {
         int screenSlot = inventorySlotToScreenSlot(inventorySlot);
         if (screenSlot < 0) return;
 
+        int syncId = mc.player.currentScreenHandler.syncId;
         Runnable throwAction = () -> {
             if (mc.player == null || mc.interactionManager == null || mc.player.currentScreenHandler == null) return;
+            if (mc.player.currentScreenHandler.syncId != syncId) return;
             mc.interactionManager.clickSlot(
-                mc.player.currentScreenHandler.syncId,
+                syncId,
                 screenSlot,
                 fullStack ? 1 : 0,
                 SlotActionType.THROW,
