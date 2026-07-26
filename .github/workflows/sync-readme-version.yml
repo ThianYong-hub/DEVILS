@@ -1,5 +1,8 @@
 name: Sync README Version
 on:
+  release:
+    types:
+      - published
   workflow_dispatch:
 
 permissions:
