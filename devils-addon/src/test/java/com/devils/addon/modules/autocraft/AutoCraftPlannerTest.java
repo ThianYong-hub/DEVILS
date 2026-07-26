@@ -286,6 +286,265 @@ class AutoCraftPlannerTest {
         assertEquals(1, allowed.plan().craftedItemCount());
     }
 
+    @Test
+    void craftAllClampsBatchesToTheSmallestIngredientStack() {
+        RecipeDefinition blob = recipe("blob", "devils:blob", 1, 1, 1, RecipeKind.SHAPED, spec("devils:pearl"));
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:blob"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(36, Map.of("devils:pearl", 100), Map.of("devils:pearl", 16, "devils:blob", 64)),
+            blob
+        ));
+
+        assertTrue(result.success());
+        // 100 pearls are available, but one crafting pass may only hold a single 16-stack.
+        assertEquals(16, result.plan().targetBatches());
+        assertEquals(16, result.plan().craftedItemCount());
+        assertEquals(1, result.plan().steps().size());
+        assertEquals(16, result.plan().steps().get(0).batches());
+    }
+
+    @Test
+    void batchCapUsesTheSmallestStackAcrossAllIngredients() {
+        RecipeDefinition mixed = recipe(
+            "mixed",
+            "devils:mixed",
+            1,
+            2,
+            1,
+            RecipeKind.SHAPED,
+            spec("devils:plank"),
+            spec("devils:pearl")
+        );
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:mixed"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(
+                36,
+                Map.of("devils:plank", 200, "devils:pearl", 200),
+                Map.of("devils:plank", 64, "devils:pearl", 16, "devils:mixed", 64)
+            ),
+            mixed
+        ));
+
+        assertTrue(result.success());
+        assertEquals(16, result.plan().targetBatches());
+    }
+
+    @Test
+    void unstackableIngredientLimitsCraftAllToOneBatch() {
+        RecipeDefinition filled = recipe(
+            "filled_bucket_recipe",
+            "devils:filled",
+            1,
+            2,
+            1,
+            RecipeKind.SHAPED,
+            spec("devils:bucket"),
+            spec("devils:plank")
+        );
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:filled"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(
+                36,
+                Map.of("devils:bucket", 5, "devils:plank", 64),
+                Map.of("devils:bucket", 1, "devils:plank", 64, "devils:filled", 64)
+            ),
+            filled
+        ));
+
+        assertTrue(result.success());
+        assertEquals(1, result.plan().targetBatches());
+        assertEquals(1, result.plan().craftedItemCount());
+    }
+
+    @Test
+    void emptyGridSlotsDoNotLowerTheBatchCap() {
+        RecipeDefinition sparse = recipe(
+            "sparse",
+            "devils:sparse",
+            1,
+            3,
+            1,
+            RecipeKind.SHAPED,
+            spec("devils:plank"),
+            spec(),
+            spec("devils:brick")
+        );
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:sparse"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(
+                36,
+                Map.of("devils:plank", 200, "devils:brick", 200),
+                Map.of("devils:plank", 64, "devils:brick", 32, "devils:sparse", 64)
+            ),
+            sparse
+        ));
+
+        assertTrue(result.success());
+        assertEquals(32, result.plan().targetBatches());
+    }
+
+    @Test
+    void unknownIngredientStackSizesFallBackToSixtyFour() {
+        RecipeDefinition unknown = recipe("unknown", "devils:unknown_out", 1, 1, 1, RecipeKind.SHAPED, spec("devils:unknown_in"));
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:unknown_out"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            new InventorySnapshot(Map.of("devils:unknown_in", 500), Map.of(), 36),
+            unknown
+        ));
+
+        assertTrue(result.success());
+        assertEquals(64, result.plan().targetBatches());
+    }
+
+    @Test
+    void ingredientFreeRecipesAreLimitedToASingleBatch() {
+        RecipeDefinition freebie = new RecipeDefinition("freebie", "devils:freebie", 3, 1, 1, RecipeKind.SHAPELESS, List.of());
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:freebie"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(36, Map.of(), Map.of("devils:freebie", 64)),
+            freebie
+        ));
+
+        assertTrue(result.success());
+        assertEquals(1, result.plan().targetBatches());
+        assertEquals(3, result.plan().craftedItemCount());
+    }
+
+    @Test
+    void craftLimitStillWinsWhenItIsTighterThanTheBatchCap() {
+        RecipeDefinition blob = recipe("blob", "devils:blob", 1, 1, 1, RecipeKind.SHAPED, spec("devils:pearl"));
+
+        PlannerResult tightLimit = planner.plan(input(
+            List.of("devils:blob"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(5, 0),
+            false,
+            true,
+            inventory(36, Map.of("devils:pearl", 100), Map.of("devils:pearl", 16, "devils:blob", 64)),
+            blob
+        ));
+
+        PlannerResult looseLimit = planner.plan(input(
+            List.of("devils:blob"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(100, 0),
+            false,
+            true,
+            inventory(36, Map.of("devils:pearl", 100), Map.of("devils:pearl", 16, "devils:blob", 64)),
+            blob
+        ));
+
+        assertTrue(tightLimit.success());
+        assertEquals(5, tightLimit.plan().targetBatches());
+
+        assertTrue(looseLimit.success());
+        assertEquals(16, looseLimit.plan().targetBatches(), "the stack cap still applies below a loose limit");
+    }
+
+    @Test
+    void intermediateStackCapBoundsHowManyFinalItemsAPlanCanReach() {
+        RecipeDefinition mid = recipe("a_mid", "devils:mid", 1, 1, 1, RecipeKind.SHAPED, spec("devils:raw"));
+        RecipeDefinition finalItem = recipe(
+            "b_final",
+            "devils:final",
+            1,
+            3,
+            1,
+            RecipeKind.SHAPED,
+            spec("devils:mid"),
+            spec("devils:mid"),
+            spec("devils:mid")
+        );
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:final"),
+            Set.of(),
+            true,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(
+                36,
+                Map.of("devils:raw", 64),
+                Map.of("devils:raw", 16, "devils:mid", 64, "devils:final", 64)
+            ),
+            mid,
+            finalItem
+        ));
+
+        assertTrue(result.success());
+        // A single "mid" pass may only fill 16 raw items, so the chain tops out at 5 finals (15 mids).
+        assertEquals(5, result.plan().targetBatches());
+        assertEquals(5, result.plan().craftedItemCount());
+        assertEquals(2, result.plan().steps().size());
+        assertEquals("devils:mid", result.plan().steps().get(0).outputItemId());
+        assertEquals(15, result.plan().steps().get(0).batches());
+        assertEquals("devils:final", result.plan().steps().get(1).outputItemId());
+        assertEquals(5, result.plan().steps().get(1).batches());
+    }
+
+    @Test
+    void singleCraftIgnoresCraftAllSearchAndAlwaysPlansOneBatch() {
+        RecipeDefinition blob = recipe("blob", "devils:blob", 4, 1, 1, RecipeKind.SHAPED, spec("devils:pearl"));
+
+        PlannerResult result = planner.plan(input(
+            List.of("devils:blob"),
+            Set.of(),
+            false,
+            AutoCraftPolicies.remainingLimit(0, 0),
+            false,
+            true,
+            inventory(36, Map.of("devils:pearl", 100), Map.of("devils:pearl", 16, "devils:blob", 64)),
+            blob
+        ));
+
+        assertTrue(result.success());
+        assertEquals(1, result.plan().targetBatches());
+        assertEquals(4, result.plan().craftedItemCount());
+    }
+
+    private static InventorySnapshot inventory(int totalSlots, Map<String, Integer> counts, Map<String, Integer> stackSizes) {
+        return new InventorySnapshot(counts, stackSizes, totalSlots);
+    }
+
     private static PlannerInput input(
         List<String> targets,
         Set<String> blacklist,

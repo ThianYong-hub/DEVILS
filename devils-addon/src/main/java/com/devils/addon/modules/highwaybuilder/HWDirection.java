@@ -25,7 +25,7 @@ public enum HWDirection {
 
     public HWDirection clockwise(int steps) {
         HWDirection[] values = values();
-        return values[(this.ordinal() + steps) % values.length];
+        return values[Math.floorMod(this.ordinal() + steps, values.length)];
     }
 
     public HWDirection counterClockwise(int steps) {
@@ -52,8 +52,9 @@ public enum HWDirection {
             HWDirection lateral = lateralDirection();
             return dx * lateral.directionVec.getX() + dz * lateral.directionVec.getZ();
         }
-        // 2D cross product with the forward vector = orthogonal (true perpendicular) offset
-        return (dx * directionVec.getZ() - dz * directionVec.getX()) / 2.0;
+        // 2D cross product with the forward vector = orthogonal (true perpendicular) offset, signed the
+        // same way as the cardinal branch above: a block a quarter turn clockwise of forward reads positive.
+        return (dz * directionVec.getX() - dx * directionVec.getZ()) / 2.0;
     }
 
     public BlockPos multiply(Vec3i vec, int factor) {
