@@ -11,8 +11,6 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
-
-
 abstract class SpearSpoofCombatDecisionOps extends SpearSpoofCombatRuntimeOps {
     protected SpearSpoofCombatDecisionOps(
         SpearSpoof module,
@@ -366,7 +364,7 @@ abstract class SpearSpoofCombatDecisionOps extends SpearSpoofCombatRuntimeOps {
         double reach = Math.max(ENFORCED_MAX_RANGE + 0.65, toAimLength + 0.15);
         Vec3d end = eyePos.add(dir.multiply(reach));
         double expansion = ctx.smallTarget ? 0.08 : 0.15;
-        
+
         Vec3d offset = ctx.predictedTargetPos.subtract(ctx.targetPos);
         Box predictedBox = target.getBoundingBox().offset(offset);
 
@@ -458,17 +456,17 @@ abstract class SpearSpoofCombatDecisionOps extends SpearSpoofCombatRuntimeOps {
 
     protected boolean hasTargetIFrameSignal(LivingEntity target) {
         if (target == null) return false;
-        int hurtTime = readIntMember(target, "hurtTime", "getHurtTime");
+        int hurtTime = target.hurtTime;
         if (hurtTime > 0) return true;
-        int regen = readIntMember(target, "timeUntilRegen", "getTimeUntilRegen");
+        int regen = target.timeUntilRegen;
         return regen > 0;
     }
 
     protected boolean hasServerDamageSignalOnEntity(LivingEntity target, long now) {
         if (target == null) return false;
-        int hurtTime = readIntMember(target, "hurtTime", "getHurtTime");
+        int hurtTime = target.hurtTime;
         if (hurtTime > 0 && hurtTime != hitConfirmBaseHurtTime) return true;
-        int regen = readIntMember(target, "timeUntilRegen", "getTimeUntilRegen");
+        int regen = target.timeUntilRegen;
         if (regen > 0 && regen != hitConfirmBaseRegenTime) return true;
 
         // Failsafe: if we are very close to confirm timeout and target is in active hurt/recovery frames,

@@ -18,7 +18,6 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
 
-
 abstract class SpearSpoofCombatRuntimeOps extends SpearSpoofCombatContext {
     protected SpearSpoofCombatRuntimeOps(
         SpearSpoof module,
@@ -367,8 +366,8 @@ abstract class SpearSpoofCombatRuntimeOps extends SpearSpoofCombatContext {
 
         now = System.currentTimeMillis();
         clearPacketConfirm();
-        hitConfirmBaseHurtTime = readIntMember(strikeTarget, "hurtTime", "getHurtTime");
-        hitConfirmBaseRegenTime = readIntMember(strikeTarget, "timeUntilRegen", "getTimeUntilRegen");
+        hitConfirmBaseHurtTime = strikeTarget.hurtTime;
+        hitConfirmBaseRegenTime = strikeTarget.timeUntilRegen;
         runtime.onStrikeSent(now, strikeTarget, resolveHitConfirmWindowMs());
         runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, now + recoveryDelayMs.get());
         lockApproachDirection(strikeTarget);
@@ -376,7 +375,6 @@ abstract class SpearSpoofCombatRuntimeOps extends SpearSpoofCombatContext {
         scheduleAttributeSwap();
         debugLogger.logSkip("StrikeSent", "await-hit-confirm", strikeTarget, ctx, runtime);
     }
-
 
     protected boolean isDamageConfirmationPacket(Object packet) {
         if (packet == null) return false;

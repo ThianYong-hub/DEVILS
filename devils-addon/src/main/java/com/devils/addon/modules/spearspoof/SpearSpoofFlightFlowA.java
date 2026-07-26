@@ -13,7 +13,6 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
-
 abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
     protected SpearSpoofFlightFlowA(SpearSpoof module, SpearSpoofRuntime runtime, SpearSpoofFlightPathfinder pathfinder, SpearSpoofTargetingService targeting, SpearSpoofCombatService combat, SpearSpoofDebugLogger debugLogger, Setting<Boolean> onlyWhileElytra, Setting<Boolean> attributeSwap, Setting<Double> minRange, Setting<Double> maxRange, Setting<Double> smallTargetRange, Setting<Double> horizontalSpeed, Setting<Double> verticalSpeed, Setting<Double> approachRange, Setting<Double> retreatRange, Setting<Boolean> topDownEnabled, Setting<Double> topDownHeight, Setting<Boolean> obstacleAvoidance, Setting<Boolean> autoRelaunch, Setting<Boolean> testFlyUntilDamage, Setting<Boolean> mode4x) {
         super(module, runtime, pathfinder, targeting, combat, debugLogger, onlyWhileElytra, attributeSwap, minRange, maxRange, smallTargetRange, horizontalSpeed, verticalSpeed, approachRange, retreatRange, topDownEnabled, topDownHeight, obstacleAvoidance, autoRelaunch, testFlyUntilDamage, mode4x);
@@ -434,7 +433,6 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
         }
         return walls;
     }
-
 
     protected abstract boolean isHorizontalRouteBlocked(Vec3d playerPos, Vec3d targetPos, LivingEntity target);
     protected abstract boolean isVerticalColumnBlocked(Vec3d playerPos, Vec3d targetPos);

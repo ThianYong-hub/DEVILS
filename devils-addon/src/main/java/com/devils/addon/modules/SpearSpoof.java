@@ -4,6 +4,7 @@ import com.devils.addon.DevilsAddon;
 import com.devils.addon.modules.spearspoof.SpearSpoofCombatService;
 import com.devils.addon.modules.spearspoof.SpearSpoofDevDebugService;
 import com.devils.addon.modules.spearspoof.SpearSpoofDebugLogger;
+import com.devils.addon.modules.spearspoof.SpearSpoofEventService;
 import com.devils.addon.modules.spearspoof.SpearSpoofFlightPathfinder;
 import com.devils.addon.modules.spearspoof.SpearSpoofFlightService;
 import com.devils.addon.modules.spearspoof.SpearSpoofRuntime;
@@ -13,8 +14,6 @@ import meteordevelopment.meteorclient.events.entity.player.PlayerMoveEvent;
 import meteordevelopment.meteorclient.events.packets.PacketEvent;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.mixininterface.IPlayerInteractEntityC2SPacket;
-import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -24,25 +23,9 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.entity.SortPriority;
-import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
-import net.minecraft.network.packet.s2c.play.DamageTiltS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.HealthUpdateS2CPacket;
-import net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.math.Box;
-
-import java.lang.reflect.Method;
 
 public class SpearSpoof extends Module {
     private static final double PERMANENT_TARGET_RANGE = 200.0;
@@ -195,16 +178,6 @@ public class SpearSpoof extends Module {
         .description("Do not target friends.")
         .defaultValue(true)
         .visible(() -> targetEntity.get() == TargetEntityMode.Players || targetEntity.get() == TargetEntityMode.Any)
-        .build()
-    );
-
-    private final Setting<Integer> targetStickMs = sgTargeting.add(new IntSetting.Builder()
-        .name("target-stick-ms")
-        .description("Minimum lock time before switching to a better target.")
-        .defaultValue(700)
-        .range(0, 5000)
-        .sliderRange(0, 2000)
-        .visible(this::showAdvanced)
         .build()
     );
 
@@ -540,7 +513,6 @@ public class SpearSpoof extends Module {
         priority,
         targetEntity,
         ignoreFriends,
-        targetStickMs,
         retargetDelayMs
     );
 
@@ -610,6 +582,21 @@ public class SpearSpoof extends Module {
         devDebugIntervalMs
     );
 
+    private final SpearSpoofEventService eventService = new SpearSpoofEventService(
+        this,
+        runtime,
+        combatService,
+        flightService,
+        devDebugService,
+        debugLogger,
+        devDebug,
+        debugPacketLog,
+        renderTarget,
+        nearRange,
+        nearColor,
+        farColor
+    );
+
     public SpearSpoof() {
         super(DevilsAddon.CATEGORY, "spear-spoof", "Full spear FSM: targeting, movement controller, attack contour and debug pipeline.");
     }
@@ -632,157 +619,27 @@ public class SpearSpoof extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre event) {
-        CrashGuard.run(this, "onTickPre", this::onTickSafe);
+        CrashGuard.run(this, "onTickPre", eventService::onTickSafe);
     }
 
     @EventHandler
     private void onMove(PlayerMoveEvent event) {
-        CrashGuard.run(this, "onMove", () -> onMoveSafe(event));
+        CrashGuard.run(this, "onMove", () -> eventService.onMoveSafe(event));
     }
 
     @EventHandler
     private void onPacketSend(PacketEvent.Send event) {
-        CrashGuard.run(this, "onPacketSend", () -> onPacketSendSafe(event));
+        CrashGuard.run(this, "onPacketSend", () -> eventService.onPacketSendSafe(event));
     }
 
     @EventHandler
     private void onPacketReceive(PacketEvent.Receive event) {
-        CrashGuard.run(this, "onPacketReceive", () -> onPacketReceiveSafe(event));
+        CrashGuard.run(this, "onPacketReceive", () -> eventService.onPacketReceiveSafe(event));
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        CrashGuard.run(this, "onRender3D", () -> onRender3DSafe(event));
-    }
-
-    private void onRender3DSafe(Render3DEvent event) {
-        if (!renderTarget.get() || mc.player == null || mc.world == null) return;
-        LivingEntity target = runtime.target;
-        if (target == null || !target.isAlive()) return;
-
-        double distanceSq = mc.player.squaredDistanceTo(target);
-        double farSq = 12.0 * 12.0; 
-        double nearSq = nearRange.get() * nearRange.get();
-
-        if (distanceSq > farSq) return;
-
-        SettingColor settingColor = distanceSq <= nearSq ? nearColor.get() : farColor.get();
-        Color side = new Color(settingColor);
-        Color line = new Color(settingColor).a(220);
-        event.renderer.box(target.getBoundingBox().expand(0.1), side, line, ShapeMode.Both, 0);
-    }
-
-    private void onTickSafe() {
-        if (devDebug.get()) {
-            devDebugService.onTick();
-            return;
-        }
-
-        devDebugService.onDisable();
-
-        combatService.onTick();
-        flightService.onTick();
-    }
-
-    private void onMoveSafe(PlayerMoveEvent event) {
-        if (devDebug.get()) return;
-        flightService.onMove(event);
-    }
-
-    private void onPacketSendSafe(PacketEvent.Send event) {
-        if (event == null || event.packet == null) return;
-        if (devDebug.get()) devDebugService.onPacketSend(event.packet);
-        if (!isInterestingSendPacket(event.packet)) return;
-        debugLogger.logPacketSend(event.packet, describeSendPacket(event.packet), runtime);
-    }
-
-    private void onPacketReceiveSafe(PacketEvent.Receive event) {
-        if (event == null || event.packet == null) return;
-        if (devDebug.get()) devDebugService.onPacketReceive(event.packet);
-        else combatService.onPacketReceive(event.packet);
-        boolean interesting = isInterestingReceivePacket(event.packet);
-        if (!interesting && !debugPacketLog.get()) return;
-        debugLogger.logPacketReceive(event.packet, describeReceivePacket(event.packet), runtime);
-    }
-
-    private boolean isInterestingSendPacket(Object packet) {
-        return packet instanceof IPlayerInteractEntityC2SPacket
-            || packet instanceof ClientCommandC2SPacket
-            || packet instanceof PlayerMoveC2SPacket;
-    }
-
-    private boolean isInterestingReceivePacket(Object packet) {
-        return packet instanceof EntityStatusS2CPacket
-            || packet instanceof EntityTrackerUpdateS2CPacket
-            || packet instanceof EntityVelocityUpdateS2CPacket
-            || packet instanceof PlayerPositionLookS2CPacket
-            || packet instanceof HealthUpdateS2CPacket
-            || packet instanceof DamageTiltS2CPacket
-            || packet instanceof EntityS2CPacket;
-    }
-
-    private String describeSendPacket(Object packet) {
-        StringBuilder detail = new StringBuilder();
-        detail.append("name=").append(packet.getClass().getSimpleName());
-
-        if (packet instanceof IPlayerInteractEntityC2SPacket interact) {
-            detail.append(" type=").append(interact.meteor$getType());
-            if (interact.meteor$getType() == PlayerInteractEntityC2SPacket.InteractType.ATTACK) detail.append(" attack=true");
-            if (interact.meteor$getEntity() != null) {
-                detail.append(" entityId=").append(interact.meteor$getEntity().getId());
-                detail.append(" entity=").append(interact.meteor$getEntity().getName().getString());
-            }
-        }
-
-        if (packet instanceof ClientCommandC2SPacket) {
-            Object mode = invokeNoArg(packet, "getMode");
-            if (mode == null) mode = invokeNoArg(packet, "mode");
-            if (mode != null) detail.append(" mode=").append(mode);
-        }
-
-        Object onGround = invokeNoArg(packet, "isOnGround");
-        if (onGround instanceof Boolean value) detail.append(" onGround=").append(value);
-
-        return detail.toString();
-    }
-
-    private String describeReceivePacket(Object packet) {
-        StringBuilder detail = new StringBuilder();
-        String name = packet.getClass().getSimpleName();
-        detail.append("name=").append(name);
-
-        Integer entityId = extractEntityId(packet);
-        if (entityId != null) {
-            detail.append(" entityId=").append(entityId);
-        }
-
-        Object status = invokeNoArg(packet, "getStatus");
-        if (status != null) detail.append(" status=").append(status);
-
-        if (packet instanceof PlayerPositionLookS2CPacket) {
-            detail.append(" rubberband=true");
-        }
-
-        return detail.toString();
-    }
-
-    private Integer extractEntityId(Object packet) {
-        Object value = invokeNoArg(packet, "getEntityId");
-        if (value instanceof Integer i) return i;
-        value = invokeNoArg(packet, "getId");
-        if (value instanceof Integer i) return i;
-        return null;
-    }
-
-    private Object invokeNoArg(Object target, String methodName) {
-        if (target == null || methodName == null || methodName.isBlank()) return null;
-        try {
-            Method method = target.getClass().getMethod(methodName);
-            method.setAccessible(true);
-            return method.invoke(target);
-        } catch (Throwable ignored) {
-            return null;
-        }
+        CrashGuard.run(this, "onRender3D", () -> eventService.onRender3DSafe(event));
     }
 
     private boolean showAdvanced() {

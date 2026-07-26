@@ -30,7 +30,6 @@ public final class SpearSpoofTargetingService {
     private final Setting<SortPriority> priority;
     private final Setting<SpearSpoof.TargetEntityMode> targetEntity;
     private final Setting<Boolean> ignoreFriends;
-    private final Setting<Integer> targetStickMs;
     private final Setting<Integer> retargetDelayMs;
 
     public SpearSpoofTargetingService(
@@ -38,14 +37,12 @@ public final class SpearSpoofTargetingService {
         Setting<SortPriority> priority,
         Setting<SpearSpoof.TargetEntityMode> targetEntity,
         Setting<Boolean> ignoreFriends,
-        Setting<Integer> targetStickMs,
         Setting<Integer> retargetDelayMs
     ) {
         this.module = module;
         this.priority = priority;
         this.targetEntity = targetEntity;
         this.ignoreFriends = ignoreFriends;
-        this.targetStickMs = targetStickMs;
         this.retargetDelayMs = retargetDelayMs;
     }
 

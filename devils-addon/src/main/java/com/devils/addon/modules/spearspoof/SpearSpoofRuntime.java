@@ -113,7 +113,7 @@ public final class SpearSpoofRuntime {
         hitConfirmUntilMs = 0;
         lastConfirmedHitMs = 0;
         lastKnownTargetSeenAtMs = 0;
-        
+
         dashRemaining = 0.0;
         dashDirection = Vec3d.ZERO;
 

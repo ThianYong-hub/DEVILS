@@ -15,7 +15,6 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 
-
 abstract class SpearSpoofFlightFlowB extends SpearSpoofFlightFlowAExt {
     protected SpearSpoofFlightFlowB(
         SpearSpoof module,

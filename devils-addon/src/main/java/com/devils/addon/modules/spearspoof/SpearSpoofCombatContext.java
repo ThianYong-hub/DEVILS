@@ -11,7 +11,6 @@ import net.minecraft.util.math.Vec3d;
 
 import java.util.Locale;
 
-
 abstract class SpearSpoofCombatContext {
     protected static final int ROTATE_PRIORITY = 80;
     protected static final int RMB_RECHARGE_RELEASE_TICKS = 4;
@@ -158,7 +157,8 @@ abstract class SpearSpoofCombatContext {
         // Keep RMB charge when the target swaps. Feels jank if we reclick every mob.
         runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, now + 35L);
 
-        // FIXME: late charge can be dead already; restart it or the next hit just whiffs.
+        // Exception to the keep-charge rule: a charge that is already near the end of its window
+        // would die mid-approach on the new target, so re-arm it now instead of carrying it over.
         if (!attributeSwap.get() && autoHoldUse.get() && runtime.useStartedAtMs > 0L) {
             long heldMs = runtime.holdMs(now);
             long fullWindow = fullChargeWindowMs();

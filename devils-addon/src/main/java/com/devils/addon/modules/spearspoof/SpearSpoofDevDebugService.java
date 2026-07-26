@@ -248,4 +248,3 @@ public final class SpearSpoofDevDebugService {
         return String.format(Locale.US, "%.2f", value);
     }
 }
-

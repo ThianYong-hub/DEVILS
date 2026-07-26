@@ -24,12 +24,6 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 abstract class StashMoverRuntime extends StashMoverInteraction {
-    private static final double RETURN_THROW_CENTER_TOLERANCE = 0.07;
-    private static final double RETURN_THROW_HORIZONTAL_NUDGE_MAX = 0.08;
-    private static final double RETURN_THROW_MIN_EYE_HEIGHT_ABOVE_TARGET = 0.35;
-    private static final double RETURN_THROW_MAX_EYE_HEIGHT_ABOVE_TARGET = 2.80;
-    private static final double RETURN_THROW_MAX_HORIZONTAL_SPEED = 0.025;
-
     protected void tickMover() {
         BlockPos pearlChest = pearlChestPos();
         BlockPos lootChest = lootChestPos();
@@ -62,9 +56,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (useBlock(chamberBlock, chamber)) {
             StrictRuntimeLogger.logStashMover(
                 "loader-click",
-                "pos=" + formatVecForFeedback(mc.player.getEntityPos())
-                    + " chamber=" + formatVecForFeedback(chamber)
-                    + " ackPending=" + loaderAckPending
+                StashMoverTelemetry.loaderClick(this, mc.player.getEntityPos(), chamber)
             );
             sendLoaderLoadAck();
             loaderPhase = LoaderPhase.WAITING;
@@ -77,7 +69,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             enterWaitForPearlPhase();
             return;
         }
-        if (loadAckReceived) return;
         if (resendLoadMessageTicks > 0) {
             resendLoadMessageTicks--;
             return;
@@ -185,9 +176,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 releaseSneakRecovery();
                 StrictRuntimeLogger.logStashMover(
                     "pearl-throw-stabilize-recovery",
-                    "playerPos=" + formatVecForFeedback(mc.player.getEntityPos())
-                        + " water=" + formatBlockPosForFeedback(water)
-                        + " stationaryTicks=" + stationaryTicks
+                    StashMoverTelemetry.pearlThrowStabilizeRecovery(this, mc.player.getEntityPos(), water)
                 );
                 actionCooldownTicks = 2;
                 return;
@@ -230,10 +219,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         lastPearlThrowPitch = pitch;
         StrictRuntimeLogger.logStashMover(
             "pearl-throw",
-            "playerPos=" + formatVecForFeedback(mc.player.getEntityPos())
-                + " target=" + formatVecForFeedback(pearlTarget)
-                + " yaw=" + String.format(Locale.ROOT, "%.2f", yaw)
-                + " pitch=" + String.format(Locale.ROOT, "%.2f", pitch)
+            StashMoverTelemetry.pearlThrow(this, mc.player.getEntityPos(), pearlTarget, yaw, pitch)
         );
         debugLog(
             "throw pearl target=" + formatVecForFeedback(pearlTarget)
@@ -272,41 +258,26 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
         Vec3d playerPos = mc.player.getEntityPos();
         Vec3d velocity = mc.player.getVelocity();
-        double dx = pearlTarget.x - playerPos.x;
-        double dz = pearlTarget.z - playerPos.z;
-        double horizontalSq = dx * dx + dz * dz;
-        double eyeVerticalDelta = mc.player.getEyePos().y - pearlTarget.y;
-        double horizontalVelocitySq = velocity.x * velocity.x + velocity.z * velocity.z;
-        boolean centered = horizontalSq <= RETURN_THROW_CENTER_TOLERANCE * RETURN_THROW_CENTER_TOLERANCE;
-        boolean heightReady = eyeVerticalDelta >= RETURN_THROW_MIN_EYE_HEIGHT_ABOVE_TARGET
-            && eyeVerticalDelta <= RETURN_THROW_MAX_EYE_HEIGHT_ABOVE_TARGET;
-        boolean calm = horizontalVelocitySq <= RETURN_THROW_MAX_HORIZONTAL_SPEED * RETURN_THROW_MAX_HORIZONTAL_SPEED;
+        StashMoverThrowGeometry.ReturnThrowPose pose =
+            StashMoverThrowGeometry.evaluateReturnThrowPose(playerPos, mc.player.getEyePos(), velocity, pearlTarget);
 
-        if (centered && heightReady && calm) {
+        if (pose.ready()) {
             releaseSneakRecovery();
             return true;
         }
 
-        if (eyeVerticalDelta > RETURN_THROW_MAX_EYE_HEIGHT_ABOVE_TARGET) holdSneakRecovery();
+        if (pose.aboveMaxEyeHeight()) holdSneakRecovery();
         else releaseSneakRecovery();
 
-        double distance = Math.sqrt(horizontalSq);
-        if (distance > RETURN_THROW_CENTER_TOLERANCE) {
-            double nudge = Math.min(RETURN_THROW_HORIZONTAL_NUDGE_MAX, Math.max(0.015, distance * 0.35));
-            mc.player.setVelocity(dx / distance * nudge, velocity.y, dz / distance * nudge);
+        if (pose.needsHorizontalNudge()) {
+            Vec3d nudged = pose.nudgedVelocity(velocity.y);
+            mc.player.setVelocity(nudged.x, nudged.y, nudged.z);
         }
 
         if (phaseAgeTicks == 1 || phaseAgeTicks % 10 == 0) {
             StrictRuntimeLogger.logStashMover(
                 "return-pearl-throw-pose-wait",
-                "playerPos=" + formatVecForFeedback(playerPos)
-                    + " target=" + formatVecForFeedback(pearlTarget)
-                    + " horizontalSq=" + String.format(Locale.ROOT, "%.4f", horizontalSq)
-                    + " eyeVerticalDelta=" + String.format(Locale.ROOT, "%.3f", eyeVerticalDelta)
-                    + " horizontalVelocitySq=" + String.format(Locale.ROOT, "%.5f", horizontalVelocitySq)
-                    + " centered=" + centered
-                    + " heightReady=" + heightReady
-                    + " calm=" + calm
+                StashMoverTelemetry.returnThrowPoseWait(this, playerPos, pearlTarget, pose)
             );
         }
 
@@ -330,16 +301,8 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         ownPearlStasisTicks++;
         Vec3d target = resolvePearlTarget(water, chamber);
         if (target == null) target = lastPearlTarget;
-        Vec3d pearlPos = pearl.getEntityPos();
-        Vec3d pearlVelocity = pearl.getVelocity();
-        double distanceSq = target == null ? 0.0 : pearlPos.squaredDistanceTo(target);
-        double horizontalSq = target == null ? 0.0 : squaredHorizontalDistance(pearlPos, target);
-        double verticalDelta = target == null ? 0.0 : pearlPos.y - target.y;
-        double verticalAbs = Math.abs(verticalDelta);
-        double verticalBelow = target == null ? 0.0 : Math.max(0.0, target.y - pearlPos.y);
-        double horizontalVelocitySq = pearlVelocity.x * pearlVelocity.x + pearlVelocity.z * pearlVelocity.z;
-        double speedSq = pearlVelocity.lengthSquared();
-        boolean nearTarget = target == null || distanceSq <= 9.0;
+        StashMoverPearlFlight flight = StashMoverPearlFlight.of(target, pearl.getEntityPos(), pearl.getVelocity());
+        boolean nearTarget = flight.nearTarget();
         String returnCommandValue = returnCommand.get() == null ? "" : returnCommand.get().trim();
         boolean lethalReturn = loadingReturnPearlAfterDeposit
             && (!returnCommandValue.isEmpty()
@@ -347,35 +310,20 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 || returnCommandValue.toLowerCase(Locale.ROOT).startsWith("kill ")));
         boolean returnPearlFlightConfirmed = loadingReturnPearlAfterDeposit
             && !lethalReturn
-            && isReturnPearlFlightConfirmed(target, pearlPos, pearlVelocity, ownPearlStasisTicks);
+            && flight.isReturnFlightConfirmed(ownPearlStasisTicks);
         boolean returnPearlReady = loadingReturnPearlAfterDeposit
             && !lethalReturn
-            && target != null
-            && ownPearlStasisTicks >= 20
-            && horizontalSq <= 0.12 * 0.12
-            && verticalAbs <= 0.25
-            && pearlVelocity.y >= 0.0
-            && pearlVelocity.y <= 0.12
-            && horizontalVelocitySq <= 0.015 * 0.015;
+            && flight.isReturnSettled(ownPearlStasisTicks);
         boolean lethalReturnFlightConfirmed = loadingReturnPearlAfterDeposit
             && lethalReturn
-            && isLethalReturnPearlFlightConfirmed(target, pearlPos, pearlVelocity, ownPearlStasisTicks);
+            && flight.isLethalReturnFlightConfirmed(ownPearlStasisTicks);
         boolean lethalReturnPearlLaunched = loadingReturnPearlAfterDeposit
             && lethalReturn
-            && isLethalReturnPearlLaunched(target, pearlPos, pearlVelocity, ownPearlStasisTicks, speedSq);
+            && flight.isLethalReturnLaunched(ownPearlStasisTicks);
         boolean lethalReturnPearlReady = loadingReturnPearlAfterDeposit
             && lethalReturn
-            && target != null
-            && ownPearlStasisTicks >= 35
-            && horizontalSq <= 0.10 * 0.10
-            && verticalAbs <= 0.15
-            && Math.abs(pearlVelocity.y) <= 0.04
-            && horizontalVelocitySq <= 0.010 * 0.010;
-        boolean chamberSettled = target == null
-            || (ownPearlStasisTicks >= 18
-                && horizontalSq <= 0.25 * 0.25
-                && verticalAbs <= 0.35
-                && Math.abs(pearlVelocity.y) <= 0.12);
+            && flight.isLethalReturnSettled(ownPearlStasisTicks);
+        boolean chamberSettled = flight.isChamberSettled(ownPearlStasisTicks);
         boolean genericStasisReady = chamberSettled || (ownPearlStasisTicks >= OWN_PEARL_STASIS_MIN_TICKS && nearTarget);
         boolean lethalReturnChestCleanupPending = loadingReturnPearlAfterDeposit
             && lethalReturn
@@ -409,18 +357,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (ownPearlStasisTicks == 1 || ownPearlStasisTicks % 20 == 0 || detailedReturnTelemetry) {
             StrictRuntimeLogger.logStashMover(
                 "pearl-stasis-wait",
-                "entityId=" + trackedEntityId
-                    + " ticks=" + ownPearlStasisTicks
-                    + " pos=" + formatVecForFeedback(pearlPos)
-                    + " target=" + formatVecForFeedback(target)
-                    + " distanceSq=" + String.format(Locale.ROOT, "%.3f", distanceSq)
-                    + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
-                    + " verticalDelta=" + String.format(Locale.ROOT, "%.3f", verticalDelta)
-                    + " verticalAbs=" + String.format(Locale.ROOT, "%.3f", verticalAbs)
-                    + " verticalBelow=" + String.format(Locale.ROOT, "%.3f", verticalBelow)
-                    + " velocity=" + formatVecForFeedback(pearlVelocity)
-                    + " speedSq=" + String.format(Locale.ROOT, "%.4f", speedSq)
-                    + " horizontalVelocitySq=" + String.format(Locale.ROOT, "%.4f", horizontalVelocitySq)
+                StashMoverTelemetry.pearlStasisWait(this, trackedEntityId, ownPearlStasisTicks, flight)
             );
         }
 
@@ -431,37 +368,14 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             String lethalReason = lethalReturnCommandFlightConfirmed
                 ? "tracked-own-pearl-return-kill-flight-confirmed"
                 : "tracked-own-pearl-return-kill-ready";
-            dispatchLethalReturnAfterTrackedPearl(
-                trackedEntityId,
-                lethalReason,
-                lethalSignal,
-                pearlPos,
-                pearlVelocity,
-                target,
-                distanceSq,
-                horizontalSq,
-                verticalDelta,
-                verticalAbs,
-                verticalBelow,
-                speedSq
-            );
+            dispatchLethalReturnAfterTrackedPearl(trackedEntityId, lethalReason, lethalSignal, flight);
             return;
         }
 
         if (readyForPutBack) {
             StrictRuntimeLogger.logStashMover(
                 readyEvent,
-                "entityId=" + trackedEntityId
-                    + " ticks=" + ownPearlStasisTicks
-                    + " pos=" + formatVecForFeedback(pearlPos)
-                    + " target=" + formatVecForFeedback(target)
-                    + " distanceSq=" + String.format(Locale.ROOT, "%.3f", distanceSq)
-                    + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
-                    + " verticalDelta=" + String.format(Locale.ROOT, "%.3f", verticalDelta)
-                    + " verticalAbs=" + String.format(Locale.ROOT, "%.3f", verticalAbs)
-                    + " verticalBelow=" + String.format(Locale.ROOT, "%.3f", verticalBelow)
-                    + " velocity=" + formatVecForFeedback(pearlVelocity)
-                    + " speedSq=" + String.format(Locale.ROOT, "%.4f", speedSq)
+                StashMoverTelemetry.pearlFlight(this, trackedEntityId, ownPearlStasisTicks, flight)
             );
             setMoverPhase(MoverPhase.PUT_BACK_PEARLS, readyReason);
             actionCooldownTicks = 1;
@@ -481,9 +395,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (phaseAgeTicks == 1 || phaseAgeTicks % 20 == 0) {
             StrictRuntimeLogger.logStashMover(
                 "awaiting-return-death",
-                "ticks=" + phaseAgeTicks
-                    + " returnCommand=" + normalizedReturnCommand()
-                    + " playerPos=" + (mc.player == null ? "<unset>" : formatVecForFeedback(mc.player.getEntityPos()))
+                StashMoverTelemetry.awaitingReturnDeath(this, normalizedReturnCommand(), playerPosOrNull())
             );
         }
     }
@@ -491,23 +403,17 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     protected boolean shouldStabilizePearlThrow(BlockPos water) {
         if (mc.player == null || mc.world == null || water == null) return false;
 
-        Vec3d waterCenter = Vec3d.ofCenter(water);
-        double dx = mc.player.getX() - waterCenter.x;
-        double dz = mc.player.getZ() - waterCenter.z;
-        double horizontalSq = dx * dx + dz * dz;
-        boolean nearWaterCenter = horizontalSq <= 0.18 * 0.18;
-        boolean tooHighAboveWater = mc.player.getY() > waterCenter.y + 0.22;
+        Vec3d playerPos = mc.player.getEntityPos();
+        StashMoverThrowGeometry.WaterStabilize stabilize = StashMoverThrowGeometry.evaluateWaterStabilize(playerPos, water);
         BlockPos playerBlock = mc.player.getBlockPos();
         boolean waterLoadedAtFeet = playerBlock.equals(water)
             || mc.world.getFluidState(playerBlock).isIn(FluidTags.WATER);
 
-        if (nearWaterCenter && tooHighAboveWater && waterLoadedAtFeet) {
+        if (stabilize.nearWaterCenter() && stabilize.tooHighAboveWater() && waterLoadedAtFeet) {
             holdSneakRecovery();
             StrictRuntimeLogger.logStashMover(
                 "pearl-throw-stabilize",
-                "playerPos=" + formatVecForFeedback(mc.player.getEntityPos())
-                    + " waterCenter=" + formatVecForFeedback(waterCenter)
-                    + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
+                StashMoverTelemetry.pearlThrowStabilize(this, playerPos, stabilize.waterCenter(), stabilize.horizontalSq())
             );
             return true;
         }
@@ -523,16 +429,8 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (mc.player == null || mc.player.networkHandler == null || water == null) return false;
 
         BlockPos approachGoal = resolvePearlApproachGoal(water, target, chamber);
-        Vec3d snapped;
-        String reason;
-        if (approachGoal != null) {
-            snapped = new Vec3d(approachGoal.getX() + 0.5, approachGoal.getY(), approachGoal.getZ() + 0.5);
-            reason = "approach-goal";
-        } else {
-            Vec3d waterCenter = Vec3d.ofCenter(water);
-            snapped = new Vec3d(waterCenter.x, water.getY() + 0.61, waterCenter.z);
-            reason = "water-center";
-        }
+        StashMoverThrowGeometry.SnapTarget snapTarget = StashMoverThrowGeometry.resolveSnapTarget(approachGoal, water);
+        Vec3d snapped = snapTarget.position();
         Vec3d current = mc.player.getEntityPos();
         double dx = current.x - snapped.x;
         double dy = current.y - snapped.y;
@@ -552,19 +450,9 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         ));
         StrictRuntimeLogger.logStashMover(
             "pearl-throw-snap",
-            "from=" + formatVecForFeedback(current)
-                + " to=" + formatVecForFeedback(snapped)
-                + " reason=" + reason
-                + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
-                + " verticalDelta=" + String.format(Locale.ROOT, "%.3f", dy)
+            StashMoverTelemetry.pearlThrowSnap(this, current, snapped, snapTarget.reason(), horizontalSq, dy)
         );
         return true;
-    }
-
-    private static double squaredHorizontalDistance(Vec3d a, Vec3d b) {
-        double dx = a.x - b.x;
-        double dz = a.z - b.z;
-        return dx * dx + dz * dz;
     }
 
     protected boolean shouldTreatTrackedPearlRemovalAsReady(EnderPearlEntity pearl) {
@@ -574,83 +462,19 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     protected void acceptTrackedPearlRemovalAsReady(EnderPearlEntity pearl) {
         if (pearl == null) return;
 
-        Vec3d pearlPos = pearl.getEntityPos();
-        Vec3d pearlVelocity = pearl.getVelocity();
         BlockPos water = waterPos();
         Vec3d chamber = chamberLookPos();
         Vec3d target = resolvePearlTarget(water, chamber);
         if (target == null) target = lastPearlTarget;
-        double distanceSq = target == null ? 0.0 : pearlPos.squaredDistanceTo(target);
-        double horizontalSq = target == null ? 0.0 : squaredHorizontalDistance(pearlPos, target);
-        double verticalDelta = target == null ? 0.0 : pearlPos.y - target.y;
-        double verticalAbs = Math.abs(verticalDelta);
-        double verticalBelow = target == null ? 0.0 : Math.max(0.0, target.y - pearlPos.y);
-        double speedSq = pearlVelocity.lengthSquared();
+        StashMoverPearlFlight flight = StashMoverPearlFlight.of(target, pearl.getEntityPos(), pearl.getVelocity());
         StrictRuntimeLogger.logStashMover(
             "pearl-return-kill-removal-confirmed",
-            "entityId=" + pearl.getId()
-                + " ticks=" + ownPearlStasisTicks
-                + " pos=" + formatVecForFeedback(pearlPos)
-                + " target=" + formatVecForFeedback(target)
-                + " distanceSq=" + String.format(Locale.ROOT, "%.3f", distanceSq)
-                + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
-                + " verticalDelta=" + String.format(Locale.ROOT, "%.3f", verticalDelta)
-                + " verticalAbs=" + String.format(Locale.ROOT, "%.3f", verticalAbs)
-                + " verticalBelow=" + String.format(Locale.ROOT, "%.3f", verticalBelow)
-                + " velocity=" + formatVecForFeedback(pearlVelocity)
-                + " speedSq=" + String.format(Locale.ROOT, "%.4f", speedSq)
+            StashMoverTelemetry.pearlFlight(this, pearl.getId(), ownPearlStasisTicks, flight)
         );
         cancelGoal("tracked-pearl-removal-confirmed");
         trackedPearlReadyOnRemoval = false;
         setMoverPhase(MoverPhase.PUT_BACK_PEARLS, "tracked-own-pearl-return-kill-removal-confirmed");
         actionCooldownTicks = 1;
-    }
-
-    private static boolean isReturnPearlFlightConfirmed(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks) {
-        if (target == null || pearlPos == null || pearlVelocity == null) return false;
-        double horizontalSq = squaredHorizontalDistance(pearlPos, target);
-        double verticalBelow = Math.max(0.0, target.y - pearlPos.y);
-        double horizontalVelocitySq = pearlVelocity.x * pearlVelocity.x + pearlVelocity.z * pearlVelocity.z;
-        return stasisTicks >= 10
-            && horizontalSq <= 0.15 * 0.15
-            && verticalBelow <= 5.0
-            && pearlVelocity.y >= 0.18
-            && pearlVelocity.y <= 0.35
-            && horizontalVelocitySq <= 0.015 * 0.015;
-    }
-
-    private static boolean isLethalReturnPearlFlightConfirmed(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks) {
-        if (target == null || pearlPos == null || pearlVelocity == null) return false;
-        double horizontalSq = squaredHorizontalDistance(pearlPos, target);
-        double verticalBelow = Math.max(0.0, target.y - pearlPos.y);
-        double horizontalVelocitySq = pearlVelocity.x * pearlVelocity.x + pearlVelocity.z * pearlVelocity.z;
-        return stasisTicks >= 10
-            && horizontalSq <= 0.24 * 0.24
-            && verticalBelow <= 3.25
-            && pearlVelocity.y >= 0.10
-            && pearlVelocity.y <= 0.40
-            && horizontalVelocitySq <= 0.035 * 0.035;
-    }
-
-    private static boolean isLethalReturnPearlLaunched(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks, double speedSq) {
-        if (pearlPos == null || pearlVelocity == null) return false;
-        double verticalBelow = target == null ? 0.0 : Math.max(0.0, target.y - pearlPos.y);
-        return stasisTicks >= 3
-            && speedSq >= 0.0025
-            && verticalBelow <= 8.0;
-    }
-
-    private static boolean isLethalReturnRemovalConfirmation(Vec3d target, Vec3d pearlPos, Vec3d pearlVelocity, int stasisTicks) {
-        if (target == null || pearlPos == null || pearlVelocity == null) return false;
-        double horizontalSq = squaredHorizontalDistance(pearlPos, target);
-        double verticalBelow = Math.max(0.0, target.y - pearlPos.y);
-        double horizontalVelocitySq = pearlVelocity.x * pearlVelocity.x + pearlVelocity.z * pearlVelocity.z;
-        return stasisTicks >= 14
-            && horizontalSq <= 0.20 * 0.20
-            && verticalBelow <= 1.25
-            && pearlVelocity.y >= 0.0
-            && pearlVelocity.y <= 0.45
-            && horizontalVelocitySq <= 0.030 * 0.030;
     }
 
     protected boolean hasPearlChestCleanupPendingAfterThrow() {
@@ -661,15 +485,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         int trackedEntityId,
         String phaseReason,
         String signal,
-        Vec3d pearlPos,
-        Vec3d pearlVelocity,
-        Vec3d target,
-        double distanceSq,
-        double horizontalSq,
-        double verticalDelta,
-        double verticalAbs,
-        double verticalBelow,
-        double speedSq
+        StashMoverPearlFlight flight
     ) {
         String command = normalizedReturnCommand();
         closeHandledScreen();
@@ -680,19 +496,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         trackedPearlReadyOnRemoval = false;
         StrictRuntimeLogger.logStashMover(
             "pearl-return-command-dispatched",
-            "entityId=" + trackedEntityId
-                + " signal=" + signal
-                + " ticks=" + ownPearlStasisTicks
-                + " pos=" + formatVecForFeedback(pearlPos)
-                + " target=" + formatVecForFeedback(target)
-                + " distanceSq=" + String.format(Locale.ROOT, "%.3f", distanceSq)
-                + " horizontalSq=" + String.format(Locale.ROOT, "%.3f", horizontalSq)
-                + " verticalDelta=" + String.format(Locale.ROOT, "%.3f", verticalDelta)
-                + " verticalAbs=" + String.format(Locale.ROOT, "%.3f", verticalAbs)
-                + " verticalBelow=" + String.format(Locale.ROOT, "%.3f", verticalBelow)
-                + " velocity=" + formatVecForFeedback(pearlVelocity)
-                + " speedSq=" + String.format(Locale.ROOT, "%.4f", speedSq)
-                + " returnCommand=" + command
+            StashMoverTelemetry.pearlReturnCommandDispatched(this, trackedEntityId, signal, ownPearlStasisTicks, flight, command)
         );
         StrictRuntimeLogger.logStashMover(
             "pearl-return-lethal-precondition",
@@ -735,10 +539,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
         StrictRuntimeLogger.logStashMover(
             "trapdoor-click",
-            "reason=" + reason
-                + " playerPos=" + formatVecForFeedback(mc.player.getEntityPos())
-                + " chamber=" + formatVecForFeedback(chamber)
-                + " open=false"
+            StashMoverTelemetry.trapdoorClick(this, reason, mc.player.getEntityPos(), chamber)
         );
         if (useBlock(chamberBlock, chamber)) actionCooldownTicks = 4;
         return false;
@@ -861,12 +662,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 if (actionCooldownTicks <= 0) {
                     StrictRuntimeLogger.logStashMover(
                         "source-open-retry",
-                        "source=" + formatBlockPosForFeedback(currentLootSourceChest)
-                            + " openedContainer=" + formatValue(openedContainerTarget)
-                            + " handler="
-                            + (mc.player.currentScreenHandler == null
-                                ? "<null>"
-                                : mc.player.currentScreenHandler.getClass().getSimpleName() + "#" + mc.player.currentScreenHandler.syncId)
+                        StashMoverTelemetry.sourceOpenRetry(this, currentLootSourceChest, openedContainerTarget, mc.player.currentScreenHandler)
                     );
                     openedContainerTarget = null;
                     tryOpenContainer(currentLootSourceChest, true);
@@ -874,11 +670,22 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 return;
             }
 
-            if (baritone.isPathing()
-                && (activeGoalKind == GoalKind.SOURCE_CHEST || activeGoalKind == GoalKind.CONTAINER_INTERACT)
-                && activeGoalPos != null) {
-                return;
+            if (baritone.isPathing() && activeGoalPos != null) {
+                if (activeGoalKind == GoalKind.SOURCE_CHEST || activeGoalKind == GoalKind.CONTAINER_INTERACT) {
+                    lootNudgeWaitTicks = 0;
+                    return;
+                }
+
+                // Waiting out an unstick nudge keeps the loot loop from ending the stash early, but LOOT is not
+                // covered by detectOperationalStall, so a nudge baritone never finishes must not wait forever.
+                if (activeGoalKind == GoalKind.RANDOM_NUDGE || activeGoalKind == GoalKind.RECONNECT_NUDGE) {
+                    if (++lootNudgeWaitTicks < LOOT_NUDGE_WAIT_TICKS) return;
+                    lootNudgeWaitTicks = 0;
+                    cancelGoal("loot-nudge-timeout");
+                }
             }
+
+            lootNudgeWaitTicks = 0;
 
             if (stationaryTicks >= STATIONARY_NUDGE_TICKS) {
                 BlockPos target = randomNearbyGoal(3);
@@ -908,9 +715,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             currentLootSourceChest = chest.toImmutable();
             StrictRuntimeLogger.logStashMover(
                 "source-selected",
-                "source=" + formatBlockPosForFeedback(currentLootSourceChest)
-                    + " destinationLootChest=" + formatBlockPosForFeedback(lootChest)
-                    + " pearlChest=" + formatBlockPosForFeedback(pearlChestPos())
+                StashMoverTelemetry.sourceSelected(this, currentLootSourceChest, lootChest, pearlChestPos())
             );
             tryOpenContainer(chest, true);
             return;
@@ -1009,10 +814,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             markFullDestinationChest(lootChest);
             StrictRuntimeLogger.logStashMover(
                 "destination-full",
-                "pos=" + formatBlockPosForFeedback(lootChest)
-                    + " occupiedSlots=" + occupiedStorageSlots(handler)
-                    + " storageSlots=" + storageSlotCount(handler)
-                    + " markedFull=" + fullDestinationChests.size()
+                StashMoverTelemetry.destinationFull(this, lootChest, occupiedStorageSlots(handler), storageSlotCount(handler), fullDestinationChests.size())
             );
             if (!waitingForDestinationSpace) {
                 waitingForDestinationSpace = true;
@@ -1041,7 +843,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     private boolean returnReplenishedPearlsAfterReturnThrow(ScreenHandler handler, BlockPos pearlChest) {
         if (playerInventoryPearlCount() == 0) return false;
         int storageSlots = storageSlotCount(handler);
-        if (!canStorageAcceptEnderPearls(handler, storageSlots)) {
+        if (!StashMoverPearlChestPolicy.canStorageAcceptEnderPearls(handler, storageSlots)) {
             warning("Pearl chest full; cant dump extra pearls before /kill.");
             StrictRuntimeLogger.logStashMover(
                 "replenish-pearl-return-blocked",
@@ -1058,25 +860,13 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             if (!readyForChestAction()) return true;
             StrictRuntimeLogger.logStashMover(
                 "replenish-pearl-return",
-                "slot=" + i
-                    + " count=" + stack.getCount()
-                    + " pearlChest=" + formatBlockPosForFeedback(pearlChest)
-                    + " stage=after-return-throw"
+                StashMoverTelemetry.replenishPearlReturn(this, i, stack.getCount(), pearlChest)
             );
             mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
             chestActionCooldownTicks = 2;
             return true;
         }
 
-        return false;
-    }
-
-    private boolean canStorageAcceptEnderPearls(ScreenHandler handler, int storageSlots) {
-        for (int i = 0; i < storageSlots; i++) {
-            ItemStack stack = handler.getSlot(i).getStack();
-            if (stack.isEmpty()) return true;
-            if (stack.isOf(Items.ENDER_PEARL) && stack.getCount() < stack.getMaxCount()) return true;
-        }
         return false;
     }
 
@@ -1133,45 +923,17 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     protected void handlePlayerDeath() {
         StrictRuntimeLogger.logStashMover(
             "player-death",
-            "mode=" + mode.get()
-                + " moverPhase=" + moverPhase
-                + " loaderPhase=" + loaderPhase
-                + " pos=" + (mc.player == null ? "<unset>" : formatVecForFeedback(mc.player.getEntityPos()))
-                + " returnCommand=" + returnCommand.get()
+            StashMoverTelemetry.playerDeath(this, playerPosOrNull())
         );
         closeHandledScreen();
         cancelGoal("player-died");
-        setMoverPhase(MoverPhase.LOOT, "player-died");
-        loaderPhase = LoaderPhase.WAITING;
-        ownPearlTracker.reset();
-        clearPearlChestBorrowState();
-        currentLootSourceChest = null;
-        openedContainerTarget = null;
-        renderedSourceChests.clear();
-        loadAckReceived = false;
-        loadingReturnPearlAfterDeposit = false;
-        disableAfterPartnerSeen = false;
-        waitingForDestinationSpace = false;
-        chestActionCooldownTicks = 0;
-        actionCooldownTicks = 10;
-        logicPulseTicks = 0;
-        phaseAgeTicks = 0;
-        resendLoadMessageTicks = 0;
-        stationaryTicks = 0;
-        ownPearlStasisTicks = 0;
-        lastPacketReceivedAtMs = System.currentTimeMillis();
-        lastProgressAtMs = System.currentTimeMillis();
-        clearPearlFailureState();
-        lastStallReason = "none";
-        lastRecoveryAction = "none";
+        resetCycleStateAfterDeath("player-died", 10, "none");
 
         try {
             mc.player.requestRespawn();
             StrictRuntimeLogger.logStashMover(
                 "player-respawn-requested",
-                "mode=" + mode.get()
-                    + " nextMoverPhase=" + moverPhase
-                    + " returnCommand=" + returnCommand.get()
+                StashMoverTelemetry.playerRespawnRequested(this)
             );
         } catch (Throwable ignored) {
         }
@@ -1182,15 +944,15 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
         StrictRuntimeLogger.logStashMover(
             "return-death-confirmed",
-            "reason=" + reason
-                + " signal=" + signal
-                + " mode=" + mode.get()
-                + " pos=" + (mc.player == null ? "<unset>" : formatVecForFeedback(mc.player.getEntityPos()))
-                + " returnCommand=" + returnCommand.get()
+            StashMoverTelemetry.returnDeathConfirmed(this, reason, signal, playerPosOrNull())
         );
         closeHandledScreen();
         cancelGoal("return-death-confirmed");
-        setMoverPhase(MoverPhase.LOOT, reason == null ? "return-death-confirmed" : reason);
+        resetCycleStateAfterDeath(reason == null ? "return-death-confirmed" : reason, 3, "return-death-confirmed");
+    }
+
+    private void resetCycleStateAfterDeath(String phaseReason, int cooldownTicks, String recoveryAction) {
+        setMoverPhase(MoverPhase.LOOT, phaseReason);
         loaderPhase = LoaderPhase.WAITING;
         ownPearlTracker.reset();
         clearPearlChestBorrowState();
@@ -1202,7 +964,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         disableAfterPartnerSeen = false;
         waitingForDestinationSpace = false;
         chestActionCooldownTicks = 0;
-        actionCooldownTicks = 3;
+        actionCooldownTicks = cooldownTicks;
         logicPulseTicks = 0;
         phaseAgeTicks = 0;
         resendLoadMessageTicks = 0;
@@ -1212,7 +974,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         lastProgressAtMs = System.currentTimeMillis();
         clearPearlFailureState();
         lastStallReason = "none";
-        lastRecoveryAction = "return-death-confirmed";
+        lastRecoveryAction = recoveryAction;
     }
 
     protected void tickTrackedPearlState() {
@@ -1409,7 +1171,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
     }
 
     private boolean returnPearlsToChest(ScreenHandler handler, int pearlHotbarSlot) {
-        int storageSlot = resolvePearlChestReturnSlot(handler);
+        int storageSlot = StashMoverPearlChestPolicy.resolvePearlChestReturnSlot(handler, storageSlotCount(handler), borrowedPearlChestSlot);
         if (storageSlot == -1) {
             warning("Pearl chest has no valid slot for returning the borrowed pearl stack.");
             return false;
@@ -1424,18 +1186,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         return true;
     }
 
-    private int resolvePearlChestReturnSlot(ScreenHandler handler) {
-        int storageSlots = storageSlotCount(handler);
-        if (borrowedPearlChestSlot >= 0 && borrowedPearlChestSlot < storageSlots) {
-            ItemStack tracked = handler.getSlot(borrowedPearlChestSlot).getStack();
-            if (tracked.isEmpty() || tracked.isOf(Items.ENDER_PEARL)) return borrowedPearlChestSlot;
-        }
-        for (int i = 0; i < storageSlots; i++) {
-            if (handler.getSlot(i).getStack().isOf(Items.ENDER_PEARL)) return i;
-        }
-        for (int i = 0; i < storageSlots; i++) {
-            if (handler.getSlot(i).getStack().isEmpty()) return i;
-        }
-        return -1;
+    private Vec3d playerPosOrNull() {
+        return mc.player == null ? null : mc.player.getEntityPos();
     }
 }

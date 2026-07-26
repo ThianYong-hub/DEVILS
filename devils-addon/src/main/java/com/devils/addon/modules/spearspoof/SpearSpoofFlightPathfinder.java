@@ -202,8 +202,9 @@ public final class SpearSpoofFlightPathfinder {
         Double cached = floorDistanceCache.get(key);
         if (cached != null) return cached;
 
-        double value = pos.y - nearestSolidBelow(pos, maxDepth);
-        floorDistanceCache.put(key, value);
+        boolean[] found = new boolean[1];
+        double value = pos.y - nearestSolidBelow(pos, maxDepth, found);
+        if (found[0]) floorDistanceCache.put(key, value);
         return value;
     }
 
@@ -212,8 +213,9 @@ public final class SpearSpoofFlightPathfinder {
         Double cached = ceilingDistanceCache.get(key);
         if (cached != null) return cached;
 
-        double value = nearestSolidAbove(pos, maxHeight) - (pos.y + playerHeight());
-        ceilingDistanceCache.put(key, value);
+        boolean[] found = new boolean[1];
+        double value = nearestSolidAbove(pos, maxHeight, found) - (pos.y + playerHeight());
+        if (found[0]) ceilingDistanceCache.put(key, value);
         return value;
     }
 
@@ -265,6 +267,10 @@ public final class SpearSpoofFlightPathfinder {
     }
 
     private double nearestSolidBelow(Vec3d pos, int maxDepth) {
+        return nearestSolidBelow(pos, maxDepth, new boolean[1]);
+    }
+
+    private double nearestSolidBelow(Vec3d pos, int maxDepth, boolean[] found) {
         int x = MathHelper.floor(pos.x);
         int z = MathHelper.floor(pos.z);
         int yStart = MathHelper.floor(pos.y);
@@ -272,15 +278,26 @@ public final class SpearSpoofFlightPathfinder {
 
         for (int i = 0; i <= maxDepth; i++) {
             int y = yStart - i;
-            if (module.client().world.isOutOfHeightLimit(y)) return y;
+            if (module.client().world.isOutOfHeightLimit(y)) {
+                found[0] = true;
+                return y;
+            }
             mutable.set(x, y, z);
-            if (isSolid(mutable)) return y + 1.0;
+            if (isSolid(mutable)) {
+                found[0] = true;
+                return y + 1.0;
+            }
         }
 
+        found[0] = false;
         return pos.y - maxDepth;
     }
 
     private double nearestSolidAbove(Vec3d pos, int maxHeight) {
+        return nearestSolidAbove(pos, maxHeight, new boolean[1]);
+    }
+
+    private double nearestSolidAbove(Vec3d pos, int maxHeight, boolean[] found) {
         int x = MathHelper.floor(pos.x);
         int z = MathHelper.floor(pos.z);
         int yStart = MathHelper.floor(pos.y + playerHeight());
@@ -288,11 +305,18 @@ public final class SpearSpoofFlightPathfinder {
 
         for (int i = 0; i <= maxHeight; i++) {
             int y = yStart + i;
-            if (module.client().world.isOutOfHeightLimit(y)) return y;
+            if (module.client().world.isOutOfHeightLimit(y)) {
+                found[0] = true;
+                return y;
+            }
             mutable.set(x, y, z);
-            if (isSolid(mutable)) return y;
+            if (isSolid(mutable)) {
+                found[0] = true;
+                return y;
+            }
         }
 
+        found[0] = false;
         return pos.y + maxHeight;
     }
 }

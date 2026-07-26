@@ -143,6 +143,12 @@ final class UpdateEntry {
         return new UpdateEntry("", "", "", EntryStatus.SYSTEM, safe(detail), "", "");
     }
 
+    // SYSTEM entries are advisory and no longer fail a run, so setup failures that invalidate the whole
+    // result (unreadable mods dir, unparsable sources file) must be reported as real errors instead.
+    static UpdateEntry systemError(String detail) {
+        return new UpdateEntry("", "", "", EntryStatus.ERROR, safe(detail), "", "");
+    }
+
     private static String safe(String value) {
         return value == null ? "" : value;
     }
@@ -161,6 +167,7 @@ final class UpdateReport {
     final int excluded;
     final int unresolved;
     final int errors;
+    final int notices;
     final List<UpdateEntry> entries;
 
     UpdateReport(
@@ -176,6 +183,7 @@ final class UpdateReport {
         int excluded,
         int unresolved,
         int errors,
+        int notices,
         List<UpdateEntry> entries
     ) {
         this.ok = ok;
@@ -190,11 +198,12 @@ final class UpdateReport {
         this.excluded = excluded;
         this.unresolved = unresolved;
         this.errors = errors;
+        this.notices = notices;
         this.entries = entries;
     }
 
     static UpdateReport failed(String message) {
-        return new UpdateReport(false, safe(message), 0, null, 0, 0, 0, 0, 0, 0, 0, 1, List.of(UpdateEntry.system(message)));
+        return new UpdateReport(false, safe(message), 0, null, 0, 0, 0, 0, 0, 0, 0, 1, 0, List.of(UpdateEntry.system(message)));
     }
 
     static UpdateReport from(List<UpdateEntry> entries, long durationMs, Path backupDir, boolean dryRun) {
@@ -206,6 +215,7 @@ final class UpdateReport {
         int excluded = 0;
         int unresolved = 0;
         int errors = 0;
+        int notices = 0;
 
         for (UpdateEntry entry : entries) {
             switch (entry.status) {
@@ -234,10 +244,11 @@ final class UpdateReport {
                     unresolved++;
                 }
                 case NON_FABRIC -> excluded++;
-                case ERROR, SYSTEM -> {
+                case ERROR -> {
                     scanned++;
                     errors++;
                 }
+                case SYSTEM -> notices++;
             }
         }
 
@@ -245,7 +256,7 @@ final class UpdateReport {
             ? String.format(Locale.ROOT, "Dry-run: scanned=%d available=%d up-to-date=%d unresolved=%d excluded=%d errors=%d.", scanned, available, upToDate, unresolved, excluded, errors)
             : String.format(Locale.ROOT, "Updated: scanned=%d updated=%d copied=%d up-to-date=%d unresolved=%d excluded=%d errors=%d.", scanned, updated, copied, upToDate, unresolved, excluded, errors);
 
-        return new UpdateReport(errors == 0, summary, durationMs, backupDir, scanned, updated, copied, available, upToDate, excluded, unresolved, errors, List.copyOf(entries));
+        return new UpdateReport(errors == 0, summary, durationMs, backupDir, scanned, updated, copied, available, upToDate, excluded, unresolved, errors, notices, List.copyOf(entries));
     }
 
     private static String safe(String value) {

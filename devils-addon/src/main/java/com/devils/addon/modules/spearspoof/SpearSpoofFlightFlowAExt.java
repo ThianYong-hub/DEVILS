@@ -8,7 +8,6 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.registry.tag.BlockTags;
 
-
 abstract class SpearSpoofFlightFlowAExt extends SpearSpoofFlightFlowA {
     protected SpearSpoofFlightFlowAExt(
         SpearSpoof module,
@@ -94,7 +93,6 @@ abstract class SpearSpoofFlightFlowAExt extends SpearSpoofFlightFlowA {
         long strikeDelayMs = combat.strikeReadyDelayMs(runtime.target);
         updatePassPhase(runtime.target, strikeDelayMs);
     }
-
 
     protected boolean isHorizontalRouteBlocked(Vec3d playerPos, Vec3d targetPos, LivingEntity target) {
         if (playerPos == null || targetPos == null || target == null || module.client().world == null) return false;

@@ -3,7 +3,6 @@ package com.devils.addon.modules.spearspoof;
 import com.devils.addon.modules.SpearSpoof;
 import meteordevelopment.meteorclient.settings.Setting;
 
-
 abstract class SpearSpoofFlightContext {
     protected static final double ENFORCED_MIN_RANGE = 0.40;
     protected static final double SMALL_TARGET_MIN_RANGE = 0.28;

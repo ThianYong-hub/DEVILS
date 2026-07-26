@@ -8,7 +8,6 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
-
 abstract class SpearSpoofFlightMovePhase2 extends SpearSpoofFlightFlowB {
     protected SpearSpoofFlightMovePhase2(
         SpearSpoof module,

@@ -15,7 +15,6 @@ import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 
 abstract class StashMoverSupport extends Module {
@@ -27,6 +26,7 @@ abstract class StashMoverSupport extends Module {
     protected static final int LOAD_MESSAGE_RESEND_TICKS = 40;
     protected static final int RECONNECT_NUDGE_DELAY_TICKS = 30;
     protected static final int STATIONARY_NUDGE_TICKS = 200;
+    protected static final int LOOT_NUDGE_WAIT_TICKS = 100;
     protected static final double CONTAINER_REACH = 4.5;
     protected static final double DESTINATION_CLOSE_SQ = 9.0;
     protected static final SettingColor DEFAULT_RENDER_COLOR = new SettingColor(255, 140, 0, 70);
@@ -239,6 +239,7 @@ abstract class StashMoverSupport extends Module {
     protected int reconnectNudgeTicks;
     protected int resendLoadMessageTicks;
     protected int stationaryTicks;
+    protected int lootNudgeWaitTicks;
     protected int ownPearlStasisTicks;
     protected float movedStacks;
     protected long lastPacketReceivedAtMs;
@@ -284,6 +285,7 @@ abstract class StashMoverSupport extends Module {
         reconnectNudgeTicks = 0;
         resendLoadMessageTicks = 0;
         stationaryTicks = 0;
+        lootNudgeWaitTicks = 0;
         ownPearlStasisTicks = 0;
         pearlChestNoPearlRetries = 0;
         movedStacks = 0.0f;

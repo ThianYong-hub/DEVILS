@@ -220,8 +220,7 @@ public class ModAutoUpdater extends Module {
         }
         boolean allowCopyFallback = copyFallbackMods.get();
         if (runMode == RunMode.MIGRATION && !sourceEqualsTarget && allowCopyFallback) {
-            warning("copy-fallback-mods is disabled for cross-version migration to avoid copying incompatible old jars.");
-            allowCopyFallback = false;
+            warning("copy-fallback-mods is enabled: unresolved source jars are copied as-is and old jars may be incompatible with the target version.");
         }
 
         Set<String> excludedIds = splitToTokenSet(excludedModIds.get());
@@ -348,7 +347,7 @@ public class ModAutoUpdater extends Module {
             info("Backups saved to %s", report.backupDir);
         }
 
-        if (report.errors > 0 || report.unresolved > 0) {
+        if (report.errors > 0 || report.unresolved > 0 || report.notices > 0) {
             info("[mod-updater] Issues:");
             for (UpdateEntry entry : report.entries) {
                 if (entry.status != EntryStatus.ERROR

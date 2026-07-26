@@ -427,26 +427,14 @@ abstract class StashMoverInteraction extends StashMoverSupport {
     }
 
     protected boolean hasRemainingEligibleSourceChest(BlockPos lootChest, BlockPos pearlChest) {
-        if (mc.world == null) return false;
+        if (mc.world == null || mc.player == null) return false;
 
         BlockEntityIterator iterator = new BlockEntityIterator();
         while (iterator.hasNext()) {
             BlockEntity blockEntity = iterator.next();
             if (!(blockEntity instanceof ChestBlockEntity)) continue;
 
-            BlockPos pos = blockEntity.getPos();
-            if (blacklistedSourceChests.contains(pos)) continue;
-            if (pos.equals(lootChest) || pos.equals(pearlChest)) continue;
-            if (isSameChestBlock(pos, lootChest) || isSameChestBlock(pos, pearlChest)) continue;
-
-            BlockState state = mc.world.getBlockState(pos);
-            if (!(state.getBlock() instanceof ChestBlock)) continue;
-
-            if (ignoreSingleChest.get() && state.contains(ChestBlock.CHEST_TYPE) && state.get(ChestBlock.CHEST_TYPE) == ChestType.SINGLE) {
-                continue;
-            }
-
-            return true;
+            if (isEligibleSourceChest(blockEntity.getPos(), lootChest, pearlChest)) return true;
         }
 
         return hasRemainingEligibleSourceChestFallback(lootChest, pearlChest);
