@@ -1,10 +1,10 @@
 <div align="center">
   <img src="icon.png" alt="Devils Addon Icon" width="200"/>
-  
+
   # Devils Addon
-  
+
   **Client-side Fabric addon for Meteor Client**
-  
+
   [![Stars](https://img.shields.io/github/stars/ThianYong-hub/DEVILS?style=for-the-badge&color=blue)](https://github.com/ThianYong-hub/DEVILS/stargazers)
   [![Issues](https://img.shields.io/github/issues/ThianYong-hub/DEVILS?style=for-the-badge&color=red)](https://github.com/ThianYong-hub/DEVILS/issues)
   [![License](https://img.shields.io/github/license/ThianYong-hub/DEVILS?style=for-the-badge&color=green)](https://github.com/ThianYong-hub/DEVILS/blob/main/LICENSE)
@@ -16,8 +16,8 @@
 
 Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
-Current addon build (`0.0.61`)
-Current game build (`0.0.5`)
+Current addon build (`0.0.62`)
+Current game build (`0.0.62`)
 
 ## What Is In Here
 
@@ -25,7 +25,6 @@ Current game build (`0.0.5`)
 - `devils-game` - optional extra jar with dumb little game overlays.
 - `SyncHub` - tiny Python server for sharing module data between clients.
 - `devils-shared` - shared Java bits used by both jars.
-- `tools` - local build glue. Ugly, but it works.
 
 This repo vendors/assimilates a few mod resources. If GitHub spits out a tiny addon jar without the `META-INF/devils-addon/mixins/*.json` files, that build is broken. The Gradle build and Actions now check that so it should fail before release instead of crashing Minecraft.
 
@@ -106,6 +105,7 @@ Integrations:
 
 - `sync-hub` - shared SyncHub settings.
 - `mod-auto-updater` - Modrinth/GitHub jar mover.
+
 ## StashMover Notes
 
 Two account setup:
@@ -176,7 +176,7 @@ Stress test:
 ```bash
 python SyncHub/tests/sync_stress_tester.py \
   --base-url http://127.0.0.1:7878 \
-  --module xaero-world-map \
+  --module ping \
   --server-key example.test:25565 \
   --duration-sec 120 \
   --clients 2 \
