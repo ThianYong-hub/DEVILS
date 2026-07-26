@@ -17,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -29,8 +28,7 @@ import org.lwjgl.glfw.GLFW;
 final class DoomSession {
     private static final String BUNDLED_BASE = "assets/devils-game/games/doom/runtime/";
     private static final String BUNDLED_ENGINE = "devilsdoom-runtime.jar";
-    private static final String BUNDLED_IWAD_PRIMARY = "freedoom2.wad";
-    private static final String BUNDLED_IWAD_SECONDARY = "freedoom1.wad";
+    private static final String BUNDLED_IWAD = "freedoom2.wad";
     private static final String EMBED_PROPERTY = "devilsdoom.embed";
 
     private final AtomicReference<Image> pendingFrame = new AtomicReference<>();
@@ -388,10 +386,8 @@ final class DoomSession {
     }
 
     private Path resolveIwad(Path runtimeDir) throws IOException {
-        Path primary = extractResource(runtimeDir, BUNDLED_IWAD_PRIMARY);
-        if (Files.isRegularFile(primary)) return primary;
-        Path secondary = extractResource(runtimeDir, BUNDLED_IWAD_SECONDARY);
-        return Files.isRegularFile(secondary) ? secondary : primary;
+        // extractResource keeps an existing file in the runtime dir, so a user can drop in their own IWAD.
+        return extractResource(runtimeDir, BUNDLED_IWAD);
     }
 
     private static Path extractResource(Path runtimeDir, String fileName) throws IOException {
@@ -556,5 +552,3 @@ final class DoomSession {
         return clean.substring(0, 177) + "...";
     }
 }
-
-
