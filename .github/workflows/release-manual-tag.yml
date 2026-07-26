@@ -94,25 +94,40 @@ jobs:
             exit 1
           fi
 
+          export RELEASE_VERSION="${release_tag#v}"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          props = Path("gradle.properties")
+          props_text = props.read_text(encoding="utf-8")
+          props_text = re.sub(r"^addon_version=.*$", f"addon_version={version}", props_text, flags=re.MULTILINE)
+          props_text = re.sub(r"^game_version=.*$", f"game_version={version}", props_text, flags=re.MULTILINE)
+          props.write_text(props_text, encoding="utf-8")
+
+          root_mod = Path("fabric.mod.json")
+          if root_mod.exists():
+              root_mod.write_text(re.sub(r'"version":\s*"[^"]+"', f'"version": "{version}"', root_mod.read_text(encoding="utf-8"), count=1), encoding="utf-8")
+
+          readme = Path("README.md")
+          if readme.exists():
+              text = readme.read_text(encoding="utf-8")
+              text = re.sub(r"Current addon build \(`[^`]+`\)", f"Current addon build (`{version}`)", text)
+              text = re.sub(r"Current game build \(`[^`]+`\)", f"Current game build (`{version}`)", text)
+              readme.write_text(text, encoding="utf-8")
+          PY
+
+          if ! git diff --quiet; then
+            git add gradle.properties fabric.mod.json README.md
+            git commit -m "chore(release): prepare ${release_tag}"
+            git push origin HEAD
+          fi
+
           git tag -a "${release_tag}" -m "Release ${release_tag}"
           git push origin "${release_tag}"
           echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Summary
         run: echo "Created manual release tag ${{ steps.create_tag.outputs.release_tag }}"
-
-      - name: Trigger Release Workflow
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.create_tag.outputs.release_tag }}
-        run: |
-          set -euo pipefail
-
-          payload="$(printf '{"ref":"%s","inputs":{"tag":"%s"}}' "${GITHUB_REF_NAME}" "${RELEASE_TAG}")"
-
-          curl -sS -L -X POST \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/release-on-tag.yml/dispatches" \
-            -d "${payload}"
