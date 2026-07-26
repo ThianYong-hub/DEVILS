@@ -144,29 +144,6 @@ repositories {
             includeGroupAndSubgroups("org.quiltmc")
         }
     }
-    maven {
-        name = "Shedaniel"
-        url = uri("https://maven.shedaniel.me/")
-    }
-    maven {
-        name = "CurseMaven"
-        url = uri("https://cursemaven.com")
-    }
-    maven {
-        name = "TerraformersMC"
-        url = uri("https://maven.terraformersmc.com/releases/")
-        content {
-            includeGroup("com.terraformersmc")
-        }
-    }
-    maven {
-        name = "WTHIT"
-        url = uri("https://maven2.bai.lol")
-        content {
-            includeGroupAndSubgroups("mcp.mobius.waila")
-            includeGroupAndSubgroups("lol.bai")
-        }
-    }
 }
 
 dependencies {
@@ -180,20 +157,6 @@ dependencies {
 
     modImplementation("io.github.llamalad7:mixinextras-fabric:0.5.0")
 
-    modCompileOnly("com.terraformersmc:modmenu:17.0.0-beta.1")
-    // shulkerboxtooltip removed — not used in code and causes Loom build failure
-    modCompileOnly("mcp.mobius.waila:wthit-api:fabric-18.0.4")
-    modCompileOnly("maven.modrinth:jade:21.0.1+fabric")
-    modCompileOnly("maven.modrinth:litematica:0.25.2")
-    modCompileOnly("maven.modrinth:malilib:0.27.2")
-    modCompileOnly("maven.modrinth:open-parties-and-claims:fabric-1.20.1-0.24.0")
-    modCompileOnly("maven.modrinth:sodium:mc1.21.11-0.8.0-fabric")
-    modCompileOnly("maven.modrinth:waystones:14.1.17+fabric-1.20.1")
-    modCompileOnly("maven.modrinth:balm:7.3.35+fabric-1.20.1")
-    modCompileOnly("maven.modrinth:fwaystones:3.3.3+mc1.20.1")
-    modCompileOnly("maven.modrinth:worldtools:1.2.4+1.20.1")
-    modCompileOnly("maven.modrinth:immediatelyfast:1.5.2+1.20.4-fabric")
-    modCompileOnly("meteordevelopment:baritone:1.21.10-SNAPSHOT")
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
     add(bundledRuntimeLibs.name, "com.github.ben-manes.caffeine:caffeine:3.2.0")
     implementation("net.lenni0451:LambdaEvents:2.4.2")
