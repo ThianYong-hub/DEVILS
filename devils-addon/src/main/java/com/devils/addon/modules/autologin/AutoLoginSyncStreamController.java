@@ -25,6 +25,10 @@ public final class AutoLoginSyncStreamController {
     private static final long SYNC_CONFIG_BACKOFF_MS = 30_000;
     private static final long SYNC_STREAM_RECONNECT_MS = 5_000;
     private static final long SYNC_STREAM_UNSUPPORTED_BACKOFF_MS = 300_000;
+    private static final long SYNC_STREAM_PATH_SWITCH_MS = 0;
+    // Marker for the benign v1 -> legacy path switch. Must stay free of tokens classifyReconnectDelay()
+    // and AutoLoginSyncDiagnostics treat as real failures (e.g. "404", "connect", "reset").
+    private static final String SYNC_STREAM_PATH_SWITCH_MARKER = "stream-switch-to-legacy";
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
     private static final ExecutorService STREAM_EXECUTOR = Executors.newCachedThreadPool(r -> {
         Thread thread = new Thread(r, "Devils-AutoLoginSyncStream");
@@ -48,6 +52,7 @@ public final class AutoLoginSyncStreamController {
     private volatile boolean syncStreamUseLegacyPath;
     private volatile boolean syncStreamUnsupported;
     private volatile long syncStreamUnsupportedUntilMs;
+    private volatile long syncStreamGeneration;
 
     public AutoLoginSyncStreamController(AutoLoginSyncCodec codec, BooleanSupplier verboseSupplier, Consumer<String> infoLogger, BiConsumer<String, String> problemLogger) {
         this.codec = codec;
@@ -83,9 +88,10 @@ public final class AutoLoginSyncStreamController {
         syncStreamStopRequested = false;
         syncStreamConnecting = true;
         syncStreamConnectionKey = connectionKey;
+        long generation = ++syncStreamGeneration;
         int safeWaitMs = Math.max(1_000, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
-        syncStreamFuture = CompletableFuture.runAsync(() -> runStream(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, Math.max(-1, knownRevision), safeWaitMs, writerFormatter), STREAM_EXECUTOR);
+        syncStreamFuture = CompletableFuture.runAsync(() -> runStream(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, Math.max(-1, knownRevision), safeWaitMs, writerFormatter, generation), STREAM_EXECUTOR);
     }
 
     public void stop() {
@@ -108,7 +114,7 @@ public final class AutoLoginSyncStreamController {
         stop();
     }
 
-    private void runStream(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs, Function<String, String> writerFormatter) {
+    private void runStream(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs, Function<String, String> writerFormatter, long generation) {
         String streamError = null;
         try {
             HttpResponse<InputStream> response = HttpClient.newHttpClient().send(
@@ -122,7 +128,7 @@ public final class AutoLoginSyncStreamController {
                 }
                 if (response.statusCode() == 404 && !syncStreamUseLegacyPath) {
                     syncStreamUseLegacyPath = true;
-                    throw new IllegalStateException("stream-404-switching-to-legacy");
+                    throw new IllegalStateException(SYNC_STREAM_PATH_SWITCH_MARKER);
                 }
                 if (response.statusCode() == 404 && syncStreamUseLegacyPath) {
                     syncStreamUnsupported = true;
@@ -133,6 +139,7 @@ public final class AutoLoginSyncStreamController {
             }
 
             MinecraftClient.getInstance().execute(() -> {
+                if (generation != syncStreamGeneration) return;
                 syncStreamConnecting = false;
                 syncStreamConnected = true;
                 syncStreamReconnectAtMs = 0;
@@ -173,15 +180,21 @@ public final class AutoLoginSyncStreamController {
         } finally {
             String finalStreamError = streamError;
             MinecraftClient.getInstance().execute(() -> {
+                if (generation != syncStreamGeneration) return;
                 syncStreamConnected = false;
                 syncStreamConnecting = false;
                 syncStreamFuture = null;
                 if (!syncStreamStopRequested) {
-                    long reconnectDelay = classifyReconnectDelay(finalStreamError);
+                    boolean pathSwitch = finalStreamError != null && finalStreamError.contains(SYNC_STREAM_PATH_SWITCH_MARKER);
+                    long reconnectDelay = pathSwitch ? SYNC_STREAM_PATH_SWITCH_MS : classifyReconnectDelay(finalStreamError);
                     long reconnectAt = System.currentTimeMillis() + reconnectDelay;
                     if (syncStreamUnsupported && syncStreamUnsupportedUntilMs > reconnectAt) reconnectAt = syncStreamUnsupportedUntilMs;
                     syncStreamReconnectAtMs = reconnectAt;
-                    if (finalStreamError != null && !finalStreamError.isBlank()) problemLogger.accept("stream disconnected", finalStreamError);
+                    if (pathSwitch) {
+                        if (verboseSupplier.getAsBoolean()) infoLogger.accept("AutoLogin sync stream falling back to legacy path.");
+                    } else if (finalStreamError != null && !finalStreamError.isBlank()) {
+                        problemLogger.accept("stream disconnected", finalStreamError);
+                    }
                 }
             });
         }
@@ -196,5 +209,3 @@ public final class AutoLoginSyncStreamController {
         return SYNC_STREAM_RECONNECT_MS;
     }
 }
-
-

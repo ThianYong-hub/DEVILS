@@ -162,6 +162,7 @@ public final class PingSyncController {
             String error = null;
             List<SyncPingData> effectiveSnapshot = localSnapshot;
             String effectiveFingerprint = localFingerprint;
+            boolean snapshotAuthoritative = false;
             long pushBaseRevision = knownRevision;
             boolean pushRequestedByMerge = false;
             boolean localNeedsPush = localChanged;
@@ -183,17 +184,20 @@ public final class PingSyncController {
                             if (!mergedFingerprint.equals(remoteFingerprint)) {
                                 effectiveSnapshot = merged;
                                 effectiveFingerprint = mergedFingerprint;
+                                snapshotAuthoritative = true;
                                 pushRequestedByMerge = true;
                                 localNeedsPush = true;
                             } else {
                                 effectiveSnapshot = remoteSnapshot;
                                 effectiveFingerprint = remoteFingerprint;
+                                snapshotAuthoritative = true;
                                 localNeedsPush = false;
                                 if (remoteIsNewer) remoteApplied = true;
                             }
                         } else if (remoteIsNewer) {
                             effectiveSnapshot = remoteSnapshot;
                             effectiveFingerprint = remoteFingerprint;
+                            snapshotAuthoritative = true;
                             remoteApplied = true;
                         }
                     }
@@ -211,6 +215,7 @@ public final class PingSyncController {
                         pushResult = codec.sendPushRequest(baseUrl, deviceId, token, signingKey, timeoutSec, encryptionKey, pushResult.revision(), conflictMerged);
                         effectiveSnapshot = conflictMerged;
                         effectiveFingerprint = conflictFingerprint;
+                        snapshotAuthoritative = true;
                     }
                 } catch (Throwable throwable) {
                     error = SyncJsonUtils.formatSyncException("push-error", throwable, PingConstants.SYNC_ERROR_DETAIL_MAX);
@@ -224,7 +229,8 @@ public final class PingSyncController {
                 localNeedsPush,
                 effectiveSnapshot,
                 effectiveFingerprint,
-                error
+                error,
+                snapshotAuthoritative
             );
             module.client().execute(() -> handleSyncCycleResult(result));
         });
@@ -262,7 +268,9 @@ public final class PingSyncController {
                         module.logSyncInternal("Ping sync push ok (rev=%d).", lastKnownSyncRevision);
                         lastPushOkLogMs = now;
                     }
-                    markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
+                    if (result.snapshotAuthoritative()) {
+                        markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
+                    }
                     refreshLocalOwnedFingerprint();
                     problemTracker.clear();
                     return;
@@ -275,7 +283,9 @@ public final class PingSyncController {
                         module.logSyncInternal("Ping sync conflict handled by merge.");
                         lastConflictLogMs = now;
                     }
-                    markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
+                    if (result.snapshotAuthoritative()) {
+                        markerController.applySyncedSnapshot(result.snapshot(), runtimePingSyncEnabled, runtimeSyncDeviceId);
+                    }
                     refreshLocalOwnedFingerprint();
                     problemTracker.clear();
                     return;
@@ -336,6 +346,3 @@ public final class PingSyncController {
         );
     }
 }
-
-
-

@@ -159,6 +159,3 @@ final class HighwayAutoEatController {
             && item != Items.PUFFERFISH;
     }
 }
-
-
-

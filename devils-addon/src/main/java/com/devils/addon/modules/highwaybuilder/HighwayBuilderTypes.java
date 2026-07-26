@@ -231,4 +231,3 @@ final class TaskSpatialRules {
             && !module.pathfinder.currentBlockPos.add(module.pathfinder.startingDirection.directionVec).equals(blockPos);
     }
 }
-

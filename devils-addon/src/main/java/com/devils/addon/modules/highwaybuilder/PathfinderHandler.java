@@ -36,7 +36,6 @@ public class PathfinderHandler {
         this.movement = new PathfinderMovementController(module);
     }
 
-
     public void setupPathing() {
         if (mc.player == null) return;
         moveState = MovementState.RUNNING;
@@ -58,7 +57,6 @@ public class PathfinderHandler {
     public boolean hasMinerGoal() {
         return minerGoal != null;
     }
-
 
     public void startPickup(Predicate<net.minecraft.item.ItemStack> filter) {
         baritone.startPickup(filter);
@@ -190,7 +188,15 @@ public class PathfinderHandler {
         // If nothing is actionable in current reach, but there is unfinished work ahead,
         // advance one step so that next slice enters active range.
         if (distToCurrentSq <= STEP_FORWARD_DIST_SQ && hasUnfinishedAhead()) {
-            tryAdvanceOneStep();
+            if (tryAdvanceOneStep()) return;
+        }
+
+        // Can't advance normally (gap ahead with no walkable floor). If scaffolding
+        // is enabled and there is no reachable placement work left, hand off to the
+        // BRIDGE state so we sneak-walk to the edge and the far floor cell becomes
+        // placeable. This replaces the never-reached handleImpossiblePlace() path.
+        if (shouldBridge() && moveState != MovementState.RESTOCK) {
+            moveState = MovementState.BRIDGE;
         }
     }
 
@@ -426,7 +432,6 @@ public class PathfinderHandler {
         baritone.updateGoal(goal, movement::moveTo);
     }
 
-
     private void normalizeMovementState() {
         if (module.containerHandler == null) return;
 
@@ -477,6 +482,3 @@ public class PathfinderHandler {
         updateBaritoneGoal();
     }
 }
-
-
-

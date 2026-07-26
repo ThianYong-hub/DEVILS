@@ -164,6 +164,3 @@ public class BlockPlacer {
         return best;
     }
 }
-
-
-

@@ -402,6 +402,3 @@ public class ContainerHandler {
         return pickupTracker.getCollectingPosition();
     }
 }
-
-
-

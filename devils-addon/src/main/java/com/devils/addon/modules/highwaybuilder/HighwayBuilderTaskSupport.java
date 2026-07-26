@@ -91,9 +91,9 @@ final class InventoryJunkDropper {
         HWDirection buildDir = module.pathfinder != null ? module.pathfinder.startingDirection : null;
         if (buildDir != null) {
             return switch (mode) {
-                case 0 -> buildDir.counterClockwise(2).yaw;
-                case 1 -> buildDir.clockwise(2).yaw;
-                default -> buildDir.clockwise(4).yaw;
+                case 0 -> buildDir.counterClockwise(2).yaw + 180.0f;
+                case 1 -> buildDir.clockwise(2).yaw + 180.0f;
+                default -> buildDir.clockwise(4).yaw + 180.0f;
             };
         }
 
@@ -379,7 +379,3 @@ final class TaskPriorityPlanner {
         return Math.abs(dir.lateralOffset(origin, pos));
     }
 }
-
-
-
-

@@ -104,6 +104,7 @@ public final class SlotMachineOverlay extends Module {
         int key = event.key();
         if (key == GLFW.GLFW_KEY_ESCAPE) {
             GameLaunchCoordinator.closeAll();
+            event.setCancelled(true);
         }
     }
 
@@ -164,4 +165,3 @@ public final class SlotMachineOverlay extends Module {
         return mc;
     }
 }
-

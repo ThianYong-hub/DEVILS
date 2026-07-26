@@ -58,6 +58,8 @@ public final class AutoCraftExecutor {
 
     private record Placement(int targetSlotId, IngredientSpec ingredient, int requiredCount) {}
 
+    private static final int MAX_STALLED_DRAIN_ATTEMPTS = 3;
+
     private final MinecraftClient mc = MinecraftClient.getInstance();
     private final AutoCraftInventoryOps inventoryOps;
 
@@ -67,6 +69,8 @@ public final class AutoCraftExecutor {
     private int expectedSyncId = -1;
     private int outputSlotId = -1;
     private int outputRemainingBatches;
+    private boolean outputCrafted;
+    private int stalledDrainAttempts;
     private int placementIndex;
     private int currentTargetSlotId = -1;
     private int currentTargetRemaining;
@@ -84,6 +88,8 @@ public final class AutoCraftExecutor {
         expectedSyncId = -1;
         outputSlotId = -1;
         outputRemainingBatches = 0;
+        outputCrafted = false;
+        stalledDrainAttempts = 0;
         placementIndex = 0;
         currentTargetSlotId = -1;
         currentTargetRemaining = 0;
@@ -198,7 +204,7 @@ public final class AutoCraftExecutor {
                         click(handler.syncId, currentTargetSlotId, 1, SlotActionType.PICKUP);
                         currentTargetRemaining--;
                     }
-                    
+
                     if (currentTargetRemaining <= 0) phase = Phase.PLACE_RETURN_CURSOR;
                     return TickResult.action("Placing ingredient into crafting grid.");
                 }
@@ -218,25 +224,39 @@ public final class AutoCraftExecutor {
                         continue;
                     }
 
-                    if (outputRemainingBatches <= 0) {
-                        phase = Phase.CLEANUP_POST;
-                        continue;
-                    }
-
                     ItemStack outputStack = handler.getSlot(outputSlotId).getStack();
-                    if (outputStack.isEmpty()) {
-                        return TickResult.blocked("Crafting result is not available yet.");
-                    }
 
                     if (dropFinalOutput) {
+                        if (outputRemainingBatches <= 0) {
+                            phase = Phase.CLEANUP_POST;
+                            continue;
+                        }
+                        if (outputStack.isEmpty()) {
+                            return TickResult.blocked("Crafting result is not available yet.");
+                        }
                         click(handler.syncId, outputSlotId, 0, SlotActionType.PICKUP);
                         phase = Phase.OUTPUT_STORE_CURSOR;
                         return TickResult.action("Taking crafted output for drop.");
-                    } else {
+                    }
+
+                    // Non-drop: one shift-click drains every batch the grid can supply.
+                    if (!outputStack.isEmpty()) {
+                        // A single QUICK_MOVE normally drains the whole grid; if the result slot is still
+                        // full after we already crafted, the inventory has no room, so bail out with BLOCKED
+                        // (the session stall budget then forces a replan) instead of looping on ACTION forever.
+                        if (outputCrafted && ++stalledDrainAttempts >= MAX_STALLED_DRAIN_ATTEMPTS) {
+                            return TickResult.blocked("No inventory space for crafted output.");
+                        }
                         click(handler.syncId, outputSlotId, 0, SlotActionType.QUICK_MOVE);
-                        outputRemainingBatches--;
+                        outputCrafted = true;
                         return TickResult.action("Quick-moving crafted output.");
                     }
+
+                    // Result slot empty: either nothing has synced yet, or the grid is fully drained.
+                    if (!outputCrafted) {
+                        return TickResult.blocked("Crafting result is not available yet.");
+                    }
+                    phase = Phase.CLEANUP_POST;
                 }
                 case OUTPUT_STORE_CURSOR -> {
                     if (cursor.isEmpty()) {

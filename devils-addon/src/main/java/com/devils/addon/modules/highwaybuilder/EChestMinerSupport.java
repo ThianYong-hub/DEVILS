@@ -122,4 +122,3 @@ final class EChestMinerSupport {
         return stuckTicks >= MINING_POSITION_RECOVER_TICKS;
     }
 }
-

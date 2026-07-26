@@ -245,4 +245,3 @@ public final class SelectionScreens {
         }
     }
 }
-

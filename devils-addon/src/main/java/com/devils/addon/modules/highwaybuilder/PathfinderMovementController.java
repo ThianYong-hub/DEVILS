@@ -125,6 +125,3 @@ final class PathfinderMovementController {
         lastRunningPos = null;
     }
 }
-
-
-

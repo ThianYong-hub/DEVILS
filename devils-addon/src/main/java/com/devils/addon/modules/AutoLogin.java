@@ -473,5 +473,3 @@ public class AutoLogin extends Module {
     public record ParsedCommand(LoginMode mode, String password) {}
     public enum LoginMode { LOGIN, REGISTER }
 }
-
-

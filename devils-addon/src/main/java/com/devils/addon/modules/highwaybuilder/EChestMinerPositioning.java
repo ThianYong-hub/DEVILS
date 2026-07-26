@@ -482,7 +482,3 @@ final class EChestMinerPositioning {
         return Math.max(min, Math.min(max, value));
     }
 }
-
-
-
-

@@ -142,6 +142,3 @@ public class BlockTask {
         return "BlockTask{" + targetBlock + " @ " + blockPos.toShortString() + " state=" + taskState + "}";
     }
 }
-
-
-

@@ -40,33 +40,20 @@ public enum HWDirection {
     public double forwardProgress(BlockPos origin, BlockPos pos) {
         int dx = pos.getX() - origin.getX();
         int dz = pos.getZ() - origin.getZ();
-
-        if (!isDiagonal) {
-            return dx * directionVec.getX() + dz * directionVec.getZ();
-        }
-
-        HWDirection lateral = lateralDirection();
-        if (lateral.directionVec.getX() != 0) {
-            return dz * directionVec.getZ();
-        }
-
-        return dx * directionVec.getX();
+        double dot = dx * directionVec.getX() + dz * directionVec.getZ();
+        // diagonal directionVec is (+-1,0,+-1) so |v|^2 = 2; cardinal is a unit vector so 1
+        return isDiagonal ? dot / 2.0 : dot;
     }
 
     public double lateralOffset(BlockPos origin, BlockPos pos) {
         int dx = pos.getX() - origin.getX();
         int dz = pos.getZ() - origin.getZ();
-        HWDirection lateral = lateralDirection();
-
         if (!isDiagonal) {
+            HWDirection lateral = lateralDirection();
             return dx * lateral.directionVec.getX() + dz * lateral.directionVec.getZ();
         }
-
-        if (lateral.directionVec.getX() != 0) {
-            return dx * lateral.directionVec.getX();
-        }
-
-        return dz * lateral.directionVec.getZ();
+        // 2D cross product with the forward vector = orthogonal (true perpendicular) offset
+        return (dx * directionVec.getZ() - dz * directionVec.getX()) / 2.0;
     }
 
     public BlockPos multiply(Vec3i vec, int factor) {
@@ -107,6 +94,3 @@ public enum HWDirection {
         return name().charAt(0) + name().substring(1).toLowerCase().replace('_', '-');
     }
 }
-
-
-

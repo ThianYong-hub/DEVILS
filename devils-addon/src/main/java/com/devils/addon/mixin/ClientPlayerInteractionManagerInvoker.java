@@ -1,17 +1,11 @@
 package com.devils.addon.mixin;
 
-import com.devils.addon.DevilsAddon;
-import com.mojang.authlib.GameProfile;
-import java.lang.reflect.Field;
 import meteordevelopment.meteorclient.gui.GuiThemes;
 import meteordevelopment.meteorclient.gui.screens.settings.ItemListSettingScreen;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.misc.Names;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerInteractionManager;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.item.Item;
@@ -26,9 +20,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Pseudo;
 
 @Mixin(ClientPlayerInteractionManager.class)
 public interface ClientPlayerInteractionManagerInvoker {
@@ -102,5 +94,3 @@ abstract class ModulesNameCollisionMixin {
         return module != null && module.getClass().getName().startsWith(DEVILS_PACKAGE_PREFIX);
     }
 }
-
-

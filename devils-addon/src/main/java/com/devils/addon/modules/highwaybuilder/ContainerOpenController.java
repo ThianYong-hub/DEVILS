@@ -302,6 +302,3 @@ final class ContainerOpenController {
         FAILED
     }
 }
-
-
-

@@ -454,6 +454,3 @@ final class ContainerPlacementPlanner {
         return Math.max(min, Math.min(max, value));
     }
 }
-
-
-

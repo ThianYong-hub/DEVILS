@@ -18,6 +18,7 @@ import javax.crypto.spec.SecretKeySpec;
 public final class SyncJsonUtils {
     private static final SecureRandom RNG = new SecureRandom();
     private static final HexFormat HEX = HexFormat.of();
+    private static final int MAX_CAUSE_DEPTH = 32;
 
     private SyncJsonUtils() {
     }
@@ -98,7 +99,11 @@ public final class SyncJsonUtils {
         if (throwable == null) return prefix + ":unknown";
 
         Throwable root = throwable;
-        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+        // Bounded walk: cause chains can be cyclic (a.cause == b, b.cause == a), so a plain
+        // self-reference guard is not enough to guarantee termination.
+        for (int depth = 0; depth < MAX_CAUSE_DEPTH && root.getCause() != null && root.getCause() != root; depth++) {
+            root = root.getCause();
+        }
 
         String type = root.getClass().getSimpleName();
         if (type == null || type.isBlank()) type = root.getClass().getName();

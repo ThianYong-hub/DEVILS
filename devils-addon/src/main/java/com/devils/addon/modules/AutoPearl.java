@@ -64,7 +64,6 @@ public class AutoPearl extends Module {
     public final AutoPearlTrajectory.EscapeHelper escapeHelper = new AutoPearlTrajectory.EscapeHelper(this);
 
     public PlayerEntity target;
-    private Box cachedTargetBox;
     private int tickTimer;
     private boolean waitingForTeleport;
     private Vec3d posBeforeThrow;
@@ -305,7 +304,7 @@ public class AutoPearl extends Module {
 
     private void doThrow(int pearlSlot) {
         if (mc.player == null || mc.interactionManager == null) return;
-        InvUtils.swap(pearlSlot, false);
+        InvUtils.swap(pearlSlot, true);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         InvUtils.swapBack();
     }
@@ -318,6 +317,3 @@ public class AutoPearl extends Module {
         return -1;
     }
 }
-
-
-

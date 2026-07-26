@@ -417,5 +417,3 @@ public class TnTBomber extends Module {
         Ignite
     }
 }
-
-

@@ -8,7 +8,6 @@ import com.devils.addon.games.checkers.CheckersLogic.Move;
 import com.devils.addon.games.sync.MiniGamesSyncRuntime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
@@ -39,7 +38,6 @@ public final class CheckersGameScreen extends Screen {
     private final Screen parent;
     private final Mode mode;
     private final MiniGamesSyncRuntime runtime = MiniGamesSyncRuntime.get();
-    private final Random random = new Random();
     private final ArrayList<ButtonHitbox> buttons = new ArrayList<>();
     private final ArrayList<Coord> stagedPath = new ArrayList<>();
     private String boardState = CheckersLogic.initialState();
@@ -467,4 +465,3 @@ public final class CheckersGameScreen extends Screen {
         }
     }
 }
-

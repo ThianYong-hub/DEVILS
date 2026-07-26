@@ -96,15 +96,6 @@ class StashMoverSourceTest {
     }
 
     @Test
-    void liveRuntimeHarnessKeepsRealisticUserWorldLootFirstOrdering() throws IOException {
-        String harness = Files.readString(Path.of("src", "main", "java", "com", "devils", "addon", "util", "smoke", "StashMoverLiveRuntimeValidation.java"));
-
-        assertTrue(harness.contains("boolean realisticBootstrapWarmup = useUserWorld() && realisticMode() && runIndex == 0 && !bootstrapWarmupCompleted;"));
-        assertTrue(harness.contains("reason=real-player-thrown-initial-pearl-required"));
-        assertTrue(harness.contains("STAGE bootstrap-throw-prepared"));
-    }
-
-    @Test
     void nativeModuleFilesExistAndRhPluginMetadataIsNotRuntimeWired() {
         assertTrue(Files.exists(Path.of("src", "main", "java", "com", "devils", "addon", "modules", "stashmover", "StashMover.java")));
         assertTrue(Files.exists(Path.of("src", "main", "java", "com", "devils", "addon", "modules", "stashmover", "StashMoverCommand.java")));

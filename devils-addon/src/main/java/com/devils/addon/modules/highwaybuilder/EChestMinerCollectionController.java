@@ -196,7 +196,3 @@ final class EChestMinerCollectionController {
         }
     }
 }
-
-
-
-

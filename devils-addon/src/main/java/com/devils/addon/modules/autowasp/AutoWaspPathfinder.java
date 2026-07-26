@@ -85,7 +85,7 @@ public final class AutoWaspPathfinder {
         boolean needsRepath = pathDepleted
             || (targetMovedFar && pathTimer >= AutoWaspPathSearch.PATH_UPDATE_TICKS)
             || pathTimer >= AutoWaspPathSearch.PATH_FORCE_REFRESH_TICKS
-            || stuckTicks >= AutoWaspFlightController.STUCK_REPATH_TICKS
+            || (stuckTicks >= AutoWaspFlightController.STUCK_REPATH_TICKS && pathTimer >= AutoWaspPathSearch.PATH_UPDATE_TICKS)
             || pathBlocked;
 
         if (needsRepath) {
@@ -193,7 +193,7 @@ public final class AutoWaspPathfinder {
     }
 
     public double distanceToSolidBelow(Vec3d pos, int maxDepth) {
-        long key = BlockPos.ofFloored(pos).asLong();
+        long key = BlockPos.ofFloored(pos).asLong() * 41L + maxDepth;
         Double cached = floorDistanceCache.get(key);
         if (cached != null) return cached;
 
@@ -203,7 +203,7 @@ public final class AutoWaspPathfinder {
     }
 
     public double distanceToSolidAbove(Vec3d pos, int maxHeight) {
-        long key = BlockPos.ofFloored(pos).asLong();
+        long key = BlockPos.ofFloored(pos).asLong() * 41L + maxHeight;
         Double cached = ceilingDistanceCache.get(key);
         if (cached != null) return cached;
 
@@ -291,5 +291,3 @@ public final class AutoWaspPathfinder {
         return pos.y + maxHeight;
     }
 }
-
-

@@ -2,7 +2,6 @@ package com.devils.addon.modules.ping;
 
 import com.devils.addon.shared.sync.SyncJsonUtils;
 
-
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -109,6 +108,3 @@ public final class PingFormattingUtils {
         return String.format(Locale.ROOT, "%d %d %d", Math.round(x), Math.round(y), Math.round(z));
     }
 }
-
-
-

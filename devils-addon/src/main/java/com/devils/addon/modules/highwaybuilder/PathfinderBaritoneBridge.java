@@ -162,6 +162,3 @@ final class PathfinderBaritoneBridge {
         }
     }
 }
-
-
-

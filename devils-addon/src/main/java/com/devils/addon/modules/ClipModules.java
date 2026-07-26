@@ -201,4 +201,3 @@ final class AntiWaspObstacleAvoidance {
         return min;
     }
 }
-

@@ -8,7 +8,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
 
 final class DoomWindow {
     private static final int DARK_BG = 0xD010131B;
@@ -372,4 +371,3 @@ final class DoomWindow {
         int resizeX, int resizeY, int resizeSize
     ) {}
 }
-

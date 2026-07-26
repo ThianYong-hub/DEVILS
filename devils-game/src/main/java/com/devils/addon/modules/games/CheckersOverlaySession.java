@@ -402,4 +402,3 @@ final class CheckersOverlaySession {
     private record BotResult(long requestId, String stateSnapshot, int level, String move) {
     }
 }
-

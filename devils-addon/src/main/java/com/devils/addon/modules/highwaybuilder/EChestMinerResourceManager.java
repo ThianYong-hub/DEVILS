@@ -102,15 +102,18 @@ final class EChestMinerResourceManager {
         if (mc.player == null) return 0;
 
         int space = 0;
+        int currentObsidian = 0;
         for (int i = 0; i < 36; i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) {
                 space += 64;
             } else if (stack.getItem() == Items.OBSIDIAN) {
                 space += stack.getMaxCount() - stack.getCount();
+                currentObsidian += stack.getCount();
             }
         }
-        return space;
+        int cap = Math.max(0, module.echestSlots.get() * 64 - currentObsidian);
+        return Math.min(space, cap);
     }
 
     int countMissingObsidianForRefill() {
@@ -164,6 +167,3 @@ final class EChestMinerResourceManager {
         return true;
     }
 }
-
-
-

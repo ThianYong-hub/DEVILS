@@ -18,15 +18,16 @@ import meteordevelopment.orbit.EventHandler;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.network.packet.s2c.play.DeathMessageS2CPacket;
+import net.minecraft.network.packet.s2c.play.GameJoinS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerListS2CPacket;
 import net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -57,14 +58,18 @@ public class JoinWatcher extends Module {
         .build()
     );
 
+    private static final long INITIAL_JOIN_SUPPRESSION_NANOS = TimeUnit.MILLISECONDS.toNanos(3000L);
+    private static final int SESSION_START_PLAYER_AGE_TICKS = 60;
+
     private static final ScheduledExecutorService CHAT_SEND_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "Devils-TrackerPlayer-ChatSend");
         thread.setDaemon(true);
         return thread;
     });
 
-    private boolean waitingInitialJoinPacket = true;
-    private final Map<UUID, String> knownPlayers = new HashMap<>();
+    private volatile long initialJoinSuppressedUntilNanos;
+    private volatile boolean initialJoinSuppressionArmed;
+    private final Map<UUID, String> knownPlayers = new ConcurrentHashMap<>();
     private final List<ScheduledFuture<?>> pendingDelayedSends = Collections.synchronizedList(new ArrayList<>());
 
     public JoinWatcher() {
@@ -78,14 +83,17 @@ public class JoinWatcher extends Module {
 
     @Override
     public void onActivate() {
-        waitingInitialJoinPacket = true;
+        // Meteor calls this both when a play session starts (it subscribes modules on GameJoinedEvent) and when the
+        // user toggles the module mid-session. Only the former should swallow the initial player-list burst.
+        if (mc.player == null || mc.player.age <= SESSION_START_PLAYER_AGE_TICKS) armInitialJoinSuppression();
+        else initialJoinSuppressionArmed = false;
         knownPlayers.clear();
         cancelPendingDelayedSends();
     }
 
     @Override
     public void onDeactivate() {
-        waitingInitialJoinPacket = true;
+        initialJoinSuppressionArmed = false;
         knownPlayers.clear();
         cancelPendingDelayedSends();
     }
@@ -96,7 +104,10 @@ public class JoinWatcher extends Module {
     }
 
     private void onGameJoinedSafe(GameJoinedEvent event) {
-        waitingInitialJoinPacket = true;
+        // Meteor only subscribes non-main-menu modules once this event fires, so the GameJoinS2CPacket that starts a
+        // session is normally received while we are still unsubscribed. Arm the window here (and in onActivate) so the
+        // initial ADD_PLAYER batches are covered no matter how many packets the server splits them across.
+        armInitialJoinSuppression();
         knownPlayers.clear();
         cancelPendingDelayedSends();
     }
@@ -107,7 +118,6 @@ public class JoinWatcher extends Module {
     }
 
     private void onGameLeftSafe(GameLeftEvent event) {
-        waitingInitialJoinPacket = true;
         knownPlayers.clear();
         cancelPendingDelayedSends();
     }
@@ -118,6 +128,11 @@ public class JoinWatcher extends Module {
     }
 
     private void onPacketReceiveSafe(PacketEvent.Receive event) {
+        if (event.packet instanceof GameJoinS2CPacket) {
+            armInitialJoinSuppression();
+            return;
+        }
+
         if (event.packet instanceof PlayerListS2CPacket packet) {
             handleJoinPacket(packet);
             return;
@@ -141,7 +156,7 @@ public class JoinWatcher extends Module {
             knownPlayers.put(entry.profile().id(), entry.profile().name());
         }
 
-        if (shouldIgnoreInitialPacket(packet)) return;
+        if (isInitialJoinSuppressed()) return;
 
         for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
             if (entry.profile() == null) continue;
@@ -165,6 +180,13 @@ public class JoinWatcher extends Module {
     private void handleDeathPacket(DeathMessageS2CPacket packet) {
         if (mc.world == null) return;
 
+        // The world entity index is client-thread state, so resolve the dead player there instead of on the netty read thread.
+        mc.execute(() -> CrashGuard.run(this, "handleDeathPacket", () -> handleDeathPacketOnClientThread(packet)));
+    }
+
+    private void handleDeathPacketOnClientThread(DeathMessageS2CPacket packet) {
+        if (mc.world == null) return;
+
         Entity entity = mc.world.getEntityById(packet.playerId());
         if (!(entity instanceof PlayerEntity player)) return;
 
@@ -174,19 +196,23 @@ public class JoinWatcher extends Module {
         }
     }
 
-    private boolean shouldIgnoreInitialPacket(PlayerListS2CPacket packet) {
-        if (!waitingInitialJoinPacket) return false;
-        waitingInitialJoinPacket = false;
+    private void armInitialJoinSuppression() {
+        // Monotonic: a wall-clock step backwards must not leave the window stuck open and swallow every join.
+        initialJoinSuppressedUntilNanos = System.nanoTime() + INITIAL_JOIN_SUPPRESSION_NANOS;
+        initialJoinSuppressionArmed = true;
+    }
 
-        if (mc.player == null) return false;
-        UUID selfId = mc.player.getUuid();
+    private boolean isInitialJoinSuppressed() {
+        // Servers may split the initial player list over several ADD_PLAYER packets and are not required to put the
+        // local player in the first one, so suppress every addition for a short window after the play session starts.
+        if (!initialJoinSuppressionArmed) return false;
 
-        for (PlayerListS2CPacket.Entry entry : packet.getPlayerAdditionEntries()) {
-            if (entry.profile() == null) continue;
-            if (selfId.equals(entry.profile().id())) return true;
+        if (System.nanoTime() - initialJoinSuppressedUntilNanos >= 0L) {
+            initialJoinSuppressionArmed = false;
+            return false;
         }
 
-        return false;
+        return true;
     }
 
     private void processRules(String playerName, RuleTrigger trigger) {
@@ -209,17 +235,11 @@ public class JoinWatcher extends Module {
             if (rule.sendEnabled()) {
                 String command = rule.commandText().trim();
                 if (!command.isEmpty() && mc.player != null && mc.player.networkHandler != null) {
+                    // Route the immediate case through the same bookkeeping as the delayed one (the executor
+                    // runs a non-positive delay right away): a bare mc.execute task cannot be cancelled, so a
+                    // world change between queue and drain would still fire the command on the new connection.
                     int delayMs = rule.chatDelayMs();
-                    if (delayMs <= 0) {
-                        ChatUtils.sendPlayerMsg(command);
-
-                        if (autoDisableSendAfterChat.get()) {
-                            updatedRules.set(i, rule.withSendEnabled(false));
-                            changed = true;
-                        }
-                    } else {
-                        queueDelayedChatSend(i, rule, command, delayMs);
-                    }
+                    queueDelayedChatSend(i, rule, command, delayMs);
                 }
             }
         }
@@ -257,26 +277,6 @@ public class JoinWatcher extends Module {
 
         currentRules.set(targetIndex, currentRule.withSendEnabled(false));
         trackerPlayers.set(currentRules);
-    }
-
-    private int findRuleIndexForDisable(List<TrackerPlayerRule> rules, int preferredIndex, TrackerPlayerRule snapshot) {
-        if (preferredIndex >= 0 && preferredIndex < rules.size()) {
-            TrackerPlayerRule candidate = rules.get(preferredIndex);
-            if (candidate.playerName().equals(snapshot.playerName())) return preferredIndex;
-        }
-
-        for (int i = 0; i < rules.size(); i++) {
-            TrackerPlayerRule candidate = rules.get(i);
-            if (candidate.playerName().equals(snapshot.playerName())
-                && candidate.eventMode() == snapshot.eventMode()
-                && candidate.commandText().equals(snapshot.commandText())
-                && candidate.chatDelayMs() == snapshot.chatDelayMs()
-                && candidate.sendEnabled()) {
-                return i;
-            }
-        }
-
-        return -1;
     }
 
     private int findRuleIndexForDelayedSend(List<TrackerPlayerRule> rules, int preferredIndex, TrackerPlayerRule snapshot, String command) {
@@ -338,5 +338,3 @@ public class JoinWatcher extends Module {
         Death
     }
 }
-
-

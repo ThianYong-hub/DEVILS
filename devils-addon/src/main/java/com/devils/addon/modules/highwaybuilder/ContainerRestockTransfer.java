@@ -457,6 +457,3 @@ final class ContainerRestockTransfer {
         return partialObsidianSpace + emptySlots * 64;
     }
 }
-
-
-

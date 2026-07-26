@@ -234,5 +234,3 @@ record JoinSoundResolvedPlayback(
 
 record JoinSoundRuleResolution(JoinSoundResolvedSound sound, JoinSoundPlaybackStatus status, String message) {
 }
-
-

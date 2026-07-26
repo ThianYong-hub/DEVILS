@@ -255,5 +255,3 @@ public final class AutoLoginTextRules {
         };
     }
 }
-
-

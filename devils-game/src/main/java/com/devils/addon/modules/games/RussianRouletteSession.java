@@ -250,4 +250,3 @@ final class RussianRouletteSession {
         for (int i = 0; i < spentChambers.length; i++) spentChambers[i] = false;
     }
 }
-

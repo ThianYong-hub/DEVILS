@@ -191,7 +191,7 @@ public final class AutoPearlTrajectory {
             if (state.getHardness(mc.world, pos) < 0) return;
 
             int pickSlot = findPickaxeSlot();
-            if (pickSlot != -1) InvUtils.swap(pickSlot, false);
+            if (pickSlot != -1) InvUtils.swap(pickSlot, true);
             mc.interactionManager.attackBlock(pos, Direction.UP);
             if (pickSlot != -1) InvUtils.swapBack();
         }
@@ -257,4 +257,3 @@ public final class AutoPearlTrajectory {
         }
     }
 }
-

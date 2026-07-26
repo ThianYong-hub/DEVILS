@@ -118,4 +118,3 @@ final class MiniGamesRuntimeSupport {
         return value == null ? "" : value;
     }
 }
-

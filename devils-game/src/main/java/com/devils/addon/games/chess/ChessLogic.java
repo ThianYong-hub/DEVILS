@@ -148,4 +148,3 @@ public final class ChessLogic {
         return whiteMinor == 1 && blackMinor == 1 && whiteBishopColor >= 0 && whiteBishopColor == blackBishopColor;
     }
 }
-

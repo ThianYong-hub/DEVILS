@@ -462,7 +462,7 @@ public class AntiWasp extends Module {
             return;
         }
 
-        InvUtils.swap(slot, false);
+        InvUtils.swap(slot, true);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         InvUtils.swapBack();
     }
@@ -475,5 +475,3 @@ public class AntiWasp extends Module {
     }
 
 }
-
-

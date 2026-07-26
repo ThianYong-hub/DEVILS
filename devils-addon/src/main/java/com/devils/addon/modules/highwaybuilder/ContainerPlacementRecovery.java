@@ -123,6 +123,3 @@ final class ContainerPlacementRecovery {
         return dx * dx + dz * dz;
     }
 }
-
-
-

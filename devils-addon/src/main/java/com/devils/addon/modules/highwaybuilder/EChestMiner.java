@@ -445,4 +445,3 @@ public class EChestMiner {
         EChestMinerSupport.clearPathfinderGoal(module);
     }
 }
-

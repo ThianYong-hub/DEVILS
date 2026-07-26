@@ -232,5 +232,3 @@ public final class PingSyncCodec {
         return URI.create(baseUrl + path + "?" + query);
     }
 }
-
-

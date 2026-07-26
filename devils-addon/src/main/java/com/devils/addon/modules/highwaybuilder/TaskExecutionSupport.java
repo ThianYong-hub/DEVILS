@@ -158,6 +158,3 @@ final class TaskExecutionSupport {
         return best <= module.maxReach.get() + CONTAINER_BREAK_EXTRA_REACH + 0.15;
     }
 }
-
-
-

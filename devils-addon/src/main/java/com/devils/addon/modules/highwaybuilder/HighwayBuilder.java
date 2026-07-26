@@ -490,9 +490,3 @@ public class HighwayBuilder extends HighwayBuilderConfig {
         EntityType.STRIDER
     );
 }
-
-
-
-
-
-

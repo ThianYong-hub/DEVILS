@@ -138,6 +138,18 @@ public final class MapIconManager {
         }
     }
 
+    private static String textureToken(String cacheKey) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] h = md.digest(cacheKey.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(32);
+            for (int i = 0; i < 16; i++) sb.append(Character.forDigit((h[i] >> 4) & 0xF, 16)).append(Character.forDigit(h[i] & 0xF, 16));
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(cacheKey.hashCode());
+        }
+    }
+
     private static CachedIcon loadAndRegister(String cacheKey, Path path, long lastModified, long size) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null) return null;
@@ -152,7 +164,7 @@ public final class MapIconManager {
             if (prepared == null || prepared.getWidth() <= 0 || prepared.getHeight() <= 0) return null;
             Crop preparedCrop = computeOpaqueCrop(prepared);
 
-            Identifier id = Identifier.of("devils-addon", DYNAMIC_TEXTURE_PREFIX + Integer.toHexString(cacheKey.hashCode()));
+            Identifier id = Identifier.of("devils-addon", DYNAMIC_TEXTURE_PREFIX + textureToken(cacheKey));
             NativeImageBackedTexture texture = new NativeImageBackedTexture(() -> "devils-map-icon:" + cacheKey, prepared);
             TextureManager textureManager = mc.getTextureManager();
             textureManager.destroyTexture(id);
@@ -191,7 +203,7 @@ public final class MapIconManager {
             if (prepared == null || prepared.getWidth() <= 0 || prepared.getHeight() <= 0) return null;
             Crop preparedCrop = computeOpaqueCrop(prepared);
 
-            Identifier id = Identifier.of("devils-addon", DYNAMIC_TEXTURE_PREFIX + Integer.toHexString(cacheKey.hashCode()));
+            Identifier id = Identifier.of("devils-addon", DYNAMIC_TEXTURE_PREFIX + textureToken(cacheKey));
             NativeImageBackedTexture texture = new NativeImageBackedTexture(() -> "devils-map-icon:" + cacheKey, prepared);
             TextureManager textureManager = mc.getTextureManager();
             textureManager.destroyTexture(id);
@@ -408,5 +420,3 @@ public final class MapIconManager {
         long sizeBytes
     ) {}
 }
-
-

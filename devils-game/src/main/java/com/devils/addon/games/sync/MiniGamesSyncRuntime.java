@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -146,14 +145,14 @@ public final class MiniGamesSyncRuntime {
     }
     public SessionView sessionView(GameType game) {
         if (game == null) return SessionView.inactive(game, "bad-game");
-        if (local.hostedSession != null && local.hostedSession.isFor(game) && local.hostedSession.isActive()) {
+        if (local.hostedSession != null && local.hostedSession.isFor(game)) {
             boolean whiteTurn = isWhiteTurn(game, local.hostedSession.boardState);
             return new SessionView(
                 game,
                 true,
                 true,
                 true,
-                whiteTurn,
+                whiteTurn && local.hostedSession.isActive(),
                 local.hostedSession.sessionId,
                 local.hostedSession.boardState,
                 local.hostedSession.status,
@@ -175,7 +174,7 @@ public final class MiniGamesSyncRuntime {
                 true,
                 false,
                 false,
-                !whiteTurn && hostSession.isActive(),
+                !whiteTurn && hostSession.isActive() && local.guestMove == null,
                 hostSession.sessionId,
                 hostSession.boardState,
                 hostSession.status,
@@ -212,7 +211,11 @@ public final class MiniGamesSyncRuntime {
         if (local.guestSession == null || !local.guestSession.isFor(game)) {
             return MoveSubmitResult.fail("guest-session-missing");
         }
-        int nextSeq = local.guestMove == null ? 1 : local.guestMove.seq + 1;
+        PresenceRecord hostRow = rowsByDevice.get(local.guestSession.hostDeviceId);
+        HostedSession hostSession = hostRow == null ? null : hostRow.hostedSession;
+        int processed = hostSession == null ? 0 : hostSession.processedGuestSeq;
+        int lastLocal = local.guestMove == null ? 0 : local.guestMove.seq;
+        int nextSeq = Math.max(processed, lastLocal) + 1;
         local.guestMove = new GuestMove(local.guestSession.sessionId, safe(moveText).trim(), nextSeq, System.currentTimeMillis());
         dirtyLocal = true;
         return MoveSubmitResult.success();
@@ -351,8 +354,7 @@ public final class MiniGamesSyncRuntime {
         for (String key : remove) rowsByDevice.remove(key);
     }
     private void runSyncCycleAsync(SyncRuntimeConfig cfg) {
-        HashMap<String, PresenceRecord> snapshot = new HashMap<>(rowsByDevice);
-        snapshot.put(local.deviceId, local.copy());
+        final PresenceRecord localRow = local.copy();
         CompletableFuture.runAsync(() -> {
             SyncCycleResult result;
             try {
@@ -369,7 +371,7 @@ public final class MiniGamesSyncRuntime {
                     result = SyncCycleResult.error("pull-rejected:" + safe(pull.error()));
                 } else {
                     HashMap<String, PresenceRecord> mergedRows = decodeRows(pull.rows());
-                    mergedRows.put(local.deviceId, local.copy());
+                    mergedRows.put(localRow.deviceId, localRow);
                     List<MiniGamesSyncCodec.SyncRow> payloadRows = encodeRows(mergedRows);
                     String fingerprint = codec.computeFingerprint(payloadRows);
                     boolean shouldPush = dirtyLocal || !fingerprint.equals(lastFingerprint);
@@ -389,13 +391,13 @@ public final class MiniGamesSyncRuntime {
                         );
                         if (push.conflict() || !push.applied()) {
                             HashMap<String, PresenceRecord> conflictRows = push.rows().isEmpty() ? mergedRows : decodeRows(push.rows());
-                            conflictRows.put(local.deviceId, local.copy());
+                            conflictRows.put(localRow.deviceId, localRow);
                             result = SyncCycleResult.conflict(conflictRows, push.revision(), fingerprint, safe(push.error()));
                         } else if (!push.ok()) {
                             result = SyncCycleResult.error("push-rejected:" + safe(push.error()));
                         } else {
                             HashMap<String, PresenceRecord> appliedRows = push.rows().isEmpty() ? mergedRows : decodeRows(push.rows());
-                            appliedRows.put(local.deviceId, local.copy());
+                            appliedRows.put(localRow.deviceId, localRow);
                             result = SyncCycleResult.ok(appliedRows, push.revision(), fingerprint);
                         }
                     }
@@ -480,4 +482,3 @@ public final class MiniGamesSyncRuntime {
         );
     }
 }
-

@@ -3,6 +3,7 @@ package com.devils.addon.modules.autocraft;
 public final class AutoCraftPolicies {
     public static final long DEFAULT_AUTO_OPEN_RETRY_TICKS = 20;
     public static final long DEFAULT_MANUAL_CLOSE_SUPPRESSION_TICKS = 60;
+    public static final long DEFAULT_BLOCKED_STALL_TICKS = 200;
     public static final int UNLIMITED_LIMIT = 0;
 
     private AutoCraftPolicies() {}

@@ -116,4 +116,3 @@ public final class MiniGamesContracts {
         return value == null ? "" : value;
     }
 }
-

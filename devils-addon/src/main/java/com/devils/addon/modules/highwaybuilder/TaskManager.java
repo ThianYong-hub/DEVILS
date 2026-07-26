@@ -262,9 +262,6 @@ public class TaskManager {
             return;
         }
 
-        if (module.storageManagement.get()) {
-        }
-
         if (module.inventoryHandler.waitTicks > 0) module.inventoryHandler.waitTicks--;
 
         List<BlockTask> sorted = new ArrayList<>(tasks.values());
@@ -335,6 +332,3 @@ public class TaskManager {
         module.containerHandler.grindCycles = 0;
     }
 }
-
-
-

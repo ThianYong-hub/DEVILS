@@ -10,7 +10,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gl.RenderPipelines;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.util.Identifier;
 final class ChessOverlayWindow {
     private static final int DARK_BG = 0xCF0D121B;
@@ -148,10 +147,11 @@ final class ChessOverlayWindow {
             return true;
         }
         if (inside(mouseX, mouseY, l.boardX, l.boardY, l.boardSize, l.boardSize)) {
-            SessionView syncSession = session.prepare(mode);
-            boolean whiteBottom = session.resolveOrientation(mode, syncSession);
             int drawX = (mouseX - l.boardX) / l.cell;
             int drawY = (mouseY - l.boardY) / l.cell;
+            if (drawX < 0 || drawX > 7 || drawY < 0 || drawY > 7) return true; // edge pixel, ignore
+            SessionView syncSession = session.prepare(mode);
+            boolean whiteBottom = session.resolveOrientation(mode, syncSession);
             int boardX = whiteBottom ? drawX : 7 - drawX;
             int boardY = whiteBottom ? drawY : 7 - drawY;
             session.onBoardClick(mode, boardX, boardY, syncSession);
@@ -477,4 +477,3 @@ final class ChessOverlayWindow {
     ) {
     }
 }
-

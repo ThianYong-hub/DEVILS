@@ -450,5 +450,3 @@ public class AutoWasp extends Module {
         }
     }
 }
-
-

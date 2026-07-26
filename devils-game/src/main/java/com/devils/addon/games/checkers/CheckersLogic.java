@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Random;
 
 public final class CheckersLogic {
     public static final String INITIAL_STATE = "b.b.b.b./.b.b.b.b/b.b.b.b./......../......../.w.w.w.w/w.w.w.w./.w.w.w.w w";
@@ -290,11 +289,11 @@ public final class CheckersLogic {
                 cx += dx;
                 cy += dy;
             }
+            if (piece == 'w' && to.y == 0) piece = 'W';
+            else if (piece == 'b' && to.y == 7) piece = 'B';
         }
 
         Coord end = path.get(path.size() - 1);
-        if (piece == 'w' && end.y == 0) piece = 'W';
-        else if (piece == 'b' && end.y == 7) piece = 'B';
         position.board[end.y][end.x] = piece;
         position.whiteTurn = !position.whiteTurn;
     }
@@ -354,4 +353,3 @@ public final class CheckersLogic {
         }
     }
 }
-

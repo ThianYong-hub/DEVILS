@@ -465,12 +465,14 @@ def namespace_from_payload(payload: dict[str, Any]) -> str:
 
 def clamp_stream_wait_ms(wait_ms_raw: int, wait_cap: int) -> int:
     cap = max(0, int_value(wait_cap, PULL_WAIT_MAX_MS_DEFAULT))
-    if cap <= 0:
-        return 0
 
     requested = int_value(wait_ms_raw, 0)
     if requested <= 0:
-        requested = cap
+        requested = cap if cap > 0 else PULL_WAIT_MAX_MS_DEFAULT
+
+    if cap <= 0:
+        # Cap disabled: never return 0, which would busy-spin the stream loop.
+        return max(1_000, requested)
 
     # Keep stream loops from becoming a busy-spin, but never exceed configured cap.
     floor = 2_500 if cap >= 2_500 else 1
@@ -509,6 +511,19 @@ def _ping_created_at(profile: dict[str, Any]) -> int:
         if not isinstance(parsed, dict):
             return 0
         return max(0, int_value(parsed.get("createdAt"), 0))
+    except Exception:
+        return 0
+
+
+def _profile_recency(profile: dict[str, Any]) -> int:
+    payload = string_value(profile.get("password")).strip()
+    if not payload:
+        return 0
+    try:
+        parsed = json.loads(payload)
+        if not isinstance(parsed, dict):
+            return 0
+        return max(0, int_value(parsed.get("lastSeen"), 0), int_value(parsed.get("createdAt"), 0))
     except Exception:
         return 0
 
@@ -614,9 +629,10 @@ def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str,
         if isinstance(item, dict):
             out.append(normalize_profile(item))
 
-    if module != "ping":
+    if module != "ping" and module not in GAME_MODULES:
         return out
 
+    recency = _ping_created_at if module == "ping" else _profile_recency
     dedup: dict[str, tuple[dict[str, Any], int]] = {}
     for profile in out:
         key = (
@@ -624,7 +640,7 @@ def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str,
             + "|"
             + string_value(profile.get("server")).strip().lower()
         )
-        created_at = _ping_created_at(profile)
+        created_at = recency(profile)
         prev = dedup.get(key)
         if prev is None or created_at >= prev[1]:
             dedup[key] = (profile, created_at)
@@ -632,7 +648,7 @@ def normalize_profiles(items: Any, namespace: str = "default") -> list[dict[str,
     merged = [entry[0] for entry in dedup.values()]
     merged.sort(
         key=lambda profile: (
-            -_ping_created_at(profile),
+            -recency(profile),
             string_value(profile.get("username")).strip().lower(),
             string_value(profile.get("server")).strip().lower(),
         )
@@ -803,12 +819,12 @@ class SyncStore:
         module_dir = self.namespaces_dir / slugify(module)
         return canonical, module, module_dir / f"{slugify(local_key)}.json"
 
-    def _save_json_atomic(self, path: Path, payload: dict[str, Any]) -> None:
+    def _save_json_atomic(self, path: Path, payload: dict[str, Any], rotate_backup: bool = True) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(path.suffix + ".tmp")
         bak = path.with_suffix(path.suffix + ".bak")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        if path.exists():
+        if rotate_backup and path.exists():
             try:
                 path.replace(bak)
             except Exception:
@@ -824,7 +840,7 @@ class SyncStore:
                 raw = json.loads(candidate.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     if candidate == bak:
-                        self._save_json_atomic(path, raw)
+                        self._save_json_atomic(path, raw, rotate_backup=False)
                     return raw
             except Exception:
                 continue
@@ -1155,6 +1171,22 @@ class SyncStore:
                     break
             return out
 
+    def health(self) -> dict[str, Any]:
+        with self.lock:
+            ns_count = len(self.namespaces)
+            if self.namespaces_dir.exists():
+                seen = set(self.namespaces.keys())
+                for pattern in ('*/*/*.json', '*/*.json'):
+                    for fp in self.namespaces_dir.glob(pattern):
+                        seen.add(fp.stem)
+                ns_count = max(len(seen), 1)
+            return {
+                'version': self.state.get('version'),
+                'namespaces': ns_count,
+                'clients': len(self.state.get('clients', {})),
+                'events': len(self.state.get('events', [])),
+            }
+
     def admin_snapshot(self, namespace: str | None) -> dict[str, Any]:
         with self.lock:
             if namespace:
@@ -1352,11 +1384,11 @@ class SyncHandler(BaseHTTPRequestHandler):
             expected = admin_token if admin_token else token
             if not expected:
                 return True
-            return auth == f'Bearer {expected}'
+            return hmac.compare_digest(auth.encode('utf-8', 'surrogatepass'), f'Bearer {expected}'.encode('utf-8'))
 
         if not token:
             return True
-        return auth == f'Bearer {token}'
+        return hmac.compare_digest(auth.encode('utf-8', 'surrogatepass'), f'Bearer {token}'.encode('utf-8'))
 
     def _verify_signature(self, body: bytes) -> tuple[bool, str]:
         require_signed = bool(getattr(self.server, 'require_signed', False))
@@ -1422,16 +1454,16 @@ class SyncHandler(BaseHTTPRequestHandler):
         store = self._state()
 
         if path == '/health':
-            snap = store.admin_snapshot(None)
+            h = store.health()
             self._json(
                 200,
                 {
                     'ok': True,
                     'serverTime': self._server_time(),
-                    'version': snap.get('version'),
-                    'namespaces': len(snap.get('namespaces', {})),
-                    'clients': len(snap.get('clients', {})),
-                    'events': len(snap.get('events', [])),
+                    'version': h['version'],
+                    'namespaces': h['namespaces'],
+                    'clients': h['clients'],
+                    'events': h['events'],
                 },
             )
             return

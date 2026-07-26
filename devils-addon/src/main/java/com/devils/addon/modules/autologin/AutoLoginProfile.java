@@ -115,5 +115,3 @@ public final class AutoLoginProfile implements ISerializable<AutoLoginProfile> {
     ) {
     }
 }
-
-

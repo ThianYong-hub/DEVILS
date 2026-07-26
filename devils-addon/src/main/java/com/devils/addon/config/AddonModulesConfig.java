@@ -334,5 +334,3 @@ public final class AddonModulesConfig {
         writeJsonTag(path, tag);
     }
 }
-
-

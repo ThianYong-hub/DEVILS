@@ -8,7 +8,6 @@ import meteordevelopment.meteorclient.renderer.Renderer2D;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.color.Color;
-import net.minecraft.client.gl.RenderPipelines;
 import org.joml.Vector3d;
 
 public final class PingRenderController {
@@ -118,7 +117,14 @@ public final class PingRenderController {
         String pingPrefix = "[PING] " + sender;
         String coords = PingFormattingUtils.formatCoords(marker.x(), marker.y(), marker.z());
         return switch (module.infoModeValue()) {
-            case Distance -> pingPrefix;
+            case Distance -> {
+                net.minecraft.client.network.ClientPlayerEntity player = module.client().player;
+                double dx = marker.x() - player.getX();
+                double dy = marker.y() - player.getY();
+                double dz = marker.z() - player.getZ();
+                long dist = Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz));
+                yield pingPrefix + " | " + dist + "m";
+            }
             case Coords -> pingPrefix + " | " + coords;
         };
     }
@@ -153,5 +159,3 @@ public final class PingRenderController {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 }
-
-

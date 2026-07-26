@@ -154,7 +154,8 @@ record SyncCycleResult(
     boolean localChanged,
     List<SyncPingData> snapshot,
     String snapshotFingerprint,
-    String error
+    String error,
+    boolean snapshotAuthoritative
 ) {
 }
 
@@ -207,5 +208,3 @@ record SyncRuntimeConfig(
     String signingKey
 ) {
 }
-
-

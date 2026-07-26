@@ -41,6 +41,7 @@ public final class AutoCraftSessionController {
     private long lastAutoOpenAttemptTick = -1;
     private long autoOpenSuppressedUntilTick = -1;
     private long lastProgrammaticCloseTick = -1;
+    private long blockedSinceTick = -1;
     private int autoOpenedSyncId = -1;
     private String status = "idle";
 
@@ -59,6 +60,7 @@ public final class AutoCraftSessionController {
         lastAutoOpenAttemptTick = -1;
         autoOpenSuppressedUntilTick = -1;
         lastProgrammaticCloseTick = -1;
+        blockedSinceTick = -1;
         autoOpenedSyncId = -1;
         status = "idle";
     }
@@ -92,6 +94,7 @@ public final class AutoCraftSessionController {
 
             TickResult result = executor.tick(handler);
             if (result.reason() != null && !result.reason().isBlank()) status = result.reason();
+            if (result.outcome() != Outcome.BLOCKED) blockedSinceTick = -1;
 
             if (result.outcome() == Outcome.ACTION) {
                 nextActionTick = tickCounter + module.delay();
@@ -109,6 +112,14 @@ public final class AutoCraftSessionController {
             }
 
             if (result.outcome() == Outcome.BLOCKED) {
+                if (blockedSinceTick < 0) blockedSinceTick = tickCounter;
+                if (tickCounter - blockedSinceTick >= AutoCraftPolicies.DEFAULT_BLOCKED_STALL_TICKS) {
+                    blockedSinceTick = -1;
+                    String base = (result.reason() == null || result.reason().isBlank())
+                        ? "step stalled" : result.reason() + " (stalled)";
+                    invalidatePlan(base);
+                    return;
+                }
                 nextCycleTick = tickCounter + module.frequency();
                 return;
             }
@@ -256,6 +267,7 @@ public final class AutoCraftSessionController {
         executor.reset();
         currentPlan = null;
         stepIndex = 0;
+        blockedSinceTick = -1;
         nextCycleTick = tickCounter + module.frequency();
         status = reason == null || reason.isBlank() ? "plan invalidated" : reason;
     }

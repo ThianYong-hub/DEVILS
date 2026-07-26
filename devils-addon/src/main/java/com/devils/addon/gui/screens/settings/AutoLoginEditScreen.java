@@ -162,6 +162,3 @@ public class AutoLoginEditScreen extends WindowScreen {
         return builder.toString().toLowerCase(Locale.ROOT);
     }
 }
-
-
-

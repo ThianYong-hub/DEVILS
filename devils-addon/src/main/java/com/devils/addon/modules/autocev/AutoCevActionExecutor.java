@@ -279,7 +279,11 @@ public final class AutoCevActionExecutor {
         Runnable mine = () -> {
             if (module.client().interactionManager == null) return;
             module.debug("attack block -> " + module.formatPos(pos) + " dir=UP");
-            module.client().interactionManager.attackBlock(pos, Direction.UP);
+            if (isBreakingBlock(pos)) {
+                module.client().interactionManager.updateBlockBreakingProgress(pos, Direction.UP);
+            } else {
+                module.client().interactionManager.attackBlock(pos, Direction.UP);
+            }
             swing(Hand.MAIN_HAND);
         };
 
@@ -371,5 +375,3 @@ public final class AutoCevActionExecutor {
         return ((ClientPlayerInteractionManagerInvoker) module.client().interactionManager).devilsAddon$isCurrentlyBreaking(pos);
     }
 }
-
-

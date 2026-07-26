@@ -20,9 +20,7 @@ import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
@@ -109,16 +107,18 @@ public class LavaBucket extends Module {
             return;
         }
 
+        timer = delay.get();
+
         if (dropLava.get()) dropAllLavaBuckets();
 
-        if (!dropLava.get() && !hasEmptySlot()) {
+        FindItemResult bucket = ensureBucketAvailable();
+        if (!bucket.found()) return;
+
+        if (!dropLava.get() && usedBucketStackCount(bucket) > 1 && !hasEmptySlot()) {
             error("Inventory full.");
             toggle();
             return;
         }
-
-        FindItemResult bucket = ensureBucketAvailable();
-        if (!bucket.found()) return;
 
         BlockPos lavaPos = findClosestLavaSource();
         if (lavaPos == null) return;
@@ -209,29 +209,8 @@ public class LavaBucket extends Module {
 
             ActionResult itemResult = mc.interactionManager.interactItem(mc.player, hand);
 
-            // Fallback path: explicit block interaction if generic use did not consume.
-            if (!itemResult.isAccepted() && !didCollect(emptyBefore, lavaBefore)) {
-                Direction side = Direction.UP;
-                for (Direction direction : Direction.values()) {
-                    ActionResult blockResult = mc.interactionManager.interactBlock(
-                        mc.player,
-                        hand,
-                        new BlockHitResult(hitPos, direction, pos, false)
-                    );
-
-                    if (blockResult.isAccepted()) {
-                        side = direction;
-                        break;
-                    }
-                }
-
-                // Retry once with the best known side in case first pass was inconclusive.
-                mc.interactionManager.interactBlock(mc.player, hand, new BlockHitResult(hitPos, side, pos, false));
-            }
-
-            if (didCollect(emptyBefore, lavaBefore)) {
+            if (itemResult.isAccepted() || didCollect(emptyBefore, lavaBefore)) {
                 swing(hand);
-                timer = delay.get();
             }
 
             if (swapped) InvUtils.swapBack();
@@ -244,6 +223,12 @@ public class LavaBucket extends Module {
         }
     }
 
+    private int usedBucketStackCount(FindItemResult bucket) {
+        Hand hand = bucket.getHand();
+        if (hand == Hand.OFF_HAND) return mc.player.getOffHandStack().getCount();
+        return mc.player.getInventory().getStack(bucket.slot()).getCount();
+    }
+
     private boolean hasEmptySlot() {
         for (int i = 0; i < 36; i++) {
             if (mc.player.getInventory().getStack(i).isEmpty()) return true;
@@ -253,6 +238,7 @@ public class LavaBucket extends Module {
 
     private void dropAllLavaBuckets() {
         if (mc.interactionManager == null) return;
+        if (!(mc.player.currentScreenHandler instanceof net.minecraft.screen.PlayerScreenHandler)) return;
         int syncId = mc.player.currentScreenHandler.syncId;
 
         // Hotbar: inventory 0-8 → screen handler 36-44
@@ -304,5 +290,3 @@ public class LavaBucket extends Module {
         Lowest
     }
 }
-
-

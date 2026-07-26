@@ -182,6 +182,10 @@ public class AutoCev extends Module {
 
         activeBase = plan.pos();
         activeType = plan.type();
+        if (instaMinePos != null && planner.baseNeedsPlacement(instaMinePos)) {
+            debug("clear insta pos -> tracked block broken " + formatPos(instaMinePos));
+            instaMinePos = null;
+        }
         debug("plan -> " + planSummary(plan));
         executor.executePlan(plan);
     }
@@ -368,5 +372,3 @@ public class AutoCev extends Module {
         HEAD_BLOCKER
     }
 }
-
-

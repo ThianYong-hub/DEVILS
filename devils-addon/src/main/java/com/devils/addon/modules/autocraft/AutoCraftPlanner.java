@@ -130,16 +130,18 @@ public final class AutoCraftPlanner {
     private Plan tryPlanRoot(String targetItemId, RecipeDefinition rootRecipe, int batches, PlannerInput input) {
         if (batches <= 0) return null;
 
-        int producedCount = rootRecipe.outputCount() * batches;
+        WorkingState state = new WorkingState(input.inventory());
+        int cappedBatches = Math.min(batches, state.recipeFillCap(rootRecipe));
+
+        int producedCount = rootRecipe.outputCount() * cappedBatches;
         if (input.remainingLimit() > 0 && producedCount > input.remainingLimit()) return null;
 
-        WorkingState state = new WorkingState(input.inventory());
-        if (!craftRecipe(rootRecipe, batches, true, state, input, new LinkedHashSet<>())) return null;
+        if (!craftRecipe(rootRecipe, cappedBatches, true, state, input, new LinkedHashSet<>())) return null;
 
         return new Plan(
             targetItemId,
             producedCount,
-            batches,
+            cappedBatches,
             List.copyOf(state.steps),
             state.requiresThreeByThree
         );
@@ -227,6 +229,7 @@ public final class AutoCraftPlanner {
             for (RecipeDefinition recipe : recipes) {
                 WorkingState branch = state.copy();
                 int batches = AutoCraftModels.ceilDiv(remaining, recipe.outputCount());
+                batches = Math.min(batches, branch.recipeFillCap(recipe));
                 if (!craftRecipe(recipe, batches, false, branch, input, activeOutputs)) continue;
 
                 if (branch.consume(itemId, remaining) < remaining) continue;
@@ -375,6 +378,21 @@ public final class AutoCraftPlanner {
                 used += AutoCraftModels.ceilDiv(entry.getValue(), stackSize);
             }
             return used;
+        }
+
+        private int recipeFillCap(RecipeDefinition recipe) {
+            int cap = Integer.MAX_VALUE;
+            for (IngredientSpec ingredient : recipe.ingredients()) {
+                if (ingredient == null || ingredient.isEmpty()) continue;
+
+                int smallest = Integer.MAX_VALUE;
+                for (String itemId : ingredient.matchingItemIds()) {
+                    smallest = Math.min(smallest, Math.max(1, stackSizes.getOrDefault(itemId, 64)));
+                }
+                if (smallest == Integer.MAX_VALUE) smallest = 64;
+                cap = Math.min(cap, smallest);
+            }
+            return cap == Integer.MAX_VALUE ? 1 : cap;
         }
     }
 }

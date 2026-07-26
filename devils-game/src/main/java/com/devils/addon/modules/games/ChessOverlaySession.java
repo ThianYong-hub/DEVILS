@@ -37,6 +37,7 @@ final class ChessOverlaySession {
     void onActivate(ChessOverlay.PlayMode mode) {
         clearSelection();
         statusText = "";
+        pendingStockfishFuture = null;
         botRequestId++;
         if (mode == ChessOverlay.PlayMode.STOCKFISH) {
             initEngine();
@@ -348,4 +349,3 @@ final class ChessOverlaySession {
     private record StockfishBotResult(long requestId, String fenSnapshot, String bestMove, int depth, int score) {
     }
 }
-

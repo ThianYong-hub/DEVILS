@@ -315,7 +315,3 @@ final class TrackerPlayersSettingUi {
         }
     }
 }
-
-
-
-

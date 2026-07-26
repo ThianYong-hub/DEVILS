@@ -99,7 +99,9 @@ public final class PingMarkerController {
         String serverKey = PingFormattingUtils.normalizeServerKey(module.currentServerKey());
         ArrayList<PingMarker> visible = new ArrayList<>();
         for (PingMarker marker : markers.values()) {
-            if (marker != null && isMarkerAudienceAllowed(marker, serverKey)) visible.add(marker);
+            if (marker == null || !isMarkerAudienceAllowed(marker, serverKey)) continue;
+            if (!isMarkerInCurrentDimension(marker)) continue;
+            if (isMarkerVisibleForSenderState(marker)) visible.add(marker);
         }
 
         visible.sort(Comparator.comparingLong(PingMarker::createdAtMs).reversed());
@@ -113,6 +115,8 @@ public final class PingMarkerController {
         ArrayList<Ping.MarkerJumpTarget> targets = new ArrayList<>();
         for (PingMarker marker : markers.values()) {
             if (marker == null || !isMarkerAudienceAllowed(marker, serverKey)) continue;
+            if (!isMarkerInCurrentDimension(marker)) continue;
+            if (!isMarkerVisibleForSenderState(marker)) continue;
             targets.add(new Ping.MarkerJumpTarget(
                 marker.id(),
                 marker.sender(),
@@ -230,6 +234,25 @@ public final class PingMarkerController {
     public boolean isMarkerAlive(PingMarker marker, long nowMs) {
         long age = nowMs - marker.createdAtMs();
         return age >= 0 && age <= PingConstants.MARKER_TTL_MS;
+    }
+
+    // "logout-spots" (default off) only governs markers whose sender was ever a loaded, in-view local entity:
+    // once that sender unloads the marker is hidden unless the setting keeps it. Purely-remote synced markers
+    // (a teammate across the map who was never loaded here) have no local sender state and must always render,
+    // otherwise the whole ping-sharing feature would show nothing.
+    private boolean isMarkerVisibleForSenderState(PingMarker marker) {
+        boolean senderLoaded = findLoadedPlayer(marker.sender()) != null;
+        boolean everSeenLocally = logoutSpotEligible.getOrDefault(marker.id(), false);
+        return senderLoaded || !everSeenLocally || module.logoutSpotsEnabled();
+    }
+
+    // A ping in another dimension points at meaningless coordinates here, so hide it from both the
+    // rendered markers and the jump-target list (kept in lock-step). Unknown dimensions are allowed.
+    private boolean isMarkerInCurrentDimension(PingMarker marker) {
+        if (module.client().world == null) return true;
+        String currentDim = PingFormattingUtils.normalizeKey(module.client().world.getRegistryKey().getValue().toString());
+        String markerDim = PingFormattingUtils.normalizeKey(marker.dimension());
+        return markerDim.isBlank() || currentDim.isBlank() || markerDim.equals(currentDim);
     }
 
     private boolean isMarkerAudienceAllowed(PingMarker marker, String normalizedServerKey) {
@@ -366,11 +389,9 @@ public final class PingMarkerController {
         if (!schema.isBlank() && !PingConstants.MARKER_SCHEMA.equals(schema)) return null;
 
         String senderDevice = SyncJsonUtils.readString(json, "senderDevice", "");
-        String dimension = SyncJsonUtils.readString(
-            json,
-            "dim",
-            module.client().world == null ? "minecraft:overworld" : module.client().world.getRegistryKey().getValue().toString()
-        );
+        net.minecraft.client.world.ClientWorld world = module.client().world;
+        String defaultDim = world == null ? "minecraft:overworld" : world.getRegistryKey().getValue().toString();
+        String dimension = SyncJsonUtils.readString(json, "dim", defaultDim);
         double x = SyncJsonUtils.readDouble(json, "x", Double.NaN);
         double y = PingFormattingUtils.clampY(SyncJsonUtils.readDouble(json, "y", Double.NaN), PingConstants.WORLD_MIN_Y, PingConstants.WORLD_MAX_Y);
         double z = SyncJsonUtils.readDouble(json, "z", Double.NaN);
@@ -429,5 +450,3 @@ public final class PingMarkerController {
         JoinSoundPlayer.play(SoundSourceMode.LocalFolder, module.pingSoundPathValue(), PingConstants.DEFAULT_SOUND, module.pingVolumeValue());
     }
 }
-
-

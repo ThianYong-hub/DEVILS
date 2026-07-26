@@ -287,4 +287,3 @@ final class SlotMachineSession {
         return result < 0 ? result + n : result;
     }
 }
-

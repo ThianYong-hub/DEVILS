@@ -467,4 +467,3 @@ final class BlackjackSession {
         return Math.max(MIN_BET, cap);
     }
 }
-

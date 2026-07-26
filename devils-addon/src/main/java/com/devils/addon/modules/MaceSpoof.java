@@ -76,10 +76,6 @@ public class MaceSpoof extends Module {
         int blocks = getMaxHeightAbovePlayer();
         if (blocks <= 0) return;
 
-        BlockPos checkPos1 = mc.player.getBlockPos().add(0, blocks, 0);
-        BlockPos checkPos2 = mc.player.getBlockPos().add(0, blocks + 1, 0);
-        if (!isSafeBlock(checkPos1) || !isSafeBlock(checkPos2)) return;
-
         int packetsRequired = (int) Math.ceil(Math.abs(blocks / 10.0));
         if (packetsRequired > 20) packetsRequired = 1;
 
@@ -147,5 +143,3 @@ public class MaceSpoof extends Module {
             && !mc.world.getBlockState(pos).isOf(Blocks.POWDER_SNOW);
     }
 }
-
-

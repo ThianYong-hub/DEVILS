@@ -278,6 +278,3 @@ final class ContainerInventorySupport {
         return count;
     }
 }
-
-
-

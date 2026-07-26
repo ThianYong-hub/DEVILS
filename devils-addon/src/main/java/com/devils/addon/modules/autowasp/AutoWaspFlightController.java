@@ -402,5 +402,3 @@ public final class AutoWaspFlightController {
         return maxDistance;
     }
 }
-
-

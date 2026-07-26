@@ -61,7 +61,6 @@ public final class AutoCevPlanner {
         if (head != null && head.type() == AutoCev.PlanType.HEAD) return preferActive(head, active);
         if (active != null && (active.type() == AutoCev.PlanType.FACE || active.type() == AutoCev.PlanType.FACE_BLOCKER)) return active;
         if (face != null) return preferActive(face, active);
-        if (head != null && head.type() == AutoCev.PlanType.HEAD_BLOCKER) return head;
         return null;
     }
 
@@ -443,5 +442,3 @@ public final class AutoCevPlanner {
         return new Vec3d(base.getX() + 0.5, base.getY() + 1.0, base.getZ() + 0.5);
     }
 }
-
-

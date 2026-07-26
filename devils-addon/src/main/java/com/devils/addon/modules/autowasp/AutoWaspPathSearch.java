@@ -315,5 +315,3 @@ final class AutoWaspPathSearch {
     private record SearchResult(List<Vec3d> path, boolean complete, double bestGoalDistance) {
     }
 }
-
-

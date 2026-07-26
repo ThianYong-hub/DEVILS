@@ -278,7 +278,3 @@ public class TrackerPlayersSetting extends Setting<List<TrackerPlayerRule>> {
         return TrackerPlayersSettingUi.normalizeRuleLocalSoundValues(rule, localSounds);
     }
 }
-
-
-
-

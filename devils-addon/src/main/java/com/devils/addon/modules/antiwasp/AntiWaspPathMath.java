@@ -114,5 +114,3 @@ public final class AntiWaspPathMath {
         Triangle
     }
 }
-
-

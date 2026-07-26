@@ -65,11 +65,13 @@ public class AutoAnvilRename extends Module {
 
     private static final int STUCK_TIMEOUT = 4;
     private static final int RENAME_MISMATCH_TIMEOUT = 8;
+    private static final int STALL_TIMEOUT = 40;
 
     private int ticks;
-    // TODO: rewrite this mess later; anvil screens love getting stuck server-side.
     private int stuckCycles;
     private int renameMismatchCycles;
+    private int stallCycles;
+    private int lastAnvilState;
 
     public AutoAnvilRename() {
         super(DevilsAddon.CATEGORY, "auto-anvil-rename", "Renames matching items in an open anvil.");
@@ -80,6 +82,8 @@ public class AutoAnvilRename extends Module {
         ticks = 0;
         stuckCycles = 0;
         renameMismatchCycles = 0;
+        stallCycles = 0;
+        lastAnvilState = 0;
     }
 
     @EventHandler
@@ -106,6 +110,23 @@ public class AutoAnvilRename extends Module {
         if (ticks < clickDelay.get()) return;
         ticks = 0;
 
+        // Every action below is predicted client side, so the anvil state changes as soon as a click
+        // lands. If it never changes the screen is stuck/desynced server side and we would otherwise
+        // click forever, so bail out instead of spamming the server.
+        int state = anvilState(anvil);
+        if (state != lastAnvilState) {
+            lastAnvilState = state;
+            stallCycles = 0;
+        } else if (++stallCycles >= STALL_TIMEOUT) {
+            stallCycles = 0;
+            stuckCycles = 0;
+            renameMismatchCycles = 0;
+            lastAnvilState = 0;
+            warning("Anvil screen is stuck (no progress). Reopen it and re-enable.");
+            toggle();
+            return;
+        }
+
         if (!anvil.getCursorStack().isEmpty()) {
             for (int i = 3; i < Math.min(39, anvil.slots.size()); i++) {
                 if (anvil.getSlot(i).getStack().isEmpty()) {
@@ -126,6 +147,8 @@ public class AutoAnvilRename extends Module {
             boolean canAfford = mc.player.isCreative() || mc.player.experienceLevel >= cost;
 
             if (!canAfford) {
+                // Waiting for levels is not a stall, we simply have nothing to click yet.
+                stallCycles = 0;
                 if (autoXP.get()) {
                     int xpSlot = findHotbarItem(Items.EXPERIENCE_BOTTLE);
                     if (xpSlot != -1) {
@@ -171,6 +194,14 @@ public class AutoAnvilRename extends Module {
         stuckCycles = 0;
         renameMismatchCycles = 0;
 
+        ItemStack input1 = anvil.getSlot(1).getStack();
+        if (!input1.isEmpty()) {
+            // Rename-only flow must never leave two items in the inputs; clearing slot 1
+            // prevents the anvil from computing a combine/repair result we'd wrongly take.
+            mc.interactionManager.clickSlot(anvil.syncId, 1, 0, SlotActionType.QUICK_MOVE, mc.player);
+            return;
+        }
+
         for (int i = 3; i < Math.min(39, anvil.slots.size()); i++) {
             ItemStack stack = anvil.getSlot(i).getStack();
             if (stack.isEmpty()) continue;
@@ -179,6 +210,23 @@ public class AutoAnvilRename extends Module {
             mc.interactionManager.clickSlot(anvil.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
             return;
         }
+
+        // Nothing left to rename: idling is not a stall.
+        stallCycles = 0;
+    }
+
+    private int anvilState(AnvilScreenHandler anvil) {
+        int state = anvil.syncId;
+        state = 31 * state + stackState(anvil.getCursorStack());
+        state = 31 * state + stackState(anvil.getSlot(0).getStack());
+        state = 31 * state + stackState(anvil.getSlot(1).getStack());
+        state = 31 * state + stackState(anvil.getSlot(2).getStack());
+        return state;
+    }
+
+    private int stackState(ItemStack stack) {
+        if (stack.isEmpty()) return 0;
+        return 31 * (31 * stack.getItem().hashCode() + stack.getCount()) + stack.getName().getString().hashCode();
     }
 
     private boolean passesFilters(ItemStack stack, String targetName) {

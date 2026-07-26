@@ -135,6 +135,3 @@ public class HWUtils {
         return !mc.world.getFluidState(pos).isEmpty() && mc.world.getFluidState(pos).isStill();
     }
 }
-
-
-

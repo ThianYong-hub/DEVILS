@@ -470,6 +470,3 @@ public final class JoinSoundPlayer {
         return value;
     }
 }
-
-
-

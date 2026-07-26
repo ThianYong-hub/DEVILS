@@ -127,6 +127,3 @@ final class ContainerPickupTracker {
         return closest;
     }
 }
-
-
-

@@ -297,6 +297,3 @@ public class BlueprintGenerator {
         return task != null && task.targetBlock == module.getMaterial();
     }
 }
-
-
-

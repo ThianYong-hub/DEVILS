@@ -128,6 +128,3 @@ public class PacketHandler {
         return slot < containerSlots;
     }
 }
-
-
-

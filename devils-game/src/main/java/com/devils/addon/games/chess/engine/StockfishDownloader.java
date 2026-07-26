@@ -144,8 +144,8 @@ public final class StockfishDownloader {
                 if (!normalized.startsWith(parent)) {
                     throw new IOException("Unsafe Stockfish archive entry: " + entry.getName());
                 }
-                if (!name.toLowerCase(Locale.ROOT).endsWith("/stockfish.exe")
-                    && !name.equalsIgnoreCase("stockfish.exe")) {
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (!lower.endsWith(".exe") || !lower.contains("stockfish")) {
                     continue;
                 }
 

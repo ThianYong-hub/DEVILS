@@ -239,5 +239,3 @@ public record TrackerPlayerRule(
         }
     }
 }
-
-

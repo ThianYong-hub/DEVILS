@@ -103,6 +103,7 @@ public final class BlackjackOverlay extends Module {
         if (mc.currentScreen instanceof WidgetScreen) return;
         if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
             GameLaunchCoordinator.closeAll();
+            event.setCancelled(true);
         }
     }
 
@@ -163,4 +164,3 @@ public final class BlackjackOverlay extends Module {
         return mc;
     }
 }
-

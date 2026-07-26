@@ -7,7 +7,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -60,6 +59,7 @@ public final class ChessEngine implements AutoCloseable {
     /** Pending bestmove future, set when a "go" command is in flight. */
     private volatile CompletableFuture<BestMoveResult> pendingFuture;
     private volatile BestMoveAccumulator currentAccumulator;
+    private volatile boolean handshakeComplete = false;
 
     private static final Pattern BESTMOVE_PATTERN =
         Pattern.compile("bestmove\\s+(\\S+)(?:\\s+ponder\\s+(\\S+))?");
@@ -253,6 +253,9 @@ public final class ChessEngine implements AutoCloseable {
         if (!waitForLine("readyok", 5000)) {
             DevilsGameAddon.LOG.warn("[ChessEngine] Timed out waiting for readyok");
         }
+
+        handshakeComplete = true;
+        lineQueue.clear();
     }
 
     private boolean waitForLine(String expected, long timeoutMs) {
@@ -286,7 +289,9 @@ public final class ChessEngine implements AutoCloseable {
                     }
                     continue;
                 }
-                lineQueue.offer(line);
+                if (!handshakeComplete) {
+                    lineQueue.offer(line);
+                }
                 processLine(line);
             }
         } catch (Exception e) {
