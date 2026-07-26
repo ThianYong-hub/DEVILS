@@ -4,12 +4,9 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Set;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -178,138 +175,6 @@ class ProjectConfigSuiteTest {
         assertTrue(mapIconManager.contains("DEFAULT_PING_ICON_PATH"));
         assertTrue(mapIconManager.contains("DEFAULT_MAP_ICON_PATH"));
         assertTrue(pingConstants.contains("MapIconManager.DEFAULT_PING_ICON_PATH"));
-    }
-
-    @Test
-    void debugArtifactIndexListsCanonicalEvidenceSet() throws IOException {
-        Path artifactDir = Path.of("..", "devils debug log").normalize();
-        assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
-        Path indexPath = artifactDir.resolve("ARTIFACT_INDEX.md");
-        assertTrue(Files.exists(indexPath), "debug log must contain ARTIFACT_INDEX.md when the artifact directory is present.");
-        String index = Files.readString(indexPath);
-
-        assertTrue(index.contains("STASHMOVER_MIGRATION_AUDIT.md"));
-        assertTrue(index.contains("STASHMOVER_ASSIMILATION_PLAN.md"));
-        assertTrue(index.contains("STASHMOVER_PEARL_ROTATION_FIX_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_OWN_PEARL_TRACKING_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_SLOT_POLICY_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_BARITONE_INTEGRATION_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_CONTAINER_AUDIT_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_STATE_MACHINE_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_LEGACY_CLEANUP_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_SETTINGS_INTEGRATION_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_LIVE_REPRO_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_PEARL_TRAJECTORY_ROOT_CAUSE_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_PEARL_TARGETING_FIX_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_POST_PEARL_PHASE_EXIT_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_MOVER_CONTINUATION_FIX_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_BARITONE_HANDOFF_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_STALL_RECOVERY_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_RUNTIME_DIAGNOSTICS_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_TARGETED_RUNTIME_VALIDATION_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_FINAL_EXECUTION_REPORT.md"));
-        assertTrue(index.contains("STASHMOVER_BUILD.log"));
-        assertTrue(index.contains("runtime-smoke.log"));
-        assertTrue(index.contains("stashmover-live-repro.log"));
-        assertTrue(index.contains("stashmover-targeted-runtime.log"));
-        assertTrue(index.contains("nukerplus-damage-time-build.log"));
-        assertTrue(index.contains("nukerplus-damage-time-audit.md"));
-        assertTrue(index.contains("nukerplus-damage-time-mechanics.md"));
-        assertTrue(index.contains("nukerplus-damage-time-benchmark.md"));
-        assertTrue(index.contains("nukerplus-damage-time-smoke.md"));
-        assertTrue(index.contains("nukerplus-damage-time-files.md"));
-        assertTrue(index.contains("nukerplus-damage-time-final-report.md"));
-        assertTrue(index.contains("runtime-main.log"));
-        assertTrue(index.contains("input-runtime.log"));
-        assertTrue(index.contains("autowasp-runtime.log"));
-        assertTrue(index.contains("stashmover-runtime.log"));
-        assertTrue(index.contains("FINAL_RUNTIME_REPORT.md"));
-        assertTrue(index.contains("ARTIFACT_INDEX.md"));
-        assertTrue(index.contains("overwrite"));
-        assertTrue(index.contains("No version suffixes"));
-    }
-
-    @Test
-    void debugLogDirectoryRemainsSmallAndWhitelistedWhenPresent() throws IOException {
-        Path artifactDir = Path.of("..", "devils debug log").normalize();
-        assumeTrue(Files.isDirectory(artifactDir), "Optional local artifact directory is absent in a clean checkout.");
-
-        List<String> files;
-        try (var stream = Files.list(artifactDir)) {
-            files = stream
-                .filter(Files::isRegularFile)
-                .map(path -> path.getFileName().toString())
-                .sorted()
-                .toList();
-        }
-
-        Set<String> allowed = Set.of(
-            "ARTIFACT_INDEX.md",
-            "STASHMOVER_MIGRATION_AUDIT.md",
-            "STASHMOVER_ASSIMILATION_PLAN.md",
-            "STASHMOVER_PEARL_ROTATION_FIX_REPORT.md",
-            "STASHMOVER_OWN_PEARL_TRACKING_REPORT.md",
-            "STASHMOVER_SLOT_POLICY_REPORT.md",
-            "STASHMOVER_BARITONE_INTEGRATION_REPORT.md",
-            "STASHMOVER_CONTAINER_AUDIT_REPORT.md",
-            "STASHMOVER_STATE_MACHINE_REPORT.md",
-            "STASHMOVER_LEGACY_CLEANUP_REPORT.md",
-            "STASHMOVER_SETTINGS_INTEGRATION_REPORT.md",
-            "STASHMOVER_LIVE_REPRO_REPORT.md",
-            "STASHMOVER_PEARL_TRAJECTORY_ROOT_CAUSE_REPORT.md",
-            "STASHMOVER_PEARL_TARGETING_FIX_REPORT.md",
-            "STASHMOVER_POST_PEARL_PHASE_EXIT_REPORT.md",
-            "STASHMOVER_MOVER_CONTINUATION_FIX_REPORT.md",
-            "STASHMOVER_BARITONE_HANDOFF_REPORT.md",
-            "STASHMOVER_STALL_RECOVERY_REPORT.md",
-            "STASHMOVER_RUNTIME_DIAGNOSTICS_REPORT.md",
-            "STASHMOVER_TARGETED_RUNTIME_VALIDATION_REPORT.md",
-            "STASHMOVER_FINAL_EXECUTION_REPORT.md",
-            "STASHMOVER_BUILD.log",
-            "runtime-smoke.log",
-            "stashmover-live-repro.log",
-            "stashmover-targeted-runtime.log",
-            "STASHMOVER_ARTIFACT_INSPECTION_NOTE.md",
-            "nukerplus-accel-build.log",
-            "nukerplus-accel-audit.md",
-            "nukerplus-accel-smoke.md",
-            "nukerplus-accel-runtime.md",
-            "nukerplus-accel-files.md",
-            "nukerplus-accel-final-report.md",
-            "nukerplus-damage-time-build.log",
-            "nukerplus-damage-time-audit.md",
-            "nukerplus-damage-time-mechanics.md",
-            "nukerplus-damage-time-benchmark.md",
-            "nukerplus-damage-time-smoke.md",
-            "nukerplus-damage-time-files.md",
-            "nukerplus-damage-time-final-report.md",
-            "runtime-main.log",
-            "input-runtime.log",
-            "autowasp-runtime.log",
-            "stashmover-runtime.log",
-            "FINAL_RUNTIME_REPORT.md"
-        );
-
-        assertTrue(files.size() <= 32, "debug log must stay small and canonical: " + files);
-        for (String file : files) {
-            assertTrue(allowed.contains(file), "Unexpected file in debug log: " + file);
-        }
-        assertFalse(
-            files.stream().anyMatch(name -> name.endsWith(".log") && !Set.of(
-                "STASHMOVER_BUILD.log",
-                "runtime-smoke.log",
-                "stashmover-live-repro.log",
-                "stashmover-targeted-runtime.log",
-                "nukerplus-accel-build.log",
-                "nukerplus-damage-time-build.log",
-                "runtime-main.log",
-                "input-runtime.log",
-                "autowasp-runtime.log",
-                "stashmover-runtime.log"
-            ).contains(name)),
-            "Only canonical raw logs may remain in debug log: " + files
-        );
-        assertTrue(files.contains("ARTIFACT_INDEX.md"), "ARTIFACT_INDEX.md must be present when debug log contains artifacts.");
     }
 
     @Test

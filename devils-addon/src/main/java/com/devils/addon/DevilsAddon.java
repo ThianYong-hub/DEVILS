@@ -25,13 +25,6 @@ import com.devils.addon.modules.stashmover.StashMoverCommand;
 import com.devils.addon.modules.stashmover.StashMover;
 import com.devils.addon.settings.TrackerPlayersSetting;
 import com.devils.addon.util.CrashGuard;
-import com.devils.addon.util.smoke.AssimilatedQualitySmoke;
-import com.devils.addon.util.smoke.AutoWaspRuntimeValidation;
-import com.devils.addon.util.smoke.InputRuntimeValidation;
-import com.devils.addon.util.smoke.NukerPlusDamageTimeRuntimeValidation;
-import com.devils.addon.util.smoke.StashMoverLiveRuntimeValidation;
-import com.devils.addon.util.smoke.StashMoverStrictRuntimeValidation;
-import com.devils.addon.util.smoke.StashMoverTargetedRuntimeValidation;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.logging.LogUtils;
@@ -56,13 +49,6 @@ public class DevilsAddon extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Addon");
         CrashGuard.installLogFilters();
-        AssimilatedQualitySmoke.install();
-        InputRuntimeValidation.install();
-        AutoWaspRuntimeValidation.install();
-        NukerPlusDamageTimeRuntimeValidation.install();
-        StashMoverLiveRuntimeValidation.install();
-        StashMoverStrictRuntimeValidation.install();
-        StashMoverTargetedRuntimeValidation.install();
         AddonModulesConfig.init();
         registerTrackerPlayersSettingFactory();
         registerModules();
@@ -149,4 +135,3 @@ public class DevilsAddon extends MeteorAddon {
         }
     }
 }
-

@@ -3,7 +3,6 @@ package com.devils.addon.games;
 import com.devils.addon.modules.games.BlackjackOverlay;
 import com.devils.addon.modules.games.CheckersOverlay;
 import com.devils.addon.modules.games.ChessOverlay;
-import com.devils.addon.modules.games.DevilsGameRecoverySmoke;
 import com.devils.addon.modules.games.DoomOverlay;
 import com.devils.addon.modules.games.GameSyncHub;
 import com.devils.addon.modules.games.RussianRouletteOverlay;
@@ -24,7 +23,6 @@ public class DevilsGameAddon extends MeteorAddon {
     public void onInitialize() {
         LOG.info("Initializing Devils Game");
         registerModules();
-        DevilsGameRecoverySmoke.install();
     }
 
     private void registerModules() {

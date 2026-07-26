@@ -32,35 +32,11 @@ val gameVersionFromProperty = (findProperty("game_version_override") as String?)
 val resolvedGameVersion = gameVersionFromEnv
     ?: gameVersionFromProperty
     ?: (properties["game_version"] as String)
-val stashMoverLiveUserWorld = (findProperty("stashMoverLiveUserWorld") as String?)
-    ?.trim()
-    ?.equals("true", ignoreCase = true)
-    ?: false
-val stashMoverLiveRealistic = (findProperty("stashMoverLiveRealistic") as String?)
-    ?.trim()
-    ?.equals("true", ignoreCase = true)
-    ?: false
-val stashMoverLiveWorldName = (findProperty("stashMoverLiveWorldName") as String?)
-    ?.trim()
-    ?.takeIf { it.isNotEmpty() }
-    ?: "Новый мир"
 val gameArchivesBaseName = properties["game_archives_base_name"] as String
 
 val minecraftVersion = properties["minecraft_version"] as String
 
-val sourceNativeModDependencies = listOf<String>()
-val remappedModCacheRoot = rootProject.file(".gradle/loom-cache/remapped_mods")
-val sourceNativeBuildRoot = rootProject.file("local-source-native/Source Native Build")
-val sourceNativeModuleDirs = listOf<java.io.File>()
-val sourceNativePatchJavaDir = file("src/main/source-native-patches/java")
-val sourceNativeBinaryJars = fileTree(remappedModCacheRoot) {
-    // External mod integrations removed — no embedded JARs
-    include("NEVER_MATCH_ANYTHING_DISABLED_*.jar")
-}
-val sourceNativeNestedJars = fileTree(sourceNativeBuildRoot) {
-    // External mod nested JARs removed
-}
-val sourceNativeVendorJars = files()
+val vendoredPatchJavaDir = file("src/main/vendored-patches/java")
 val generatedThirdPartyNoticeDir = layout.buildDirectory.dir("generated/third-party-notices")
 val generatedThirdPartyNoticeFile = generatedThirdPartyNoticeDir.map { it.file("META-INF/licenses/THIRD_PARTY_NOTICES.txt") }
 val bundledRuntimeLibs by configurations.creating {
@@ -68,25 +44,20 @@ val bundledRuntimeLibs by configurations.creating {
     isCanBeResolved = true
     isTransitive = true
 }
-val sourceNativeResourceJars by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    isTransitive = false
-}
 val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
 val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
 val relocatedMixinConfigs = setOf(
     "devils-addon.mixins.json"
 )
-val sourceNativeJavaDirs = listOf(
+val vendoredJavaDirs = listOf(
     file("src/main/thirdparty-audio/java"),
-    sourceNativePatchJavaDir
+    vendoredPatchJavaDir
 )
-val sourceNativeResourceDirs = listOf(
+val vendoredResourceDirs = listOf(
     file("src/main/thirdparty-audio/resources")
-) + sourceNativeModuleDirs
-val sourceNativeResourceExcludes = arrayOf(
+)
+val vendoredResourceExcludes = arrayOf(
     "**/*.java",
     "fabric.mod.json",
     "**/*.accesswidener",
@@ -103,16 +74,11 @@ val sourceNativeResourceExcludes = arrayOf(
     "NOTICE*",
     "COPYING*",
     "icon.png",
-    "yacl-128x.png",
     "pack.mcmeta",
     "architectury_inject_*",
     "architectury_inject_*/**"
 )
-val sourceNativeJarResourceExcludes = sourceNativeResourceExcludes + arrayOf(
-    "**/*.class",
-    "module-info.class"
-)
-val sourceNativeJavaExcludes = arrayOf(
+val vendoredJavaExcludes = arrayOf(
     "com/github/benmanes/caffeine/**",
     "net/lenni0451/lambdaevents/**",
     "architectury_inject_*/**"
@@ -122,28 +88,11 @@ val sharedMainOutput = project(":devils-shared")
     .getByType(SourceSetContainer::class.java)
     .named("main")
     .map { it.output }
-val sourceNativeClassOutputDir = layout.buildDirectory.dir("generated/source-native-classes/main")
-val extractSourceNativeRuntimeClasses by tasks.registering(Sync::class) {
-    into(sourceNativeClassOutputDir)
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    includeEmptyDirs = false
-
-    from({
-        (sourceNativeBinaryJars.files + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
-            zipTree(dependencyArtifact).matching {
-                include("**/*.class")
-                exclude("module-info.class")
-            }
-        }
-    })
-}
-
 sourceSets.named("main") {
-    sourceNativeJavaDirs.forEach { java.srcDir(it) }
-    java.exclude(*sourceNativeJavaExcludes)
+    vendoredJavaDirs.forEach { java.srcDir(it) }
+    java.exclude(*vendoredJavaExcludes)
 
     resources.setSrcDirs(listOf("src/main/resources"))
-    output.dir(mapOf("builtBy" to extractSourceNativeRuntimeClasses), sourceNativeClassOutputDir)
 }
 
 java {
@@ -160,91 +109,6 @@ base {
 
 loom {
     accessWidenerPath = file("src/main/resources/devils-addon.assimilated.accesswidener")
-    runs {
-        create("assimilatedClientSmoke") {
-            client()
-            ideConfigGenerated(false)
-            configName = "Assimilated Client Smoke"
-            runDir("run-assimilated-smoke")
-            vmArg("-Ddevils.assimilated.quality.smoke=true")
-            vmArg("-Ddevils.runtime.smoke.path=${rootProject.file("codex log/runtime-smoke.log").absolutePath}")
-        }
-        create("stashMoverTargetedRuntime") {
-            client()
-            ideConfigGenerated(false)
-            configName = "StashMover Targeted Runtime"
-            runDir("run-stashmover-targeted")
-            vmArg("-Ddevils.stashmover.targeted.runtime=true")
-            vmArg("-Ddevils.stashmover.targeted.runtime.path=${rootProject.file("codex log/stashmover-targeted-runtime.log").absolutePath}")
-        }
-        create("inputRuntimeValidation") {
-            client()
-            ideConfigGenerated(false)
-            configName = "Input Runtime Validation"
-            runDir("run-input-runtime")
-            vmArg("-Ddevils.strict.runtime.logging=true")
-            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
-            vmArg("-Ddevils.input.runtime=true")
-        }
-        create("autoWaspRuntimeValidation") {
-            client()
-            ideConfigGenerated(false)
-            configName = "AutoWasp Runtime Validation"
-            runDir("run-autowasp-runtime")
-            vmArg("-Ddevils.strict.runtime.logging=true")
-            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
-            vmArg("-Ddevils.autowasp.runtime=true")
-        }
-        create("stashMoverStrictRuntime") {
-            client()
-            ideConfigGenerated(false)
-            configName = "StashMover Strict Runtime"
-            runDir("run-stashmover-strict")
-            vmArg("-Ddevils.strict.runtime.logging=true")
-            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
-            vmArg("-Ddevils.stashmover.strict.runtime=true")
-        }
-        create("stashMoverLiveHostRuntime") {
-            client()
-            ideConfigGenerated(false)
-            configName = "StashMover Live Host Runtime"
-            runDir("run-stashmover-live-host")
-            vmArg("-Ddevils.strict.runtime.logging=true")
-            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
-            vmArg("-Ddevils.strict.runtime.actor=host")
-            vmArg("-Ddevils.stashmover.live.runtime=true")
-            vmArg("-Ddevils.stashmover.live.role=host")
-            if (stashMoverLiveRealistic) vmArg("-Ddevils.stashmover.live.realistic=true")
-            if (stashMoverLiveUserWorld) {
-                vmArg("-Ddevils.stashmover.live.userWorld=true")
-                vmArg("-Ddevils.stashmover.live.worldName=$stashMoverLiveWorldName")
-            }
-        }
-        create("stashMoverLiveGuestRuntime") {
-            client()
-            ideConfigGenerated(false)
-            configName = "StashMover Live Guest Runtime"
-            runDir("run-stashmover-live-guest")
-            vmArg("-Ddevils.strict.runtime.logging=true")
-            vmArg("-Ddevils.strict.runtime.dir=${rootProject.file("codex log").absolutePath}")
-            vmArg("-Ddevils.strict.runtime.actor=guest")
-            vmArg("-Ddevils.stashmover.live.runtime=true")
-            vmArg("-Ddevils.stashmover.live.role=guest")
-            if (stashMoverLiveRealistic) vmArg("-Ddevils.stashmover.live.realistic=true")
-            if (stashMoverLiveUserWorld) {
-                vmArg("-Ddevils.stashmover.live.userWorld=true")
-                vmArg("-Ddevils.stashmover.live.worldName=$stashMoverLiveWorldName")
-            }
-        }
-        create("nukerPlusDamageTimeRuntime") {
-            client()
-            ideConfigGenerated(false)
-            configName = "NukerPlus Damage-Time Runtime"
-            runDir("run-nukerplus-damage-time")
-            vmArg("-Ddevils.nukerplus.damage.runtime=true")
-            vmArg("-Ddevils.nukerplus.damage.runtime.dir=${rootProject.file("codex log").absolutePath}")
-        }
-    }
 }
 
 repositories {
@@ -289,13 +153,6 @@ repositories {
         url = uri("https://cursemaven.com")
     }
     maven {
-        name = "BlameJared"
-        url = uri("https://maven.blamejared.com")
-        content {
-            includeGroupAndSubgroups("com.blamejared.searchables")
-        }
-    }
-    maven {
         name = "TerraformersMC"
         url = uri("https://maven.terraformersmc.com/releases/")
         content {
@@ -308,13 +165,6 @@ repositories {
         content {
             includeGroupAndSubgroups("mcp.mobius.waila")
             includeGroupAndSubgroups("lol.bai")
-        }
-    }
-    maven {
-        name = "MisterPeModder"
-        url = uri("https://maven.misterpemodder.com/libs-release/")
-        content {
-            includeGroupAndSubgroups("com.misterpemodder")
         }
     }
 }
@@ -344,12 +194,6 @@ dependencies {
     modCompileOnly("maven.modrinth:worldtools:1.2.4+1.20.1")
     modCompileOnly("maven.modrinth:immediatelyfast:1.5.2+1.20.4-fabric")
     modCompileOnly("meteordevelopment:baritone:1.21.10-SNAPSHOT")
-    sourceNativeModDependencies.forEach { dependencyNotation ->
-        modCompileOnly(dependencyNotation)
-        testCompileOnly(dependencyNotation)
-        testRuntimeOnly(dependencyNotation)
-        add(sourceNativeResourceJars.name, dependencyNotation)
-    }
     implementation("com.github.ben-manes.caffeine:caffeine:3.2.0")
     add(bundledRuntimeLibs.name, "com.github.ben-manes.caffeine:caffeine:3.2.0")
     implementation("net.lenni0451:LambdaEvents:2.4.2")
@@ -374,9 +218,6 @@ dependencies {
     implementation("org.quiltmc.parsers:gson:0.2.1")
     add(bundledRuntimeLibs.name, "org.quiltmc.parsers:gson:0.2.1")
     compileOnly("com.google.code.findbugs:jsr305:3.0.2")
-    compileOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
-    testCompileOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
-    testRuntimeOnly(files(sourceNativeBinaryJars, sourceNativeVendorJars, sourceNativeNestedJars))
 
     productionRuntimeMods("meteordevelopment:meteor-client:$minecraftVersion-SNAPSHOT")
     productionRuntimeMods("net.fabricmc.fabric-api:fabric-api:${properties["fabric_api_version"] as String}")
@@ -397,11 +238,6 @@ tasks {
 
         from(project(":devils-game").layout.buildDirectory.dir("libs")) {
             include("$gameArchivesBaseName-$resolvedGameVersion.jar")
-        }
-    }
-
-    val verifySourceNativeBuildBasis by registering {
-        doLast {
         }
     }
 
@@ -430,34 +266,14 @@ tasks {
                 appendLine()
             }
 
-            val searchablesMitNotice = """
-                Searchables is declared as MIT-licensed in the local source metadata.
-                Source metadata path:
-                - local-source-native/Source Native Build/searchables-fabric/fabric.mod.json
-
-                The local source snapshot used for this build does not include a separate upstream LICENSE file,
-                so this consolidated notice keeps the declared license identifier and source path.
-            """.trimIndent()
-
-            val yaclLgplNotice = """
-                YetAnotherConfigLib is declared as LGPL-3.0-or-later in the local source metadata.
-                Source metadata path:
-                - local-source-native/Source Native Build/yet-another-config-lib/fabric.mod.json
-
-                The local source snapshot used for this build does not include a separate standalone license text.
-                YetAnotherConfigLib is LGPL-3.0-or-later; see the upstream repository for the full license.
-            """.trimIndent()
-
             outputFile.writeText(
                 buildString {
                     appendLine("Devils-Addon consolidated third-party notices")
                     appendLine()
                     appendLine("This build intentionally keeps a single root LICENSE for Devils-Addon and consolidates third-party notice material here.")
-                    appendLine("Source-native incorporated components remain subject to their upstream license terms.")
+                    appendLine("Vendored components remain subject to their upstream license terms.")
                     appendLine()
-                    append(section("Searchables - metadata notice", searchablesMitNotice))
-                    append(section("YetAnotherConfigLib - metadata notice", yaclLgplNotice))
-                    append(section("sqlite-jdbc - Apache-2.0", readOrNotice(null, "sqlite-jdbc license unavailable in clean checkout", "The source-native sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
+                    append(section("sqlite-jdbc - Apache-2.0", readOrNotice(null, "sqlite-jdbc license unavailable in clean checkout", "The sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
                     append(section("Soundlibs - LGPL-2.1", read(soundlibsLgpl)))
                     append(section("Soundlibs - jorbis notice", read(soundlibsJorbis)))
                     append(section("Soundlibs - vorbisspi notice", read(soundlibsVorbisSpi)))
@@ -468,7 +284,6 @@ tasks {
     }
 
     processResources {
-        dependsOn(verifySourceNativeBuildBasis)
         dependsOn(generateThirdPartyNotices)
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
@@ -480,19 +295,9 @@ tasks {
         inputs.properties(propertyMap)
         filteringCharset = "UTF-8"
 
-        from(sourceNativeResourceDirs) {
-            exclude(*sourceNativeResourceExcludes)
+        from(vendoredResourceDirs) {
+            exclude(*vendoredResourceExcludes)
         }
-
-        from({
-            (sourceNativeResourceJars.resolve() + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
-                val dependencyTree =
-                    if (dependencyArtifact.isDirectory) fileTree(dependencyArtifact) else zipTree(dependencyArtifact)
-                dependencyTree.matching {
-                    exclude(*sourceNativeJarResourceExcludes)
-                }
-            }
-        })
 
         from(generatedThirdPartyNoticeDir)
 
@@ -530,12 +335,7 @@ tasks {
         }
     }
 
-    compileJava {
-        dependsOn(verifySourceNativeBuildBasis)
-    }
-
     named("classes") {
-        dependsOn(extractSourceNativeRuntimeClasses)
         dependsOn(verifyAssimilatedMixinResources)
     }
 
@@ -568,316 +368,10 @@ tasks {
             }
         })
 
-        from({
-            (sourceNativeBinaryJars.files + sourceNativeVendorJars.files + sourceNativeNestedJars.files).map { dependencyArtifact ->
-                zipTree(dependencyArtifact).matching {
-                    include("**/*.class")
-                    exclude("module-info.class")
-                }
-            }
-        })
-
         from(rootProject.file("LICENSE")) {
             into("META-INF/licenses")
             rename { "DEVILS-ADDON_LICENSE.txt" }
         }
-    }
-
-    val writeAssimilatedRuntimeEvidence by registering {
-        val canonicalRuntimeLog = rootProject.file("codex log/runtime-smoke.log")
-        val smokeRunDir = layout.projectDirectory.dir("run-assimilated-smoke").asFile
-        val latestClientLog = smokeRunDir.resolve("logs/latest.log")
-        val runtimeArtifacts = listOf(
-            "config/yacl.json5",
-            "devils-addon/modules.json",
-        )
-
-        doLast {
-            val parentDir = canonicalRuntimeLog.parentFile
-            if (parentDir != null) parentDir.mkdirs()
-
-            val lines = if (latestClientLog.isFile) latestClientLog.readLines(StandardCharsets.UTF_8) else emptyList()
-            val existingHarnessLines = if (canonicalRuntimeLog.isFile) canonicalRuntimeLog.readLines(StandardCharsets.UTF_8) else emptyList()
-            val harnessEvidence = existingHarnessLines.filter { line ->
-                line.startsWith("SUMMARY ")
-                    || line.startsWith("RUNTIME ")
-                    || line.startsWith("PASS ")
-                    || line.startsWith("FAIL ")
-                    || line.startsWith("RESULT ")
-            }
-            val extracted = lines.filter { line ->
-                line.contains("Loading Minecraft")
-                    || (line.contains("Loading ") && line.contains(" mods:"))
-                    || line.contains("- devils-addon ")
-                    || line.contains("Initializing Devils Addon")
-                    || line.contains("Initializing Meteor Client")
-                    || line.contains("Sound engine started")
-                    || line.contains("Stopping!")
-            }
-            val requiredPatterns = listOf(
-                "Loading Minecraft",
-                "Initializing Meteor Client",
-                "Sound engine started",
-                "Stopping!"
-            )
-            val missingPatterns = requiredPatterns.filter { pattern -> extracted.none { it.contains(pattern) } }
-            val artifactStates = runtimeArtifacts.associateWith { relative ->
-                smokeRunDir.resolve(relative).isFile
-            }
-            val addonModLoaded = extracted.any { it.contains("- devils-addon ") || it.contains("Initializing Devils Addon") }
-            val harnessPass = harnessEvidence.any { it.startsWith("RESULT PASS") }
-            val resultPass = latestClientLog.isFile
-                && missingPatterns.isEmpty()
-                && addonModLoaded
-                && artifactStates.values.all { it }
-                && harnessPass
-
-            canonicalRuntimeLog.writeText(
-                buildString {
-                    appendLine("SUMMARY runtime-smoke canonical-client-evidence")
-                    appendLine("runDir=${smokeRunDir.absolutePath}")
-                    appendLine("latestLog=${latestClientLog.absolutePath}")
-                    appendLine("result=" + if (resultPass) "PASS" else "FAIL")
-                    appendLine("clientLogPresent=${latestClientLog.isFile}")
-                    appendLine("addonModLoaded=$addonModLoaded")
-                    appendLine("harnessPass=$harnessPass")
-                    artifactStates.forEach { (relative, present) ->
-                        appendLine("ARTIFACT $relative present=$present")
-                    }
-                    if (missingPatterns.isNotEmpty()) {
-                        missingPatterns.forEach { pattern ->
-                            appendLine("MISSING pattern=$pattern")
-                        }
-                    }
-                    if (harnessEvidence.isEmpty()) {
-                        appendLine("MISSING harnessEvidence=true")
-                    }
-                    extracted.forEach { line ->
-                        appendLine("LOG $line")
-                    }
-                    harnessEvidence.forEach { line ->
-                        appendLine("HARNESS $line")
-                    }
-                },
-                StandardCharsets.UTF_8
-            )
-
-            check(resultPass) {
-                "Runtime smoke evidence was incomplete. Missing patterns: $missingPatterns artifactStates=$artifactStates addonModLoaded=$addonModLoaded harnessPass=$harnessPass"
-            }
-        }
-    }
-
-    val validateStashMoverTargetedRuntime by registering {
-        val canonicalRuntimeLog = rootProject.file("codex log/stashmover-targeted-runtime.log")
-
-        doLast {
-            check(canonicalRuntimeLog.isFile) {
-                "StashMover targeted runtime log was not produced at ${canonicalRuntimeLog.absolutePath}"
-            }
-
-            val lines = canonicalRuntimeLog.readLines(StandardCharsets.UTF_8)
-            check(lines.any { it.startsWith("RESULT PASS") }) {
-                "StashMover targeted runtime did not report PASS. See ${canonicalRuntimeLog.absolutePath}"
-            }
-        }
-    }
-
-    val cleanStrictRuntimeEvidence by registering {
-        val runtimeArtifacts = listOf(
-            rootProject.file("codex log/runtime-main.log"),
-            rootProject.file("codex log/input-runtime.log"),
-            rootProject.file("codex log/autowasp-runtime.log"),
-            rootProject.file("codex log/stashmover-runtime.log"),
-            rootProject.file("codex log/FINAL_RUNTIME_REPORT.md")
-        )
-
-        doLast {
-            runtimeArtifacts.forEach { artifact ->
-                if (artifact.isFile) artifact.delete()
-            }
-        }
-    }
-
-    val validateInputRuntime by registering {
-        val inputRuntimeLog = rootProject.file("codex log/input-runtime.log")
-
-        doLast {
-            check(inputRuntimeLog.isFile) {
-                "Input runtime log was not produced at ${inputRuntimeLog.absolutePath}"
-            }
-
-            val lines = inputRuntimeLog.readLines(StandardCharsets.UTF_8)
-            check(lines.any { it.contains("RESULT PASS") }) {
-                "Input runtime validation did not report PASS. See ${inputRuntimeLog.absolutePath}"
-            }
-        }
-    }
-
-    val validateAutoWaspRuntime by registering {
-        val autoWaspRuntimeLog = rootProject.file("codex log/autowasp-runtime.log")
-
-        doLast {
-            check(autoWaspRuntimeLog.isFile) {
-                "AutoWasp runtime log was not produced at ${autoWaspRuntimeLog.absolutePath}"
-            }
-
-            val lines = autoWaspRuntimeLog.readLines(StandardCharsets.UTF_8)
-            check(lines.any { it.contains("RESULT PASS") }) {
-                "AutoWasp runtime validation did not report PASS. See ${autoWaspRuntimeLog.absolutePath}"
-            }
-        }
-    }
-
-    val validateStashMoverStrictRuntime by registering {
-        val stashMoverRuntimeLog = rootProject.file("codex log/stashmover-runtime.log")
-
-        doLast {
-            check(stashMoverRuntimeLog.isFile) {
-                "StashMover strict runtime log was not produced at ${stashMoverRuntimeLog.absolutePath}"
-            }
-
-            val lines = stashMoverRuntimeLog.readLines(StandardCharsets.UTF_8)
-            check(lines.any { it.contains("RESULT PASS runs=5") }) {
-                "StashMover strict runtime validation did not report 5 successful runs. See ${stashMoverRuntimeLog.absolutePath}"
-            }
-        }
-    }
-
-    val strictRuntimeValidation by registering {
-        dependsOn(cleanStrictRuntimeEvidence)
-        dependsOn("runInputRuntimeValidation")
-        dependsOn("runAutoWaspRuntimeValidation")
-        dependsOn("runStashMoverStrictRuntime")
-    }
-
-    val validateNukerPlusDamageTimeRuntime by registering {
-        val smokeReport = rootProject.file("codex log/nukerplus-damage-time-smoke.md")
-        val benchmarkReport = rootProject.file("codex log/nukerplus-damage-time-benchmark.md")
-        val mechanicsReport = rootProject.file("codex log/nukerplus-damage-time-mechanics.md")
-
-        doLast {
-            check(smokeReport.isFile) {
-                "NukerPlus damage smoke report was not produced at ${smokeReport.absolutePath}"
-            }
-            check(benchmarkReport.isFile) {
-                "NukerPlus damage benchmark report was not produced at ${benchmarkReport.absolutePath}"
-            }
-            check(mechanicsReport.isFile) {
-                "NukerPlus damage mechanics report was not produced at ${mechanicsReport.absolutePath}"
-            }
-
-            val smokeLines = smokeReport.readLines(StandardCharsets.UTF_8)
-            check(smokeLines.any { it.startsWith("RESULT PASS") }) {
-                "NukerPlus damage runtime smoke did not report PASS. See ${smokeReport.absolutePath}"
-            }
-        }
-    }
-
-    named("runAssimilatedClientSmoke") {
-        doFirst {
-            val smokeRunDir = layout.projectDirectory.dir("run-assimilated-smoke").asFile
-            val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("config"),
-                smokeRunDir.resolve("devils-addon"),
-                smokeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        finalizedBy(writeAssimilatedRuntimeEvidence)
-    }
-
-    named("runStashMoverTargetedRuntime") {
-        doFirst {
-            val smokeRunDir = layout.projectDirectory.dir("run-stashmover-targeted").asFile
-            val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("config"),
-                smokeRunDir.resolve("devils-addon"),
-                smokeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        finalizedBy(validateStashMoverTargetedRuntime)
-    }
-
-    named("runInputRuntimeValidation") {
-        doFirst {
-            val runtimeRunDir = layout.projectDirectory.dir("run-input-runtime").asFile
-            val staleEvidencePaths = listOf(
-                runtimeRunDir.resolve("config"),
-                runtimeRunDir.resolve("devils-addon"),
-                runtimeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        finalizedBy(validateInputRuntime)
-    }
-
-    named("runAutoWaspRuntimeValidation") {
-        doFirst {
-            val runtimeRunDir = layout.projectDirectory.dir("run-autowasp-runtime").asFile
-            val staleEvidencePaths = listOf(
-                runtimeRunDir.resolve("saves"),
-                runtimeRunDir.resolve("config"),
-                runtimeRunDir.resolve("devils-addon"),
-                runtimeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        mustRunAfter("runInputRuntimeValidation")
-        finalizedBy(validateAutoWaspRuntime)
-    }
-
-    named("runStashMoverStrictRuntime") {
-        doFirst {
-            val runtimeRunDir = layout.projectDirectory.dir("run-stashmover-strict").asFile
-            val staleEvidencePaths = listOf(
-                runtimeRunDir.resolve("saves"),
-                runtimeRunDir.resolve("config"),
-                runtimeRunDir.resolve("devils-addon"),
-                runtimeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        mustRunAfter("runAutoWaspRuntimeValidation")
-        finalizedBy(validateStashMoverStrictRuntime)
-    }
-
-    named("runNukerPlusDamageTimeRuntime") {
-        doFirst {
-            val smokeRunDir = layout.projectDirectory.dir("run-nukerplus-damage-time").asFile
-            val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("config"),
-                smokeRunDir.resolve("devils-addon"),
-                smokeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        finalizedBy(validateNukerPlusDamageTimeRuntime)
     }
 
     java {

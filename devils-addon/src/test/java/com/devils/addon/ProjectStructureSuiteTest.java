@@ -20,8 +20,6 @@ class ProjectStructureSuiteTest {
         assertTrue(source.contains("registerTrackerPlayersSettingFactory();"));
         assertTrue(source.contains("registerModules();"));
         assertTrue(source.contains("registerCommands();"));
-        assertTrue(source.contains("AssimilatedQualitySmoke.install();"));
-        assertTrue(source.contains("StashMoverTargetedRuntimeValidation.install();"));
         assertTrue(source.contains("class AutoAnvilRenameCommand extends Command"));
         assertTrue(source.contains("return \"com.devils.addon\";"));
         assertTrue(source.contains("new GithubRepo(\"ThianYong-hub\", \"DEVILS\")"));

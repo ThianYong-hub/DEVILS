@@ -36,19 +36,6 @@ base {
     group = properties["maven_group"] as String
 }
 
-loom {
-    runs {
-        create("gamesRecoverySmoke") {
-            client()
-            ideConfigGenerated(false)
-            configName = "Devils Game Recovery Smoke"
-            runDir("run-devils-game-smoke")
-            vmArg("-Ddevils.game.recovery.smoke=true")
-            vmArg("-Ddevils.game.recovery.smoke.path=${rootProject.file("codex log/runtime-smoke.log").absolutePath}")
-        }
-    }
-}
-
 repositories {
     maven {
         name = "meteor-maven"
@@ -82,38 +69,6 @@ dependencies {
 }
 
 tasks {
-    val validateGamesRecoverySmoke by registering {
-        val runtimeSmokeLog = rootProject.file("codex log/runtime-smoke.log")
-
-        doLast {
-            check(runtimeSmokeLog.isFile) {
-                "Devils Game recovery smoke log was not produced at ${runtimeSmokeLog.absolutePath}"
-            }
-
-            val lines = runtimeSmokeLog.readLines(StandardCharsets.UTF_8)
-            check(lines.any { it.contains("RESULT PASS") }) {
-                "Devils Game recovery smoke did not report PASS. See ${runtimeSmokeLog.absolutePath}"
-            }
-        }
-    }
-
-    named("runGamesRecoverySmoke") {
-        doFirst {
-            val smokeRunDir = layout.projectDirectory.dir("run-devils-game-smoke").asFile
-            val staleEvidencePaths = listOf(
-                smokeRunDir.resolve("config"),
-                smokeRunDir.resolve("devils-game"),
-                smokeRunDir.resolve("logs/latest.log")
-            )
-
-            staleEvidencePaths.forEach { path ->
-                if (path.isDirectory) path.deleteRecursively()
-                else path.delete()
-            }
-        }
-        finalizedBy(validateGamesRecoverySmoke)
-    }
-
     processResources {
         val propertyMap = mapOf(
             "version" to project.version,
