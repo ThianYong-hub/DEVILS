@@ -231,43 +231,6 @@ public class SpearSpoof extends Module {
         .build()
     );
 
-    private final Setting<Double> approachRange = sgFlight.add(new DoubleSetting.Builder()
-        .name("approach-range")
-        .description("Desired range while approaching target.")
-        .defaultValue(3.7)
-        .range(2.0, 5.5)
-        .sliderRange(2.5, 4.8)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Double> retreatRange = sgFlight.add(new DoubleSetting.Builder()
-        .name("retreat-range")
-        .description("Desired range while reset phase is active.")
-        .defaultValue(4.2)
-        .range(2.5, 6.0)
-        .sliderRange(3.0, 5.2)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Boolean> topDownEnabled = sgFlight.add(new BoolSetting.Builder()
-        .name("top-down-enabled")
-        .description("Allow top-down dive approach on suitable targets.")
-        .defaultValue(true)
-        .build()
-    );
-
-    private final Setting<Double> topDownHeight = sgFlight.add(new DoubleSetting.Builder()
-        .name("top-down-height")
-        .description("Height above target used for top-down approach.")
-        .defaultValue(2.8)
-        .range(1.2, 5.0)
-        .sliderRange(1.5, 4.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
     private final Setting<Boolean> obstacleAvoidance = sgFlight.add(new BoolSetting.Builder()
         .name("obstacle-avoidance")
         .description("Enable local obstacle avoidance while gliding.")
@@ -306,16 +269,6 @@ public class SpearSpoof extends Module {
         .defaultValue(4.5)
         .range(2.5, 6.0)
         .sliderRange(3.0, 5.0)
-        .build()
-    );
-
-    private final Setting<Double> smallTargetRange = sgStrike.add(new DoubleSetting.Builder()
-        .name("small-target-range")
-        .description("Maximum strike distance for small/flying targets.")
-        .defaultValue(4.25)
-        .range(2.5, 6.0)
-        .sliderRange(3.0, 5.0)
-        .visible(this::showAdvanced)
         .build()
     );
 
@@ -431,13 +384,8 @@ public class SpearSpoof extends Module {
         onlyWhileElytra,
         minRange,
         maxRange,
-        smallTargetRange,
         horizontalSpeed,
         verticalSpeed,
-        approachRange,
-        retreatRange,
-        topDownEnabled,
-        topDownHeight,
         obstacleAvoidance,
         autoRelaunch,
         testFlyUntilDamage,
