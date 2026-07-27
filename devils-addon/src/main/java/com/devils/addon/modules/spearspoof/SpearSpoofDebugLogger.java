@@ -151,29 +151,21 @@ public final class SpearSpoofDebugLogger {
     ) {
         if (!enabled.get() || debugPath == null || runtime == null) return;
         long now = System.currentTimeMillis();
-        long nextAttemptInMs = Math.max(0L, runtime.nextAttemptAtMs - now);
         long repositionInMs = Math.max(0L, runtime.repositionUntilMs - now);
         long unstuckInMs = Math.max(0L, runtime.unstuckUntilMs - now);
         String stageName = stage != null ? stage.name() : "none";
         String phaseName = runtime.passPhase != null ? runtime.passPhase.name() : "none";
         String targetName = target != null ? target.getName().getString() : "none";
         double dist = ctx != null ? ctx.distance : -1.0;
-        double speed = ctx != null ? ctx.speedBps : -1.0;
+        double relSpeed = ctx != null ? ctx.speedBps : -1.0;
         double closing = ctx != null ? ctx.closingSpeedBps : -1.0;
         double cooldown = ctx != null ? ctx.cooldown : -1.0;
         long holdMs = ctx != null ? ctx.holdMs : runtime.holdMs(now);
         double forward = ctx != null ? ctx.forwardDot : -2.0;
         double look = ctx != null ? ctx.lookDot : -2.0;
         double vertical = ctx != null ? ctx.verticalDiff : -1.0;
-        double yawErr = ctx != null ? ctx.yawError : -1.0;
-        double pitchErr = ctx != null ? ctx.pitchError : -1.0;
         double hitboxW = ctx != null ? ctx.targetWidth : -1.0;
         double hitboxH = ctx != null ? ctx.targetHeight : -1.0;
-        double predictLeadTicks = ctx != null ? ctx.predictionLeadTicks : -1.0;
-        double predictExtraTicks = ctx != null ? ctx.predictionExtraTicks : -1.0;
-        double predictTotalTicks = ctx != null ? ctx.predictionTotalTicks : -1.0;
-        boolean predictAuto = ctx != null && ctx.predictionAuto;
-        boolean predictCollisionAware = ctx != null && ctx.predictionCollisionAware;
         long phaseAgeMs = Math.max(0L, now - runtime.passPhaseStartMs);
         long resetInMs = Math.max(0L, runtime.movementResetUntilMs - now);
         long targetLockAgeMs = runtime.targetLockedAtMs > 0L ? Math.max(0L, now - runtime.targetLockedAtMs) : -1L;
@@ -182,12 +174,11 @@ public final class SpearSpoofDebugLogger {
         String playerVel = ctx != null ? formatVec(ctx.playerVel) : "null";
         String targetPos = ctx != null ? formatVec(ctx.targetPos) : "null";
         String targetVel = ctx != null ? formatVec(ctx.targetVel) : "null";
-        String predictedTargetPos = ctx != null ? formatVec(ctx.predictedTargetPos) : "null";
         String aimPos = ctx != null ? formatVec(ctx.aimPos) : "null";
 
         String line = String.format(
             Locale.US,
-            "{\"id\":%d,\"ts\":%d,\"outcome\":\"%s\",\"reason\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"stage\":\"%s\",\"phase\":\"%s\",\"phaseAgeMs\":%d,\"resetInMs\":%d,\"targetLockAgeMs\":%d,\"targetLostAgeMs\":%d,\"dist\":%.2f,\"speed\":%.2f,\"closing\":%.2f,\"cooldown\":%.2f,\"holdMs\":%d,\"forward\":%.2f,\"look\":%.2f,\"vertical\":%.2f,\"yawErr\":%.2f,\"pitchErr\":%.2f,\"hitboxW\":%.2f,\"hitboxH\":%.2f,\"predictLeadTicks\":%.2f,\"predictExtraTicks\":%.2f,\"predictTotalTicks\":%.2f,\"predictAuto\":%b,\"predictCollisionAware\":%b,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\",\"nextAttemptInMs\":%d,\"repositionInMs\":%d,\"unstuckInMs\":%d,\"switchDelayTicks\":%d,\"rmbRechargeTicks\":%d,\"windupRestartTicks\":%d,\"useKeyInjected\":%b,\"playerPos\":\"%s\",\"playerVel\":\"%s\",\"targetPos\":\"%s\",\"targetVel\":\"%s\",\"predTargetPos\":\"%s\",\"aimPos\":\"%s\",\"vel\":\"%s\"}",
+            "{\"id\":%d,\"ts\":%d,\"outcome\":\"%s\",\"reason\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"stage\":\"%s\",\"phase\":\"%s\",\"phaseAgeMs\":%d,\"resetInMs\":%d,\"targetLockAgeMs\":%d,\"targetLostAgeMs\":%d,\"eyeDist\":%.2f,\"relSpeed\":%.2f,\"closing\":%.2f,\"cooldown\":%.2f,\"holdMs\":%d,\"forward\":%.2f,\"look\":%.2f,\"vertical\":%.2f,\"hitboxW\":%.2f,\"hitboxH\":%.2f,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\",\"repositionInMs\":%d,\"unstuckInMs\":%d,\"switchDelayTicks\":%d,\"useKeyInjected\":%b,\"playerPos\":\"%s\",\"playerVel\":\"%s\",\"targetPos\":\"%s\",\"targetVel\":\"%s\",\"aimPos\":\"%s\",\"vel\":\"%s\"}",
             runtime.nextAttemptId(),
             now,
             escapeJson(outcome),
@@ -201,37 +192,26 @@ public final class SpearSpoofDebugLogger {
             targetLockAgeMs,
             targetLostAgeMs,
             dist,
-            speed,
+            relSpeed,
             closing,
             cooldown,
             holdMs,
             forward,
             look,
             vertical,
-            yawErr,
-            pitchErr,
             hitboxW,
             hitboxH,
-            predictLeadTicks,
-            predictExtraTicks,
-            predictTotalTicks,
-            predictAuto,
-            predictCollisionAware,
             runtime.hitChain,
             runtime.rejectStreak,
             escapeJson(runtime.lastRejectReason),
-            nextAttemptInMs,
             repositionInMs,
             unstuckInMs,
             runtime.switchDelayTicks,
-            runtime.rmbRechargeReleaseTicks,
-            runtime.windupRestartTicks,
             runtime.useKeyInjected,
             escapeJson(playerPos),
             escapeJson(playerVel),
             escapeJson(targetPos),
             escapeJson(targetVel),
-            escapeJson(predictedTargetPos),
             escapeJson(aimPos),
             escapeJson(formatVec(velocity))
         );
@@ -248,14 +228,15 @@ public final class SpearSpoofDebugLogger {
         String targetName = target != null ? target.getName().getString() : "none";
         int targetId = target != null ? target.getId() : -1;
         long holdMs = runtime.holdMs(now);
-        long nextAttemptInMs = Math.max(0L, runtime.nextAttemptAtMs - now);
         long resetInMs = Math.max(0L, runtime.movementResetUntilMs - now);
         long repositionInMs = Math.max(0L, runtime.repositionUntilMs - now);
         long passAgeMs = Math.max(0L, now - runtime.passPhaseStartMs);
+        long sinceStrikeMs = runtime.lastStrikeAtMs > 0L ? Math.max(0L, now - runtime.lastStrikeAtMs) : -1L;
+        long sinceHitMs = runtime.lastConfirmedHitMs > 0L ? Math.max(0L, now - runtime.lastConfirmedHitMs) : -1L;
 
         String line = String.format(
             Locale.US,
-            "{\"id\":%d,\"ts\":%d,\"dir\":\"%s\",\"packet\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"targetId\":%d,\"phase\":\"%s\",\"phaseAgeMs\":%d,\"holdMs\":%d,\"nextAttemptInMs\":%d,\"resetInMs\":%d,\"repositionInMs\":%d,\"hitConfirmPending\":%b,\"hitConfirmTargetId\":%d,\"hitConfirmRetry\":%d,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\"}",
+            "{\"id\":%d,\"ts\":%d,\"dir\":\"%s\",\"packet\":\"%s\",\"detail\":\"%s\",\"target\":\"%s\",\"targetId\":%d,\"phase\":\"%s\",\"phaseAgeMs\":%d,\"holdMs\":%d,\"resetInMs\":%d,\"repositionInMs\":%d,\"sinceStrikeMs\":%d,\"sinceHitMs\":%d,\"hitChain\":%d,\"rejectStreak\":%d,\"lastReject\":\"%s\"}",
             runtime.nextAttemptId(),
             now,
             escapeJson(direction),
@@ -266,12 +247,10 @@ public final class SpearSpoofDebugLogger {
             runtime.passPhase != null ? runtime.passPhase.name() : "none",
             passAgeMs,
             holdMs,
-            nextAttemptInMs,
             resetInMs,
             repositionInMs,
-            runtime.hitConfirmPending,
-            runtime.hitConfirmTargetId,
-            runtime.hitConfirmRetryCount,
+            sinceStrikeMs,
+            sinceHitMs,
             runtime.hitChain,
             runtime.rejectStreak,
             escapeJson(runtime.lastRejectReason)

@@ -8,7 +8,9 @@ import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
+import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 
 public final class SpearSpoofEventService {
     private final SpearSpoof module;
@@ -96,9 +98,21 @@ public final class SpearSpoofEventService {
     public void onPacketReceiveSafe(PacketEvent.Receive event) {
         if (event == null || event.packet == null) return;
         if (devDebug.get()) devDebugService.onPacketReceive(event.packet);
-        else combatService.onPacketReceive(event.packet);
+        else if (isKineticHitOnSelf(event.packet)) combatService.onKineticHit();
         boolean interesting = SpearSpoofPacketInspector.isInterestingReceivePacket(event.packet);
         if (!interesting && !debugPacketLog.get()) return;
         debugLogger.logPacketReceive(event.packet, SpearSpoofPacketInspector.describeReceivePacket(event.packet), runtime);
+    }
+
+    /**
+     * EntityStatuses.KINETIC_ATTACK (2) is sent for the ATTACKER when a spear pierce lands, so status 2
+     * on the local player is a free true-positive hit signal. Typed instanceof survives Loom remapping;
+     * lookups by Yarn method name do not.
+     */
+    private boolean isKineticHitOnSelf(Object packet) {
+        if (module.client().world == null || module.client().player == null) return false;
+        if (!(packet instanceof EntityStatusS2CPacket status)) return false;
+        if (status.getStatus() != EntityStatuses.KINETIC_ATTACK) return false;
+        return status.getEntity(module.client().world) == module.client().player;
     }
 }

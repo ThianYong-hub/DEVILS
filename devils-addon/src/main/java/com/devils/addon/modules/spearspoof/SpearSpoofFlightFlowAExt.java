@@ -17,7 +17,6 @@ abstract class SpearSpoofFlightFlowAExt extends SpearSpoofFlightFlowA {
         SpearSpoofCombatService combat,
         SpearSpoofDebugLogger debugLogger,
         Setting<Boolean> onlyWhileElytra,
-        Setting<Boolean> attributeSwap,
         Setting<Double> minRange,
         Setting<Double> maxRange,
         Setting<Double> smallTargetRange,
@@ -40,7 +39,6 @@ abstract class SpearSpoofFlightFlowAExt extends SpearSpoofFlightFlowA {
             combat,
             debugLogger,
             onlyWhileElytra,
-            attributeSwap,
             minRange,
             maxRange,
             smallTargetRange,
@@ -78,12 +76,6 @@ abstract class SpearSpoofFlightFlowAExt extends SpearSpoofFlightFlowA {
         boolean hasRecentSnapshot = runtime.lastKnownTargetSeenAtMs > 0L
             && (now - runtime.lastKnownTargetSeenAtMs) <= LOST_TARGET_FOLLOW_MS;
         if (autoRelaunch.get() && (hasValidTarget || hasRecentSnapshot)) ensureElytraRelaunch();
-
-        if (attributeSwap.get()) {
-            pathfinder.clearTargetState();
-            toApproachWithTrace(System.currentTimeMillis(), "attribute-swap", runtime.target);
-            return;
-        }
 
         if (!hasValidTarget) {
             pathfinder.clearTargetState();

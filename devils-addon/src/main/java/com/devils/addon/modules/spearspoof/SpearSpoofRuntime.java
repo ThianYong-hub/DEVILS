@@ -4,6 +4,9 @@ import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.Vec3d;
 
 public final class SpearSpoofRuntime {
+    /** How long after an engaged pass the flight controller keeps driving through the target. */
+    private static final long STRIKE_FOLLOW_THROUGH_MS = 400L;
+
     public LivingEntity target;
 
     long targetLockedAtMs;
@@ -12,7 +15,6 @@ public final class SpearSpoofRuntime {
     long useStartedAtMs;
     long lastForcedUseInteractMs;
     long lastStrikeAtMs;
-    long nextAttemptAtMs;
     long repositionUntilMs;
     long movementResetUntilMs;
     long passPhaseStartMs;
@@ -20,39 +22,25 @@ public final class SpearSpoofRuntime {
     long lastStuckSampleMs;
     long unstuckUntilMs;
     long pitVerticalLockUntilMs;
-    long rechargeRebuildUntilMs;
-    long hitConfirmStartMs;
-    long hitConfirmUntilMs;
     long lastConfirmedHitMs;
     long lastKnownTargetSeenAtMs;
 
     double dashRemaining;
     Vec3d dashDirection = Vec3d.ZERO;
 
-    int swapBackSlot = -1;
-    int swapBackTicks;
-    int windupRestartTicks;
     int relaunchJumpTicks;
     int relaunchGroundTicks;
     int stuckTicks;
     int switchDelayTicks;
     int pitVerticalLockTargetId = -1;
+    int lastStrikeTargetId = -1;
 
     boolean useKeyInjected;
-    boolean pendingRmbRecharge;
-    boolean hitConfirmPending;
-    int rmbRechargeReleaseTicks;
-    int hitConfirmTargetId = -1;
-    int hitConfirmRetryCount;
-    float hitConfirmBaseHealth;
-    float hitConfirmBaseAbsorption;
 
     long attemptId;
 
     int hitChain;
     int rejectStreak;
-    int speedRejectStreak;
-    int forwardRejectStreak;
     String lastRejectReason = "";
 
     PassPhase passPhase = PassPhase.APPROACH;
@@ -100,7 +88,6 @@ public final class SpearSpoofRuntime {
         useStartedAtMs = 0;
         lastForcedUseInteractMs = 0;
         lastStrikeAtMs = 0;
-        nextAttemptAtMs = 0;
         repositionUntilMs = 0;
         movementResetUntilMs = 0;
         passPhaseStartMs = System.currentTimeMillis();
@@ -108,39 +95,25 @@ public final class SpearSpoofRuntime {
         lastStuckSampleMs = 0;
         unstuckUntilMs = 0;
         pitVerticalLockUntilMs = 0;
-        rechargeRebuildUntilMs = 0;
-        hitConfirmStartMs = 0;
-        hitConfirmUntilMs = 0;
         lastConfirmedHitMs = 0;
         lastKnownTargetSeenAtMs = 0;
 
         dashRemaining = 0.0;
         dashDirection = Vec3d.ZERO;
 
-        swapBackSlot = -1;
-        swapBackTicks = 0;
-        windupRestartTicks = 0;
         relaunchJumpTicks = 0;
         relaunchGroundTicks = 0;
         stuckTicks = 0;
         switchDelayTicks = 0;
         pitVerticalLockTargetId = -1;
+        lastStrikeTargetId = -1;
 
         useKeyInjected = false;
-        pendingRmbRecharge = false;
-        hitConfirmPending = false;
-        rmbRechargeReleaseTicks = 0;
-        hitConfirmTargetId = -1;
-        hitConfirmRetryCount = 0;
-        hitConfirmBaseHealth = 0.0f;
-        hitConfirmBaseAbsorption = 0.0f;
 
         attemptId = 0;
 
         hitChain = 0;
         rejectStreak = 0;
-        speedRejectStreak = 0;
-        forwardRejectStreak = 0;
         lastRejectReason = "";
         passPhase = PassPhase.APPROACH;
         lockedApproachDirection = new Vec3d(1.0, 0.0, 0.0);
@@ -169,34 +142,20 @@ public final class SpearSpoofRuntime {
         lastStuckSampleMs = 0;
         unstuckUntilMs = 0;
         pitVerticalLockUntilMs = 0;
-        rechargeRebuildUntilMs = 0;
-        hitConfirmStartMs = 0;
-        hitConfirmUntilMs = 0;
         lastConfirmedHitMs = 0;
         lastKnownTargetSeenAtMs = 0;
 
-        swapBackSlot = -1;
-        swapBackTicks = 0;
-        windupRestartTicks = 0;
         relaunchJumpTicks = 0;
         relaunchGroundTicks = 0;
         stuckTicks = 0;
         switchDelayTicks = 0;
         pitVerticalLockTargetId = -1;
+        lastStrikeTargetId = -1;
 
         useKeyInjected = false;
-        pendingRmbRecharge = false;
-        hitConfirmPending = false;
-        rmbRechargeReleaseTicks = 0;
-        hitConfirmTargetId = -1;
-        hitConfirmRetryCount = 0;
-        hitConfirmBaseHealth = 0.0f;
-        hitConfirmBaseAbsorption = 0.0f;
 
         hitChain = 0;
         rejectStreak = 0;
-        speedRejectStreak = 0;
-        forwardRejectStreak = 0;
         lastRejectReason = "";
         passPhase = PassPhase.APPROACH;
         lockedApproachDirection = new Vec3d(1.0, 0.0, 0.0);
@@ -216,8 +175,6 @@ public final class SpearSpoofRuntime {
         target = null;
         useStartedAtMs = 0;
         hitChain = 0;
-        pendingRmbRecharge = false;
-        rmbRechargeReleaseTicks = 0;
         passPhase = PassPhase.APPROACH;
         movementResetUntilMs = 0;
         resetDirection = Vec3d.ZERO;
@@ -228,14 +185,7 @@ public final class SpearSpoofRuntime {
         switchDelayTicks = 0;
         pitVerticalLockUntilMs = 0;
         pitVerticalLockTargetId = -1;
-        rechargeRebuildUntilMs = 0;
-        hitConfirmPending = false;
-        hitConfirmTargetId = -1;
-        hitConfirmRetryCount = 0;
-        hitConfirmStartMs = 0;
-        hitConfirmUntilMs = 0;
-        hitConfirmBaseHealth = 0.0f;
-        hitConfirmBaseAbsorption = 0.0f;
+        lastStrikeTargetId = -1;
     }
 
     public long holdMs(long now) {
@@ -248,74 +198,32 @@ public final class SpearSpoofRuntime {
 
     public void onReject(String reason) {
         lastRejectReason = reason == null ? "" : reason;
-
-        if (!"HitUnconfirmed".equals(reason)) {
-            rejectStreak++;
-        }
-
-        if ("LowSpeed".equals(reason)) speedRejectStreak++;
-        else speedRejectStreak = 0;
-
-        if ("BadForward".equals(reason)) forwardRejectStreak++;
-        else forwardRejectStreak = 0;
-
+        rejectStreak++;
         hitChain = 0;
     }
 
+    /**
+     * Telemetry for an observed kinetic hit. Deliberately does not retreat: the spear's per-entity
+     * contact cooldown is only 10 ticks, so the rest of the pass can still land.
+     */
     public void onHit(long now) {
-        lastStrikeAtMs = now;
         lastConfirmedHitMs = now;
-        hitConfirmPending = false;
-        hitConfirmTargetId = -1;
-        hitConfirmRetryCount = 0;
-        hitConfirmStartMs = 0;
-        hitConfirmUntilMs = 0;
-        hitConfirmBaseHealth = 0.0f;
-        hitConfirmBaseAbsorption = 0.0f;
         rejectStreak = 0;
-        speedRejectStreak = 0;
-        forwardRejectStreak = 0;
         lastRejectReason = "";
         hitChain++;
-        beginReset(now, 220L);
     }
 
-    public void onStrikeSent(long now, LivingEntity strikeTarget, long confirmWindowMs) {
+    /** Records that a pass reached contact geometry on this target, packet or pure kinetic charge. */
+    public void onStrikeSent(long now, LivingEntity strikeTarget) {
         lastStrikeAtMs = now;
-        if (strikeTarget == null) {
-            hitConfirmPending = false;
-            hitConfirmTargetId = -1;
-            hitConfirmStartMs = 0;
-            hitConfirmUntilMs = 0;
-            hitConfirmBaseHealth = 0.0f;
-            hitConfirmBaseAbsorption = 0.0f;
-            return;
-        }
-
-        hitConfirmPending = true;
-        hitConfirmTargetId = strikeTarget.getId();
-        hitConfirmRetryCount = 0;
-        hitConfirmStartMs = now;
-        hitConfirmUntilMs = now + Math.max(60L, confirmWindowMs);
-        hitConfirmBaseHealth = strikeTarget.getHealth();
-        hitConfirmBaseAbsorption = strikeTarget.getAbsorptionAmount();
+        lastStrikeTargetId = strikeTarget == null ? -1 : strikeTarget.getId();
     }
 
+    /** True while the flight controller should keep driving through a target it just engaged. */
     public boolean isAwaitingHitConfirm(LivingEntity entity, long now) {
-        if (!hitConfirmPending) return false;
-        if (now > hitConfirmUntilMs) return false;
-        if (entity == null) return false;
-        return entity.getId() == hitConfirmTargetId;
-    }
-
-    public void clearHitConfirm() {
-        hitConfirmPending = false;
-        hitConfirmTargetId = -1;
-        hitConfirmRetryCount = 0;
-        hitConfirmStartMs = 0;
-        hitConfirmUntilMs = 0;
-        hitConfirmBaseHealth = 0.0f;
-        hitConfirmBaseAbsorption = 0.0f;
+        if (entity == null || lastStrikeTargetId < 0) return false;
+        if (entity.getId() != lastStrikeTargetId) return false;
+        return now - lastStrikeAtMs <= STRIKE_FOLLOW_THROUGH_MS;
     }
 
     public void beginReset(long now, long holdMs) {

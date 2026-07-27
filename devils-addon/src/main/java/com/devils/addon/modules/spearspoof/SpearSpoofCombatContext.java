@@ -13,29 +13,17 @@ import java.util.Locale;
 
 abstract class SpearSpoofCombatContext {
     protected static final int ROTATE_PRIORITY = 80;
-    protected static final int RMB_RECHARGE_RELEASE_TICKS = 4;
     protected static final long FORCED_USE_INTERACT_RETRY_MS = 90L;
-    protected static final long STRIKE_INTERVAL_MS = 90L;
-    protected static final double ENFORCED_MIN_RANGE = 0.40;
-    protected static final double ENFORCED_SMALL_MIN_RANGE = 0.28;
-    protected static final double ENFORCED_MAX_RANGE = 4.5;
-    protected static final double MODE_4X_MIN_RANGE = 4.0;
-    protected static final double MODE_4X_MAX_RANGE = 4.5;
     protected static final double NON_PLAYER_SPEED_BONUS_BPS = 0.2;
     protected static final int HOTBAR_SWITCH_DELAY_TICKS = 1;
     protected static final float LAG_PAUSE_THRESHOLD = 1.0f;
     protected static final float LAG_PAUSE_MAX_VALID = 8.0f;
-    protected static final long TARGET_SWITCH_WINDUP_RESTART_MARGIN_MS = 180L;
-    protected static final long RECHARGE_REBUILD_MS = 950L;
-    protected static final long RECHARGE_RESET_HOLD_MS = 340L;
-    protected static final long HIT_CONFIRM_WINDOW_MIN_MS = 520L;
-    protected static final long HIT_CONFIRM_WINDOW_MAX_MS = 1400L;
-    protected static final double HIT_CONFIRM_PING_FACTOR = 1.5;
-    protected static final double HIT_CONFIRM_RETRY_1_FRACTION = 0.30;
-    protected static final double HIT_CONFIRM_RETRY_2_FRACTION = 0.58;
-    protected static final double HIT_CONFIRM_RETRY_3_FRACTION = 0.82;
-    protected static final int DAMAGE_STATUS_HURT = 2;
-    protected static final int DAMAGE_STATUS_DEAD = 3;
+
+    // Only used for "spear-like" items that carry no KINETIC_WEAPON / ATTACK_RANGE component
+    // (isSpear also matches by name, so modded items can land here). Real spears read their own numbers.
+    protected static final long FALLBACK_WINDUP_MS = 500L;
+    protected static final double FALLBACK_MIN_RANGE = 1.875;
+    protected static final double FALLBACK_MAX_RANGE = 4.625;
 
     protected final SpearSpoof module;
     protected final SpearSpoofRuntime runtime;
@@ -45,8 +33,6 @@ abstract class SpearSpoofCombatContext {
     protected final Setting<Boolean> onlyWhileElytra;
     protected final Setting<Boolean> autoSwitch;
     protected final Setting<Boolean> autoHoldUse;
-    protected final Setting<Boolean> autoRestartWindup;
-    protected final Setting<Boolean> attributeSwap;
     protected final Setting<Boolean> rotate;
     protected final Setting<Boolean> yawCamera;
     protected final Setting<Boolean> mode4x;
@@ -55,25 +41,10 @@ abstract class SpearSpoofCombatContext {
     protected final Setting<Double> minSpeedBps;
     protected final Setting<Double> minForwardDot;
     protected final Setting<Double> minClosingSpeedBps;
-    protected final Setting<Double> minCooldown;
-    protected final Setting<Double> maxYawError;
-    protected final Setting<Double> maxPitchError;
-
-    protected final Setting<Integer> minWindupMs;
-    protected final Setting<Integer> readyWindowMs;
-    protected final Setting<Integer> fatigueWindowMs;
-    protected final Setting<Integer> recoveryDelayMs;
+    protected final Setting<Double> minRange;
+    protected final Setting<Double> maxRange;
 
     protected final Setting<Boolean> requireLineOfSight;
-    protected final Setting<Boolean> adaptiveReposition;
-    protected final Setting<Integer> repositionRejectStreak;
-    protected final Setting<Integer> repositionHoldMs;
-
-    protected long packetConfirmAtMs;
-    protected int packetConfirmTargetId = -1;
-    protected String packetConfirmType = "";
-    protected int hitConfirmBaseHurtTime = -1;
-    protected int hitConfirmBaseRegenTime = -1;
 
     protected SpearSpoofCombatContext(
         SpearSpoof module,
@@ -83,8 +54,6 @@ abstract class SpearSpoofCombatContext {
         Setting<Boolean> onlyWhileElytra,
         Setting<Boolean> autoSwitch,
         Setting<Boolean> autoHoldUse,
-        Setting<Boolean> autoRestartWindup,
-        Setting<Boolean> attributeSwap,
         Setting<Boolean> rotate,
         Setting<Boolean> yawCamera,
         Setting<Boolean> mode4x,
@@ -92,17 +61,9 @@ abstract class SpearSpoofCombatContext {
         Setting<Double> minSpeedBps,
         Setting<Double> minForwardDot,
         Setting<Double> minClosingSpeedBps,
-        Setting<Double> minCooldown,
-        Setting<Double> maxYawError,
-        Setting<Double> maxPitchError,
-        Setting<Integer> minWindupMs,
-        Setting<Integer> readyWindowMs,
-        Setting<Integer> fatigueWindowMs,
-        Setting<Integer> recoveryDelayMs,
-        Setting<Boolean> requireLineOfSight,
-        Setting<Boolean> adaptiveReposition,
-        Setting<Integer> repositionRejectStreak,
-        Setting<Integer> repositionHoldMs
+        Setting<Double> minRange,
+        Setting<Double> maxRange,
+        Setting<Boolean> requireLineOfSight
     ) {
         this.module = module;
         this.runtime = runtime;
@@ -112,8 +73,6 @@ abstract class SpearSpoofCombatContext {
         this.onlyWhileElytra = onlyWhileElytra;
         this.autoSwitch = autoSwitch;
         this.autoHoldUse = autoHoldUse;
-        this.autoRestartWindup = autoRestartWindup;
-        this.attributeSwap = attributeSwap;
         this.rotate = rotate;
         this.yawCamera = yawCamera;
         this.mode4x = mode4x;
@@ -122,19 +81,10 @@ abstract class SpearSpoofCombatContext {
         this.minSpeedBps = minSpeedBps;
         this.minForwardDot = minForwardDot;
         this.minClosingSpeedBps = minClosingSpeedBps;
-        this.minCooldown = minCooldown;
-        this.maxYawError = maxYawError;
-        this.maxPitchError = maxPitchError;
-
-        this.minWindupMs = minWindupMs;
-        this.readyWindowMs = readyWindowMs;
-        this.fatigueWindowMs = fatigueWindowMs;
-        this.recoveryDelayMs = recoveryDelayMs;
+        this.minRange = minRange;
+        this.maxRange = maxRange;
 
         this.requireLineOfSight = requireLineOfSight;
-        this.adaptiveReposition = adaptiveReposition;
-        this.repositionRejectStreak = repositionRejectStreak;
-        this.repositionHoldMs = repositionHoldMs;
     }
 
     protected void lockApproachDirection(LivingEntity target) {
@@ -144,32 +94,11 @@ abstract class SpearSpoofCombatContext {
         runtime.lockedApproachDirection = normalizeOrFallback(fromTarget, fallback);
     }
 
-    protected boolean isSoftTrackableDuringConfirm(LivingEntity target) {
-        if (target == null || module.client().player == null) return false;
-        if (target.isRemoved() || !target.isAlive() || target.isDead()) return false;
-        double maxDistance = module.permanentTargetRange() + 2.5;
-        return module.client().player.distanceTo(target) <= maxDistance;
-    }
-
     protected void onTargetChanged(long now, LivingEntity newTarget) {
         lockApproachDirection(newTarget);
         runtime.hitChain = 0;
-        // Keep RMB charge when the target swaps. Feels jank if we reclick every mob.
-        runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, now + 35L);
-
-        // Exception to the keep-charge rule: a charge that is already near the end of its window
-        // would die mid-approach on the new target, so re-arm it now instead of carrying it over.
-        if (!attributeSwap.get() && autoHoldUse.get() && runtime.useStartedAtMs > 0L) {
-            long heldMs = runtime.holdMs(now);
-            long fullWindow = fullChargeWindowMs();
-            long restartAt = Math.max(minWindupMs.get(), fullWindow - TARGET_SWITCH_WINDUP_RESTART_MARGIN_MS);
-            if (heldMs >= restartAt) {
-                triggerWindupRestart(now);
-                runtime.pendingRmbRecharge = false;
-                runtime.rmbRechargeReleaseTicks = 0;
-                runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, now + 55L);
-            }
-        }
+        // Keep the RMB charge when the target swaps: releasing it makes the server call clearActiveItem,
+        // which drops the charge and the piercing cooldown map and costs a full delayTicks to re-arm.
 
         if (module.client().player != null && newTarget != null) {
             double distance = module.client().player.getEntityPos().distanceTo(newTarget.getEntityPos());
@@ -181,20 +110,13 @@ abstract class SpearSpoofCombatContext {
                 runtime.beginReset(now, holdMs);
                 long rampLockMs = isSmallTarget(newTarget) ? 120L : 170L;
                 runtime.repositionUntilMs = Math.max(runtime.repositionUntilMs, now + rampLockMs);
-                runtime.nextAttemptAtMs = Math.max(runtime.nextAttemptAtMs, runtime.repositionUntilMs);
             }
         }
     }
 
-    protected void triggerWindupRestart(long now) {
-        runtime.windupRestartTicks = Math.max(runtime.windupRestartTicks, 4);
-        runtime.useStartedAtMs = 0;
-        runtime.lastForcedUseInteractMs = 0L;
-        runtime.rechargeRebuildUntilMs = Math.max(runtime.rechargeRebuildUntilMs, now + RECHARGE_REBUILD_MS);
-        runtime.beginReset(now, RECHARGE_RESET_HOLD_MS);
-    }
-
     protected boolean ensureSpearInMainHand() {
+        // Never swaps while a spear is already held: UpdateSelectedSlotC2SPacket makes the server
+        // call clearActiveItem, destroying the server-side charge mid-pass.
         if (isSpear(module.client().player.getMainHandStack())) return true;
         if (!autoSwitch.get()) return false;
 
@@ -242,7 +164,6 @@ abstract class SpearSpoofCombatContext {
         return new Vec3d(1.0, 0.0, 0.0);
     }
 
-    protected abstract long fullChargeWindowMs();
     protected abstract double effectiveMinRange(SpearSpoofCombatTypes.AttackContext ctx, LivingEntity target);
     protected abstract double effectiveMaxRange(SpearSpoofCombatTypes.AttackContext ctx, LivingEntity target);
     protected abstract boolean isSmallTarget(LivingEntity entity);

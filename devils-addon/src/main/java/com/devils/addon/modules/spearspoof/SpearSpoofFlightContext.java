@@ -4,9 +4,6 @@ import com.devils.addon.modules.SpearSpoof;
 import meteordevelopment.meteorclient.settings.Setting;
 
 abstract class SpearSpoofFlightContext {
-    protected static final double ENFORCED_MIN_RANGE = 0.40;
-    protected static final double SMALL_TARGET_MIN_RANGE = 0.28;
-    protected static final double ENFORCED_MAX_RANGE = 4.5;
     protected static final double FAR_CHASE_DIRECT_DISTANCE = 8.0;
     protected static final double FAR_CHASE_INTERCEPT_FACTOR = 0.12;
     protected static final double FAR_CHASE_INTERCEPT_MAX = 3.0;
@@ -22,9 +19,6 @@ abstract class SpearSpoofFlightContext {
     protected static final double RESET_RETREAT_DISTANCE = 5.0;
     protected static final double SMALL_RESET_RETREAT_DISTANCE = 5.0;
     protected static final double RESET_VERTICAL_RETREAT_BLOCKS = 5.0;
-    protected static final double RESET_VERTICAL_RETREAT_BLOCKS_RECHARGE = 5.6;
-    protected static final double RECHARGE_RETREAT_DISTANCE = 5.0;
-    protected static final double SMALL_RECHARGE_RETREAT_DISTANCE = 5.0;
     protected static final double MAX_RESET_RETREAT_DISTANCE = 6.0;
     protected static final double RESET_VERTICAL_RETREAT_EPS = 0.10;
     protected static final long RESET_VERTICAL_RETREAT_FAILSAFE_MS = 1200L;
@@ -110,7 +104,6 @@ abstract class SpearSpoofFlightContext {
     protected final SpearSpoofDebugLogger debugLogger;
 
     protected final Setting<Boolean> onlyWhileElytra;
-    protected final Setting<Boolean> attributeSwap;
     protected final Setting<Double> horizontalSpeed;
     protected final Setting<Double> verticalSpeed;
     protected final Setting<Boolean> obstacleAvoidance;
@@ -126,7 +119,6 @@ abstract class SpearSpoofFlightContext {
         SpearSpoofCombatService combat,
         SpearSpoofDebugLogger debugLogger,
         Setting<Boolean> onlyWhileElytra,
-        Setting<Boolean> attributeSwap,
         Setting<Double> minRange,
         Setting<Double> maxRange,
         Setting<Double> smallTargetRange,
@@ -149,7 +141,6 @@ abstract class SpearSpoofFlightContext {
         this.debugLogger = debugLogger;
 
         this.onlyWhileElytra = onlyWhileElytra;
-        this.attributeSwap = attributeSwap;
         this.horizontalSpeed = horizontalSpeed;
         this.verticalSpeed = verticalSpeed;
         this.obstacleAvoidance = obstacleAvoidance;

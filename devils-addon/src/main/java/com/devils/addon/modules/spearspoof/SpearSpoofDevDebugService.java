@@ -4,14 +4,15 @@ import com.devils.addon.modules.SpearSpoof;
 import meteordevelopment.meteorclient.mixininterface.IPlayerInteractEntityC2SPacket;
 import meteordevelopment.meteorclient.settings.Setting;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityStatuses;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
-import java.lang.reflect.Method;
 import java.util.Locale;
 
 public final class SpearSpoofDevDebugService {
@@ -142,10 +143,19 @@ public final class SpearSpoofDevDebugService {
     }
 
     public void onPacketSend(Object packet) {
+        long now = System.currentTimeMillis();
+
+        if (packet instanceof PlayerActionC2SPacket action && action.getAction() == PlayerActionC2SPacket.Action.STAB) {
+            LivingEntity stabTarget = runtime.target;
+            int stabTargetId = stabTarget != null ? stabTarget.getId() : -1;
+            runtime.onDevAttackPacket(now, stabTargetId);
+            debugLogger.logDev("stab-packet", "stab-packet targetId=" + stabTargetId, stabTarget, runtime);
+            return;
+        }
+
         if (!(packet instanceof IPlayerInteractEntityC2SPacket interact)) return;
         if (interact.meteor$getType() != PlayerInteractEntityC2SPacket.InteractType.ATTACK) return;
 
-        long now = System.currentTimeMillis();
         Entity rawTarget = interact.meteor$getEntity();
         LivingEntity target = rawTarget instanceof LivingEntity living ? living : runtime.target;
         int targetId = rawTarget != null ? rawTarget.getId() : -1;
@@ -156,24 +166,34 @@ public final class SpearSpoofDevDebugService {
         debugLogger.logDev("attack-packet", detail, target, runtime);
     }
 
+    /**
+     * Typed access only - the old reflective getEntityId()/getId() lookup resolved to nothing in a
+     * remapped jar, so this whole path silently logged zero hits in production.
+     * EntityStatuses.KINETIC_ATTACK is raised on the ATTACKER (us); status 3 is the target dying.
+     */
     public void onPacketReceive(Object packet) {
+        if (module.client() == null || module.client().world == null || module.client().player == null) return;
         if (!(packet instanceof EntityStatusS2CPacket statusPacket)) return;
         int status = statusPacket.getStatus();
-        if (status != 2 && status != 3) return;
+        if (status != EntityStatuses.KINETIC_ATTACK && status != 3) return;
 
-        Integer entityIdObj = extractEntityId(packet);
-        if (entityIdObj == null) return;
-        int entityId = entityIdObj;
+        Entity statusEntity = statusPacket.getEntity(module.client().world);
+        if (statusEntity == null) return;
 
-        boolean matchesPending = runtime.devPendingAttackTargetId >= 0 && entityId == runtime.devPendingAttackTargetId;
-        boolean matchesCurrent = runtime.target != null && entityId == runtime.target.getId();
-        if (!matchesPending && !matchesCurrent) return;
+        boolean kineticHitBySelf = status == EntityStatuses.KINETIC_ATTACK && statusEntity == module.client().player;
+        int entityId = kineticHitBySelf
+            ? (runtime.target != null ? runtime.target.getId() : -1)
+            : statusEntity.getId();
+
+        if (!kineticHitBySelf) {
+            boolean matchesPending = runtime.devPendingAttackTargetId >= 0 && entityId == runtime.devPendingAttackTargetId;
+            boolean matchesCurrent = runtime.target != null && entityId == runtime.target.getId();
+            if (!matchesPending && !matchesCurrent) return;
+        }
 
         LivingEntity target = null;
-        if (module.client() != null && module.client().world != null) {
-            Entity entity = module.client().world.getEntityById(entityId);
-            if (entity instanceof LivingEntity living) target = living;
-        }
+        Entity entity = module.client().world.getEntityById(entityId);
+        if (entity instanceof LivingEntity living) target = living;
         if (target == null) target = runtime.target;
 
         long now = System.currentTimeMillis();
@@ -223,25 +243,6 @@ public final class SpearSpoofDevDebugService {
         double y = MathHelper.clamp(point.y, box.minY, box.maxY);
         double z = MathHelper.clamp(point.z, box.minZ, box.maxZ);
         return point.distanceTo(new Vec3d(x, y, z));
-    }
-
-    private Integer extractEntityId(Object packet) {
-        Object value = invokeNoArg(packet, "getEntityId");
-        if (value instanceof Integer i) return i;
-        value = invokeNoArg(packet, "getId");
-        if (value instanceof Integer i) return i;
-        return null;
-    }
-
-    private Object invokeNoArg(Object target, String methodName) {
-        if (target == null || methodName == null || methodName.isBlank()) return null;
-        try {
-            Method method = target.getClass().getMethod(methodName);
-            method.setAccessible(true);
-            return method.invoke(target);
-        } catch (Throwable ignored) {
-            return null;
-        }
     }
 
     private String f2(double value) {

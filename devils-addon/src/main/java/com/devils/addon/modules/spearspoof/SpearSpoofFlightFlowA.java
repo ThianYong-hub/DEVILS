@@ -14,8 +14,8 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
 abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
-    protected SpearSpoofFlightFlowA(SpearSpoof module, SpearSpoofRuntime runtime, SpearSpoofFlightPathfinder pathfinder, SpearSpoofTargetingService targeting, SpearSpoofCombatService combat, SpearSpoofDebugLogger debugLogger, Setting<Boolean> onlyWhileElytra, Setting<Boolean> attributeSwap, Setting<Double> minRange, Setting<Double> maxRange, Setting<Double> smallTargetRange, Setting<Double> horizontalSpeed, Setting<Double> verticalSpeed, Setting<Double> approachRange, Setting<Double> retreatRange, Setting<Boolean> topDownEnabled, Setting<Double> topDownHeight, Setting<Boolean> obstacleAvoidance, Setting<Boolean> autoRelaunch, Setting<Boolean> testFlyUntilDamage, Setting<Boolean> mode4x) {
-        super(module, runtime, pathfinder, targeting, combat, debugLogger, onlyWhileElytra, attributeSwap, minRange, maxRange, smallTargetRange, horizontalSpeed, verticalSpeed, approachRange, retreatRange, topDownEnabled, topDownHeight, obstacleAvoidance, autoRelaunch, testFlyUntilDamage, mode4x);
+    protected SpearSpoofFlightFlowA(SpearSpoof module, SpearSpoofRuntime runtime, SpearSpoofFlightPathfinder pathfinder, SpearSpoofTargetingService targeting, SpearSpoofCombatService combat, SpearSpoofDebugLogger debugLogger, Setting<Boolean> onlyWhileElytra, Setting<Double> minRange, Setting<Double> maxRange, Setting<Double> smallTargetRange, Setting<Double> horizontalSpeed, Setting<Double> verticalSpeed, Setting<Double> approachRange, Setting<Double> retreatRange, Setting<Boolean> topDownEnabled, Setting<Double> topDownHeight, Setting<Boolean> obstacleAvoidance, Setting<Boolean> autoRelaunch, Setting<Boolean> testFlyUntilDamage, Setting<Boolean> mode4x) {
+        super(module, runtime, pathfinder, targeting, combat, debugLogger, onlyWhileElytra, minRange, maxRange, smallTargetRange, horizontalSpeed, verticalSpeed, approachRange, retreatRange, topDownEnabled, topDownHeight, obstacleAvoidance, autoRelaunch, testFlyUntilDamage, mode4x);
     }
 
     protected void handleLostTargetMove(PlayerMoveEvent event, long now, boolean gliding, boolean inLiquid) {
@@ -106,9 +106,7 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
         double desiredRetreat = desiredRetreatDistance(target, engageMin, engageMax, now);
         boolean pitResetMode = runtime.pitVerticalLockTargetId == target.getId() && now < runtime.pitVerticalLockUntilMs;
         boolean awaitingHitConfirm = runtime.isAwaitingHitConfirm(target, now);
-        boolean forceUntilDamageMode = testFlyUntilDamage.get()
-            && awaitingHitConfirm
-            && runtime.hitConfirmTargetId == target.getId();
+        boolean forceUntilDamageMode = testFlyUntilDamage.get() && awaitingHitConfirm;
 
         if (distance <= engageMin + 0.02 && runtime.passPhase != SpearSpoofRuntime.PassPhase.RESET) {
             runtime.resetDirection = normalizeOrFallback(
@@ -194,15 +192,19 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
         if (changed) debugLogger.logPhaseChange("Phase->APPROACH", reason, target, runtime);
     }
 
+    // Same window the combat gate uses, derived from the held spear's ATTACK_RANGE component. The old
+    // hardcoded 0.40 floor steered the pass into the spear's dead zone: the piercing ray only starts
+    // 1.875 blocks from the eye, so contact range was a guaranteed miss.
     protected double getEngageMinRange(LivingEntity target) {
-        double base = isSmallTarget(target) ? SMALL_TARGET_MIN_RANGE : ENFORCED_MIN_RANGE;
+        double base = combat.engageMinRange(target);
         if (mode4x.get() && target != null) base = Math.max(base, MODE_4X_MIN_RANGE);
         return base;
     }
 
     protected double getEngageMaxRange(LivingEntity target) {
-        if (mode4x.get() && target != null) return Math.min(ENFORCED_MAX_RANGE, MODE_4X_MAX_RANGE);
-        return ENFORCED_MAX_RANGE;
+        double base = combat.engageMaxRange(target);
+        if (mode4x.get() && target != null) return Math.min(base, MODE_4X_MAX_RANGE);
+        return base;
     }
 
     protected double desiredRetreatDistance(LivingEntity target, double engageMin, double engageMax, long now) {
@@ -216,15 +218,9 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
 
         if (isSmallTarget(target)) {
             double base = Math.max(SMALL_RESET_RETREAT_DISTANCE, engageMin + 0.80);
-            if (runtime.rechargeRebuildUntilMs > now) {
-                base = Math.max(base, SMALL_RECHARGE_RETREAT_DISTANCE);
-            }
             return MathHelper.clamp(base, engageMin + 0.60, MAX_RESET_RETREAT_DISTANCE);
         }
         double base = Math.max(RESET_RETREAT_DISTANCE, engageMin + 0.95);
-        if (runtime.rechargeRebuildUntilMs > now) {
-            base = Math.max(base, RECHARGE_RETREAT_DISTANCE);
-        }
         return MathHelper.clamp(base, engageMin + 0.75, MAX_RESET_RETREAT_DISTANCE);
     }
 
@@ -244,7 +240,6 @@ abstract class SpearSpoofFlightFlowA extends SpearSpoofFlightContext {
     }
 
     protected double currentResetVerticalRetreatBlocks(long now) {
-        if (runtime.rechargeRebuildUntilMs > now) return RESET_VERTICAL_RETREAT_BLOCKS_RECHARGE;
         return RESET_VERTICAL_RETREAT_BLOCKS;
     }
 

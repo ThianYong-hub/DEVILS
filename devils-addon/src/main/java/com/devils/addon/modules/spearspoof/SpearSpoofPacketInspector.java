@@ -1,10 +1,14 @@
 package com.devils.addon.modules.spearspoof;
 
 import meteordevelopment.meteorclient.mixininterface.IPlayerInteractEntityC2SPacket;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.entity.Entity;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.network.packet.s2c.play.DamageTiltS2CPacket;
+import net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket;
 import net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket;
@@ -21,11 +25,13 @@ final class SpearSpoofPacketInspector {
     static boolean isInterestingSendPacket(Object packet) {
         return packet instanceof IPlayerInteractEntityC2SPacket
             || packet instanceof ClientCommandC2SPacket
+            || packet instanceof PlayerActionC2SPacket
             || packet instanceof PlayerMoveC2SPacket;
     }
 
     static boolean isInterestingReceivePacket(Object packet) {
         return packet instanceof EntityStatusS2CPacket
+            || packet instanceof EntityDamageS2CPacket
             || packet instanceof EntityTrackerUpdateS2CPacket
             || packet instanceof EntityVelocityUpdateS2CPacket
             || packet instanceof PlayerPositionLookS2CPacket
@@ -47,6 +53,11 @@ final class SpearSpoofPacketInspector {
             }
         }
 
+        if (packet instanceof PlayerActionC2SPacket action) {
+            detail.append(" action=").append(action.getAction());
+            if (action.getAction() == PlayerActionC2SPacket.Action.STAB) detail.append(" stab=true");
+        }
+
         if (packet instanceof ClientCommandC2SPacket) {
             Object mode = invokeNoArg(packet, "getMode");
             if (mode == null) mode = invokeNoArg(packet, "mode");
@@ -64,27 +75,29 @@ final class SpearSpoofPacketInspector {
         String name = packet.getClass().getSimpleName();
         detail.append("name=").append(name);
 
-        Integer entityId = extractEntityId(packet);
-        if (entityId != null) {
-            detail.append(" entityId=").append(entityId);
+        // Typed access only. Reflection by Yarn name resolves to nothing in a remapped production jar,
+        // so the old entityId/status lookups silently logged nothing exactly where it mattered most.
+        if (packet instanceof EntityDamageS2CPacket damage) {
+            detail.append(" entityId=").append(damage.entityId());
+            detail.append(" sourceCauseId=").append(damage.sourceCauseId());
         }
 
-        Object status = invokeNoArg(packet, "getStatus");
-        if (status != null) detail.append(" status=").append(status);
+        if (packet instanceof EntityStatusS2CPacket status) {
+            detail.append(" status=").append(status.getStatus());
+            MinecraftClient mc = MinecraftClient.getInstance();
+            Entity entity = mc.world != null ? status.getEntity(mc.world) : null;
+            if (entity != null) detail.append(" entityId=").append(entity.getId());
+        }
+
+        if (packet instanceof EntityVelocityUpdateS2CPacket velocity) {
+            detail.append(" entityId=").append(velocity.getEntityId());
+        }
 
         if (packet instanceof PlayerPositionLookS2CPacket) {
             detail.append(" rubberband=true");
         }
 
         return detail.toString();
-    }
-
-    private static Integer extractEntityId(Object packet) {
-        Object value = invokeNoArg(packet, "getEntityId");
-        if (value instanceof Integer i) return i;
-        value = invokeNoArg(packet, "getId");
-        if (value instanceof Integer i) return i;
-        return null;
     }
 
     private static Object invokeNoArg(Object target, String methodName) {

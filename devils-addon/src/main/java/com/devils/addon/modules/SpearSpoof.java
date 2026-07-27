@@ -35,8 +35,6 @@ public class SpearSpoof extends Module {
     private final SettingGroup sgMovement = settings.createGroup("Movement");
     private final SettingGroup sgFlight = settings.createGroup("Flight");
     private final SettingGroup sgStrike = settings.createGroup("Strike");
-    private final SettingGroup sgStage = settings.createGroup("Stage");
-    private final SettingGroup sgRecovery = settings.createGroup("Recovery");
     private final SettingGroup sgDebug = settings.createGroup("Debug");
 
     private final SettingGroup sgRender = settings.createGroup("Render");
@@ -129,21 +127,6 @@ public class SpearSpoof extends Module {
         .build()
     );
 
-    private final Setting<Boolean> autoRestartWindup = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-restart-windup")
-        .description("Force restart windup when spear enters recovery stage.")
-        .defaultValue(true)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Boolean> attributeSwap = sgGeneral.add(new BoolSetting.Builder()
-        .name("attribute-swap")
-        .description("Swap off spear briefly after successful hit.")
-        .defaultValue(false)
-        .build()
-    );
-
     private final Setting<Boolean> rotate = sgGeneral.add(new BoolSetting.Builder()
         .name("rotate")
         .description("Rotate to predicted hitbox before attack.")
@@ -230,26 +213,6 @@ public class SpearSpoof extends Module {
         .build()
     );
 
-    private final Setting<Double> maxYawError = sgMovement.add(new DoubleSetting.Builder()
-        .name("max-yaw-error")
-        .description("Maximum yaw mismatch (degrees) before attack.")
-        .defaultValue(34.0)
-        .range(1.0, 180.0)
-        .sliderRange(5.0, 60.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Double> maxPitchError = sgMovement.add(new DoubleSetting.Builder()
-        .name("max-pitch-error")
-        .description("Maximum pitch mismatch (degrees) before attack.")
-        .defaultValue(30.0)
-        .range(1.0, 90.0)
-        .sliderRange(5.0, 45.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
     private final Setting<Double> horizontalSpeed = sgFlight.add(new DoubleSetting.Builder()
         .name("horizontal-speed")
         .description("Horizontal chase speed.")
@@ -330,21 +293,19 @@ public class SpearSpoof extends Module {
 
     private final Setting<Double> minRange = sgStrike.add(new DoubleSetting.Builder()
         .name("min-range")
-        .description("Minimum strike distance.")
+        .description("Minimum eye-to-hitbox strike distance. Never goes below the spear's own 1.875 dead zone.")
         .defaultValue(3.0)
         .range(0.0, 4.0)
         .sliderRange(0.0, 3.0)
-        .visible(this::showAdvanced)
         .build()
     );
 
     private final Setting<Double> maxRange = sgStrike.add(new DoubleSetting.Builder()
         .name("max-range")
-        .description("Maximum strike distance for normal targets.")
+        .description("Maximum eye-to-hitbox strike distance. Capped by the spear's own reach, plus the lunge bonus.")
         .defaultValue(4.5)
         .range(2.5, 6.0)
         .sliderRange(3.0, 5.0)
-        .visible(this::showAdvanced)
         .build()
     );
 
@@ -358,88 +319,10 @@ public class SpearSpoof extends Module {
         .build()
     );
 
-    private final Setting<Double> minCooldown = sgStrike.add(new DoubleSetting.Builder()
-        .name("min-cooldown")
-        .description("Required vanilla attack cooldown progress.")
-        .defaultValue(0.92)
-        .range(0.0, 1.0)
-        .sliderRange(0.75, 1.0)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
     private final Setting<Boolean> requireLineOfSight = sgStrike.add(new BoolSetting.Builder()
         .name("require-line-of-sight")
         .description("Reject strike when target is not visible.")
         .defaultValue(true)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> minWindupMs = sgStage.add(new IntSetting.Builder()
-        .name("min-windup-ms")
-        .description("Minimum RMB hold before strike.")
-        .defaultValue(180)
-        .range(0, 1000)
-        .sliderRange(0, 500)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> readyWindowMs = sgStage.add(new IntSetting.Builder()
-        .name("ready-window-ms")
-        .description("Duration of spear READY stage after windup.")
-        .defaultValue(5000)
-        .range(100, 10000)
-        .sliderRange(400, 5000)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> fatigueWindowMs = sgStage.add(new IntSetting.Builder()
-        .name("fatigue-window-ms")
-        .description("Duration of spear FATIGUE stage after READY.")
-        .defaultValue(2600)
-        .range(100, 10000)
-        .sliderRange(400, 5000)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> recoveryDelayMs = sgStage.add(new IntSetting.Builder()
-        .name("recovery-delay-ms")
-        .description("Extra delay after successful hit before next attempt.")
-        .defaultValue(70)
-        .range(0, 1000)
-        .sliderRange(0, 300)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Boolean> adaptiveReposition = sgRecovery.add(new BoolSetting.Builder()
-        .name("adaptive-reposition")
-        .description("Pause attack attempts after repeated speed/forward rejects.")
-        .defaultValue(true)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> repositionRejectStreak = sgRecovery.add(new IntSetting.Builder()
-        .name("reposition-reject-streak")
-        .description("Reject streak needed to trigger reposition lock.")
-        .defaultValue(4)
-        .range(1, 20)
-        .sliderRange(1, 10)
-        .visible(this::showAdvanced)
-        .build()
-    );
-
-    private final Setting<Integer> repositionHoldMs = sgRecovery.add(new IntSetting.Builder()
-        .name("reposition-hold-ms")
-        .description("How long attack attempts are paused during reposition.")
-        .defaultValue(260)
-        .range(0, 5000)
-        .sliderRange(0, 2000)
         .visible(this::showAdvanced)
         .build()
     );
@@ -526,8 +409,6 @@ public class SpearSpoof extends Module {
         onlyWhileElytra,
         autoSwitch,
         autoHoldUse,
-        autoRestartWindup,
-        attributeSwap,
         rotate,
         yawCamera,
         mode4x,
@@ -535,17 +416,9 @@ public class SpearSpoof extends Module {
         minSpeedBps,
         minForwardDot,
         minClosingSpeedBps,
-        minCooldown,
-        maxYawError,
-        maxPitchError,
-        minWindupMs,
-        readyWindowMs,
-        fatigueWindowMs,
-        recoveryDelayMs,
-        requireLineOfSight,
-        adaptiveReposition,
-        repositionRejectStreak,
-        repositionHoldMs
+        minRange,
+        maxRange,
+        requireLineOfSight
     );
 
     private final SpearSpoofFlightService flightService = new SpearSpoofFlightService(
@@ -556,7 +429,6 @@ public class SpearSpoof extends Module {
         combatService,
         debugLogger,
         onlyWhileElytra,
-        attributeSwap,
         minRange,
         maxRange,
         smallTargetRange,

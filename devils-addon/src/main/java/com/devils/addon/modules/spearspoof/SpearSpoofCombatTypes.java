@@ -8,26 +8,16 @@ public final class SpearSpoofCombatTypes {
 
     public enum RunStage {
         WINDUP,
-        READY,
-        FATIGUE,
-        RECOVERY;
+        READY;
 
-        public static RunStage fromHold(long holdMs, int windupMs, int readyWindowMs, int fatigueWindowMs) {
-            if (holdMs < windupMs) return WINDUP;
-
-            long afterWindup = holdMs - windupMs;
-            if (afterWindup <= readyWindowMs) return READY;
-            if (afterWindup <= readyWindowMs + fatigueWindowMs) return FATIGUE;
-            return RECOVERY;
-        }
-
-        public static long stageDurationHint(RunStage stage, int windupMs, int readyWindowMs, int fatigueWindowMs) {
-            return switch (stage) {
-                case WINDUP -> Math.max(0, windupMs);
-                case READY -> Math.max(0, readyWindowMs);
-                case FATIGUE -> Math.max(0, fatigueWindowMs);
-                case RECOVERY -> 0L;
-            };
+        /**
+         * The spear only has two states that matter: the KINETIC_WEAPON delay before the charge arms,
+         * and the armed charge itself. Vanilla stops the item use on its own after
+         * {@code delayTicks + damageConditions.maxDurationTicks} ({@code KineticWeaponComponent.getUseTicks}),
+         * so there is no fatigue or recovery stage to model here.
+         */
+        public static RunStage fromHold(long holdMs, long windupMs) {
+            return holdMs < windupMs ? WINDUP : READY;
         }
     }
 
@@ -36,12 +26,9 @@ public final class SpearSpoofCombatTypes {
         public final Vec3d playerVel;
         public final Vec3d targetPos;
         public final Vec3d targetVel;
-        public final Vec3d predictedTargetPos;
         public final Vec3d aimPos;
         public final float yaw;
         public final float pitch;
-        public final double yawError;
-        public final double pitchError;
         public final double distance;
         public final double verticalDiff;
         public final double speedBps;
@@ -53,11 +40,6 @@ public final class SpearSpoofCombatTypes {
         public final boolean smallTarget;
         public final double targetWidth;
         public final double targetHeight;
-        public final double predictionLeadTicks;
-        public final double predictionExtraTicks;
-        public final double predictionTotalTicks;
-        public final boolean predictionAuto;
-        public final boolean predictionCollisionAware;
         public final RunStage stage;
 
         public AttackContext(
@@ -65,12 +47,9 @@ public final class SpearSpoofCombatTypes {
             Vec3d playerVel,
             Vec3d targetPos,
             Vec3d targetVel,
-            Vec3d predictedTargetPos,
             Vec3d aimPos,
             float yaw,
             float pitch,
-            double yawError,
-            double pitchError,
             double distance,
             double verticalDiff,
             double speedBps,
@@ -82,23 +61,15 @@ public final class SpearSpoofCombatTypes {
             boolean smallTarget,
             double targetWidth,
             double targetHeight,
-            double predictionLeadTicks,
-            double predictionExtraTicks,
-            double predictionTotalTicks,
-            boolean predictionAuto,
-            boolean predictionCollisionAware,
             RunStage stage
         ) {
             this.playerPos = playerPos;
             this.playerVel = playerVel;
             this.targetPos = targetPos;
             this.targetVel = targetVel;
-            this.predictedTargetPos = predictedTargetPos;
             this.aimPos = aimPos;
             this.yaw = yaw;
             this.pitch = pitch;
-            this.yawError = yawError;
-            this.pitchError = pitchError;
             this.distance = distance;
             this.verticalDiff = verticalDiff;
             this.speedBps = speedBps;
@@ -110,11 +81,6 @@ public final class SpearSpoofCombatTypes {
             this.smallTarget = smallTarget;
             this.targetWidth = targetWidth;
             this.targetHeight = targetHeight;
-            this.predictionLeadTicks = predictionLeadTicks;
-            this.predictionExtraTicks = predictionExtraTicks;
-            this.predictionTotalTicks = predictionTotalTicks;
-            this.predictionAuto = predictionAuto;
-            this.predictionCollisionAware = predictionCollisionAware;
             this.stage = stage;
         }
     }
