@@ -31,6 +31,8 @@ import java.util.zip.ZipFile;
 import static com.devils.addon.modules.modupdater.ModAutoUpdaterText.safe;
 
 final class ModUpdaterInstaller {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("Devils/ModUpdater");
+
     private final HttpClient http;
 
     ModUpdaterInstaller(HttpClient http) {
@@ -150,8 +152,10 @@ final class ModUpdaterInstaller {
             }
 
             return "release-minecraft-range-incompatible (" + String.join(" || ", predicates) + " vs " + target + ")";
-        } catch (Exception ignored) {
-            return "";
+        } catch (Exception e) {
+            // A corrupt download or unreadable zip must never pass as compatible:
+            // returning "" here would let it replace a working jar.
+            return "release-validation-failed (" + e.getClass().getSimpleName() + ")";
         }
     }
 
@@ -196,7 +200,8 @@ final class ModUpdaterInstaller {
 
             Files.copy(source, destination, StandardCopyOption.REPLACE_EXISTING);
             return true;
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            LOG.warn("Copying {} into the target mods dir failed: {}", mod.fileName, e.toString());
             return false;
         }
     }
@@ -280,7 +285,11 @@ final class ModUpdaterInstaller {
                 if (!Files.exists(backup) || Files.exists(original)) continue;
                 if (original.getParent() != null) Files.createDirectories(original.getParent());
                 Files.move(backup, original, StandardCopyOption.REPLACE_EXISTING);
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // A failed rollback can leave the mods folder without the old jar;
+                // this must be visible, not silently ignored.
+                LOG.warn("Rollback failed: could not restore {} from backup {} ({})",
+                    entry.getKey(), entry.getValue(), e.toString());
             }
         }
     }
