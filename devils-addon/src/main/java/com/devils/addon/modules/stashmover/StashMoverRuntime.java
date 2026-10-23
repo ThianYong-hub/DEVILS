@@ -24,9 +24,12 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
 abstract class StashMoverRuntime extends StashMoverInteraction {
+    /** Hard cap on consecutive stall recoveries without real progress before the module disables itself. */
+    protected static final int MAX_STALL_RECOVERIES = 5;
+
     protected void tickMover() {
         BlockPos pearlChest = pearlChestPos();
-        BlockPos lootChest = lootChestPos();
+        BlockPos lootChest = resolveDestinationChest();
         BlockPos water = waterPos();
         Vec3d chamber = chamberLookPos();
         switch (moverPhase) {
@@ -138,6 +141,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             actionCooldownTicks = 2;
         } else if (result == PearlTakeResult.SUCCESS) {
             pearlChestNoPearlRetries = 0;
+            stallRecoveryCount = 0;
         }
     }
 
@@ -217,6 +221,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         lastPearlTarget = pearlTarget;
         lastPearlThrowYaw = yaw;
         lastPearlThrowPitch = pitch;
+        stallRecoveryCount = 0;
         StrictRuntimeLogger.logStashMover(
             "pearl-throw",
             StashMoverTelemetry.pearlThrow(this, mc.player.getEntityPos(), pearlTarget, yaw, pitch)
@@ -816,9 +821,24 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 "destination-full",
                 StashMoverTelemetry.destinationFull(this, lootChest, occupiedStorageSlots(handler), storageSlotCount(handler), fullDestinationChests.size())
             );
+            BlockPos alternative = findAlternativeDestinationChest(lootChest, pearlChestPos());
+            if (alternative != null) {
+                destinationChestOverride = alternative;
+                waitingForDestinationSpace = false;
+                closeHandledScreen();
+                cancelGoal("destination-full-switch");
+                openedContainerTarget = null;
+                warning("Destination chest is full; switching to alternative chest " + formatBlockPosForFeedback(alternative));
+                StrictRuntimeLogger.logStashMover(
+                    "destination-switch",
+                    "from=" + formatBlockPosForFeedback(lootChest) + " to=" + formatBlockPosForFeedback(alternative)
+                );
+                actionCooldownTicks = 5;
+                return;
+            }
             if (!waitingForDestinationSpace) {
                 waitingForDestinationSpace = true;
-                warning("Destination chest is full; keeping it open and waiting for free slots.");
+                warning("Destination chest is full and no alternative is in range; waiting for free slots.");
                 debugLog("destination chest full, keeping screen open and waiting for free slots");
             }
             actionCooldownTicks = Math.max(actionCooldownTicks, 5);
@@ -836,6 +856,7 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
             if (!readyForChestAction()) return;
             mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
             movedStacks += 1.0f;
+            stallRecoveryCount = 0;
             return;
         }
     }
@@ -1067,6 +1088,22 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         }
     }
 
+    /**
+     * Effective deposit chest: the override chosen after the saved chest filled up,
+     * falling back to the saved loot chest once the override stops being usable.
+     */
+    protected BlockPos resolveDestinationChest() {
+        BlockPos override = destinationChestOverride;
+        if (override != null) {
+            boolean stillUsable = mc.world != null
+                && mc.world.getBlockState(override).getBlock() instanceof net.minecraft.block.ChestBlock
+                && !isMarkedFullDestinationChest(override);
+            if (stillUsable) return override;
+            destinationChestOverride = null;
+        }
+        return lootChestPos();
+    }
+
     protected void detectOperationalStall(BlockPos lootChest) {
         int timeout = Math.max(1, stallTimeoutTicks.get() / LOGIC_INTERVAL_TICKS);
         if (phaseAgeTicks < timeout) return;
@@ -1074,7 +1111,9 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (moverPhase == MoverPhase.WAIT_FOR_PEARL
             || moverPhase == MoverPhase.THROWING_PEARL
             || moverPhase == MoverPhase.AWAITING_RETURN_DEATH
-            || moverPhase == MoverPhase.PUT_BACK_PEARLS) {
+            || moverPhase == MoverPhase.PUT_BACK_PEARLS
+            || moverPhase == MoverPhase.SEND_LOAD_PEARL_MSG
+            || moverPhase == MoverPhase.WALKING_TO_CHEST) {
             lastStallReason = moverPhase.name().toLowerCase(Locale.ROOT) + "-timeout";
             recoverFromOperationalStall(lootChest);
         }
@@ -1082,6 +1121,12 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
 
     protected void recoverFromOperationalStall(BlockPos lootChest) {
         stallRecoveryCount++;
+        if (stallRecoveryCount > MAX_STALL_RECOVERIES) {
+            error("Disabling StashMover after " + MAX_STALL_RECOVERIES + " stall recoveries without progress: " + lastStallReason);
+            lastRecoveryAction = "disable-too-many-stalls";
+            toggle();
+            return;
+        }
         switch (stallAction.get()) {
             case WARN_ONLY -> {
                 warning("StashMover detected a water/pearl stall: " + lastStallReason);
@@ -1089,6 +1134,34 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                 phaseAgeTicks = 0;
             }
             case RESET_PHASE -> {
+                if (moverPhase == MoverPhase.SEND_LOAD_PEARL_MSG) {
+                    warning("StashMover partner did not acknowledge the load message; resending (" + stallRecoveryCount + "/" + MAX_STALL_RECOVERIES + ").");
+                    loadAckReceived = false;
+                    resendLoadMessageTicks = 0;
+                    phaseAgeTicks = 0;
+                    actionCooldownTicks = 10;
+                    lastRecoveryAction = "resend-load-message-stall";
+                    return;
+                }
+                if (moverPhase == MoverPhase.WALKING_TO_CHEST) {
+                    BlockPos alternative = findAlternativeDestinationChest(lootChest, pearlChestPos());
+                    if (alternative != null && !alternative.equals(lootChest)) {
+                        warning("StashMover switched to an alternative deposit chest after a stall.");
+                        destinationChestOverride = alternative;
+                        waitingForDestinationSpace = false;
+                        closeHandledScreen();
+                        cancelGoal("destination-stall-switch");
+                        openedContainerTarget = null;
+                        phaseAgeTicks = 0;
+                        actionCooldownTicks = 5;
+                        lastRecoveryAction = "switch-destination-chest";
+                        return;
+                    }
+                    error("StashMover stalled at the destination chest with no alternative available; disabling.");
+                    lastRecoveryAction = "disable-destination-stall";
+                    toggle();
+                    return;
+                }
                 if (moverPhase == MoverPhase.AWAITING_RETURN_DEATH) {
                     warning("StashMover did not die after staging the return pearl; resending the lethal return command.");
                     sendChatCommand(normalizedReturnCommand());
@@ -1105,27 +1178,29 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
                         actionCooldownTicks = 8;
                         lastRecoveryAction = "retry-put-back";
                     } else {
-                warning("StashMover recovered from stalled put-back phase by continuing to loot chest.");
-                continueAfterPearlStage(lootChest, "put-back-stall-recovery");
-                lastRecoveryAction = "continue-after-put-back-stall";
-            }
-        } else {
-            if (!loadingReturnPearlAfterDeposit && !isPlayerInventoryEmpty()) {
-                warning("StashMover retried a stalled inbound pearl wait by re-requesting the loader click.");
-                closeHandledScreen();
-                cancelGoal("stall-recovery-resend-load");
-                resendLoadMessageTicks = 0;
-                loadAckReceived = false;
-                setMoverPhase(MoverPhase.SEND_LOAD_PEARL_MSG, "stall-recovery-resend-load");
-                actionCooldownTicks = 10;
-                lastRecoveryAction = "resend-load-message";
-                return;
-            }
-            warning("StashMover reset stalled water/pearl phase: " + lastStallReason);
-            setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "stall-recovery");
-            actionCooldownTicks = 10;
-            lastRecoveryAction = "reset-to-wait-for-pearl";
-        }
+                        warning("StashMover recovered from stalled put-back phase by continuing to loot chest.");
+                        continueAfterPearlStage(lootChest, "put-back-stall-recovery");
+                        lastRecoveryAction = "continue-after-put-back-stall";
+                    }
+                } else {
+                    if (!loadingReturnPearlAfterDeposit && !isPlayerInventoryEmpty()) {
+                        warning("StashMover retried a stalled inbound pearl wait by re-requesting the loader click.");
+                        closeHandledScreen();
+                        cancelGoal("stall-recovery-resend-load");
+                        resendLoadMessageTicks = 0;
+                        loadAckReceived = false;
+                        setMoverPhase(MoverPhase.SEND_LOAD_PEARL_MSG, "stall-recovery-resend-load");
+                        phaseAgeTicks = 0;
+                        actionCooldownTicks = 10;
+                        lastRecoveryAction = "resend-load-message";
+                        return;
+                    }
+                    warning("StashMover reset stalled water/pearl phase: " + lastStallReason);
+                    setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "stall-recovery");
+                    phaseAgeTicks = 0;
+                    actionCooldownTicks = 10;
+                    lastRecoveryAction = "reset-to-wait-for-pearl";
+                }
             }
             case DISABLE_MODULE -> {
                 error("Disabling StashMover after detected stall: " + lastStallReason);

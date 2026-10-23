@@ -47,7 +47,7 @@ class StashMoverSourceTest {
         assertTrue(runtime.contains("ensureThrowContextReady(\"throwing-pearl-before-use\")"));
         assertTrue(runtime.contains("throw-screen-close"));
         assertTrue(runtime.contains("cancelGoal(\"player-died\")"));
-        assertTrue(runtime.contains("Destination chest is full; keeping it open and waiting for free slots."));
+        assertTrue(runtime.contains("Destination chest is full and no alternative is in range; waiting for free slots."));
         assertTrue(runtime.contains("waitingForDestinationSpace = true;"));
         assertFalse(runtime.contains("if (autoDisable.get()) toggle();"));
         assertTrue(runtime.contains("resolvePearlTarget(water, chamber)"));

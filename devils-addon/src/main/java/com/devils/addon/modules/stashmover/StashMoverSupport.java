@@ -216,6 +216,9 @@ abstract class StashMoverSupport extends Module {
     protected final Set<BlockPos> fullDestinationChests = new LinkedHashSet<>();
     protected final Set<BlockPos> renderedSourceChests = new LinkedHashSet<>();
 
+    /** Alternative deposit chest used when the saved loot chest fills up; null = use the saved one. */
+    protected BlockPos destinationChestOverride;
+
     protected MoverPhase moverPhase = MoverPhase.LOOT;
     protected LoaderPhase loaderPhase = LoaderPhase.WAITING;
     protected BlockPos currentLootSourceChest;
@@ -296,6 +299,7 @@ abstract class StashMoverSupport extends Module {
         cancelGoal("runtime-reset");
         resetDiagnostics();
         fullDestinationChests.clear();
+        destinationChestOverride = null;
         renderedSourceChests.clear();
         if (resetReconnectState) reconnectNudgeAfterJoin = false;
     }

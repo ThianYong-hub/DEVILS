@@ -135,8 +135,14 @@ public class StashMover extends StashMoverRuntime {
         String normalized = message.toLowerCase(Locale.ROOT);
         String normalizedName = playerName == null ? "" : playerName.toLowerCase(Locale.ROOT);
 
-        if (normalized.contains("death position saved")) return true;
-        if (normalized.contains("позиция смерти") || normalized.contains("death waypoint")) return true;
+        // Generic broadcast phrases ("death position saved", "death waypoint") are sent
+        // for every player's death on busy anarchy servers; only trust them while we are
+        // actually dying, otherwise another player's death would reset our cycle early.
+        boolean playerActuallyDead = mc.player.isDead() || mc.player.getHealth() <= 0.0f;
+        if (playerActuallyDead) {
+            if (normalized.contains("death position saved")) return true;
+            if (normalized.contains("позиция смерти") || normalized.contains("death waypoint")) return true;
+        }
         if (normalizedName.isBlank()) return false;
 
         return normalized.contains(normalizedName + " was killed")
