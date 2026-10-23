@@ -30,6 +30,10 @@ SYNC_ADMIN_AUTH_TOKEN_ENV_KEYS = ("SYNC_ADMIN_AUTH_TOKEN", "SYNC_ADMIN_TOKEN")
 SYNC_REQUIRE_E2E_ENV_KEYS = ("SYNC_REQUIRE_E2E", "SYNC_REQUIRE_ENCRYPTED")
 SYNC_REQUIRE_REQUEST_SIGNING_ENV_KEYS = ("SYNC_REQUIRE_REQUEST_SIGNING", "SYNC_REQUIRE_SIGNED")
 SYNC_REQUEST_SIGNING_KEY_ENV_KEYS = ("SYNC_REQUEST_SIGNING_KEY", "SYNC_SIGNING_KEY")
+SYNC_ALLOW_NO_AUTH_ENV_KEYS = ("SYNC_ALLOW_NO_AUTH",)
+STREAM_MAX_CONCURRENT_DEFAULT = 16
+STREAM_MAX_CONCURRENT_MIN = 1
+META_SAVE_MIN_INTERVAL_SEC = 5.0
 BACKEND_DEPRECATION_STATUS = "deprecated-but-supported"
 BACKEND_REMOVAL_PREREQUISITES = (
     "new env names are the normal path",
@@ -143,6 +147,8 @@ class SyncBackendRuntimeConfig:
     max_body_bytes: int
     log_push_success: bool
     log_pull_success: bool
+    stream_max_concurrent: int
+    allow_no_auth: bool
     diagnostics: BackendConfigDiagnostics
 
 
@@ -361,6 +367,11 @@ def resolve_runtime_config(environ: dict[str, Any] | None = None, script_path: P
     max_body_bytes = max(1_024, int_value(env.get('SYNC_MAX_BODY_BYTES'), MAX_BODY_BYTES_DEFAULT))
     log_push_success = bool_value(env.get('SYNC_LOG_PUSH_SUCCESS'), False)
     log_pull_success = bool_value(env.get('SYNC_LOG_PULL_SUCCESS'), False)
+    stream_max_concurrent = max(
+        STREAM_MAX_CONCURRENT_MIN,
+        env_int(env, ('SYNC_MAX_STREAMS',), STREAM_MAX_CONCURRENT_DEFAULT),
+    )
+    allow_no_auth = env_bool(env, SYNC_ALLOW_NO_AUTH_ENV_KEYS, False)
     diagnostics = build_backend_config_diagnostics(
         env,
         sync_token,
@@ -392,6 +403,8 @@ def resolve_runtime_config(environ: dict[str, Any] | None = None, script_path: P
         max_body_bytes=max_body_bytes,
         log_push_success=log_push_success,
         log_pull_success=log_pull_success,
+        stream_max_concurrent=stream_max_concurrent,
+        allow_no_auth=allow_no_auth,
         diagnostics=diagnostics,
     )
 
@@ -805,6 +818,7 @@ class SyncStore:
         self.events_max = max(100, events_max)
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
+        self._last_meta_save_ms = 0.0
 
         self.state = self._load_meta_state()
         self.namespaces: dict[str, dict[str, Any]] = {}
@@ -892,8 +906,15 @@ class SyncStore:
 
         return state
 
-    def _save_meta(self) -> None:
-        self.state["updatedAt"] = now_ts()
+    def _save_meta(self, force: bool = False) -> None:
+        # register_client runs on every pull/poll; writing the whole meta state to
+        # disk on each call thrashes the disk under the global lock. Client-seen
+        # updates are throttled; pushes and admin actions persist immediately.
+        now = now_ms()
+        if not force and now - self._last_meta_save_ms < META_SAVE_MIN_INTERVAL_SEC * 1000.0:
+            return
+        self._last_meta_save_ms = now
+        self.state['updatedAt'] = now_ts()
         self._save_json_atomic(self.state_file, self.state)
 
     def _load_ns(self, namespace: str) -> dict[str, Any] | None:
@@ -1100,7 +1121,7 @@ class SyncStore:
 
                 self.namespaces[canonical] = ns
                 self._save_ns(canonical, ns)
-                self._save_meta()
+                self._save_meta(force=True)
                 self.cond.notify_all()
                 return PushResult(canonical, int_value(ns['revision'], 0), merged_profiles, checksum, True, False, '', self._last_event_id())
 
@@ -1128,7 +1149,7 @@ class SyncStore:
 
             self.namespaces[canonical] = ns
             self._save_ns(canonical, ns)
-            self._save_meta()
+            self._save_meta(force=True)
             self.cond.notify_all()
             return PushResult(canonical, int_value(ns['revision'], 0), normalized, checksum, True, False, '', self._last_event_id())
 
@@ -1232,7 +1253,7 @@ class SyncStore:
                 self._clear_namespace_files()
                 self._append_event('default', 'admin-reset', 'admin', {'namespaceOnly': False})
 
-            self._save_meta()
+            self._save_meta(force=True)
             self.cond.notify_all()
             return self.admin_snapshot(namespace)
 
@@ -1258,7 +1279,7 @@ class SyncStore:
 
             self.namespaces[canonical] = ns
             self._save_ns(canonical, ns)
-            self._save_meta()
+            self._save_meta(force=True)
             self.cond.notify_all()
             return deepcopy(ns)
 
@@ -1267,6 +1288,11 @@ class SyncStore:
 class QuietThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(self, address, handler):
+        super().__init__(address, handler)
+        # Default concurrency cap; main() resizes it from SYNC_MAX_STREAMS.
+        self.stream_semaphore = threading.BoundedSemaphore(STREAM_MAX_CONCURRENT_DEFAULT)  # type: ignore[attr-defined]
 
     def handle_error(self, request: Any, client_address: tuple[str, int]) -> None:
         _, error, _ = sys.exc_info()
@@ -1280,6 +1306,9 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
 class SyncHandler(BaseHTTPRequestHandler):
     server_version = 'DevilsSyncHub/3.0'
     protocol_version = 'HTTP/1.1'
+    # Bound every socket operation so stalled clients (lying Content-Length,
+    # half-open keep-alive) cannot pin handler threads forever.
+    timeout = 60
 
     def handle(self) -> None:
         try:
@@ -1553,46 +1582,63 @@ class SyncHandler(BaseHTTPRequestHandler):
             wait_ms = clamp_stream_wait_ms(wait_ms_raw, wait_cap)
             ip = string_value(self.client_address[0], '')
             user_agent = string_value(self.headers.get('User-Agent'), '')
-            store.register_client(device_id, namespace, module, ip, user_agent)
 
-            try:
-                self._sse_headers()
-                initial = store.pull(namespace, known_revision, 0, device_id)
-                self._sse_event(
-                    'ready',
+            # Each stream pins a handler thread; cap concurrent streams so a
+            # misbehaving client cannot exhaust threads for everyone else.
+            stream_semaphore = getattr(self.server, 'stream_semaphore', None)
+            if stream_semaphore is None or not stream_semaphore.acquire(timeout=5):
+                self._json(
+                    503,
                     {
-                        'ok': True,
+                        'ok': False,
+                        'error': 'too-many-streams',
                         'serverTime': self._server_time(),
-                        'namespace': initial.namespace,
-                        'revision': initial.revision,
-                        'eventId': initial.event_id,
-                        'lastWriter': initial.last_writer,
                     },
                 )
-                known_revision = initial.revision
+                return
 
-                while True:
-                    result = store.pull(namespace, known_revision, wait_ms, device_id)
-                    if result.revision != known_revision:
-                        self._sse_event(
-                            'sync',
-                            {
-                                'ok': True,
-                                'serverTime': self._server_time(),
-                                'namespace': result.namespace,
-                                'revision': result.revision,
-                                'eventId': result.event_id,
-                                'lastWriter': result.last_writer,
-                            },
-                        )
-                        known_revision = result.revision
-                    else:
-                        self._sse_ping()
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
-                return
-            except Exception as exc:
-                print(f"[{time.strftime('%H:%M:%S')}] stream-error {self.client_address[0]}: {exc}")
-                return
+            try:
+                store.register_client(device_id, namespace, module, ip, user_agent)
+                try:
+                    self._sse_headers()
+                    initial = store.pull(namespace, known_revision, 0, device_id)
+                    self._sse_event(
+                        'ready',
+                        {
+                            'ok': True,
+                            'serverTime': self._server_time(),
+                            'namespace': initial.namespace,
+                            'revision': initial.revision,
+                            'eventId': initial.event_id,
+                            'lastWriter': initial.last_writer,
+                        },
+                    )
+                    known_revision = initial.revision
+
+                    while True:
+                        result = store.pull(namespace, known_revision, wait_ms, device_id)
+                        if result.revision != known_revision:
+                            self._sse_event(
+                                'sync',
+                                {
+                                    'ok': True,
+                                    'serverTime': self._server_time(),
+                                    'namespace': result.namespace,
+                                    'revision': result.revision,
+                                    'eventId': result.event_id,
+                                    'lastWriter': result.last_writer,
+                                },
+                            )
+                            known_revision = result.revision
+                        else:
+                            self._sse_ping()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+                    return
+                except Exception as exc:
+                    print(f"[{time.strftime('%H:%M:%S')}] stream-error {self.client_address[0]}: {exc}")
+                    return
+            finally:
+                stream_semaphore.release()
 
         self._json(404, {'ok': False, 'error': 'not-found', 'serverTime': self._server_time()})
 
@@ -1844,6 +1890,12 @@ def main() -> None:
         print('Set SYNC_REQUEST_SIGNING_KEY.')
         raise SystemExit(2)
 
+    if not config.sync_token and not config.allow_no_auth:
+        print('FATAL: no SYNC_AUTH_TOKEN configured; refusing to start unauthenticated.')
+        print('Set SYNC_AUTH_TOKEN (see .env.example), or set SYNC_ALLOW_NO_AUTH=true')
+        print('only for isolated local experiments.')
+        raise SystemExit(2)
+
     store = SyncStore(config.state_file, config.namespaces_dir, config.events_max)
 
     server = QuietThreadingHTTPServer((config.host, config.port), SyncHandler)
@@ -1861,6 +1913,7 @@ def main() -> None:
     server.sign_window_sec = config.sign_window_sec  # type: ignore[attr-defined]
     server.nonce_replay_guard = NonceReplayGuard(config.nonce_ttl_sec, config.nonce_cache_max)  # type: ignore[attr-defined]
     server.config_diagnostics = config.diagnostics  # type: ignore[attr-defined]
+    server.stream_semaphore = threading.BoundedSemaphore(config.stream_max_concurrent)  # type: ignore[attr-defined]
 
     listen_scheme = 'http'
     if config.tls_cert_file or config.tls_key_file:
@@ -1884,11 +1937,12 @@ def main() -> None:
     print(f'  url: {listen_scheme}://{config.host}:{config.port}')
     print(f'  state: {config.state_file}')
     print(f'  namespaces: {config.namespaces_dir}')
-    print(f"  auth: {'on' if config.sync_token else 'off'}")
+    print(f"  auth: {'on' if config.sync_token else 'OFF (SYNC_ALLOW_NO_AUTH=true)'}")
     print(f"  admin-auth: {'on' if config.admin_token else 'off (using user token)'}")
     print(f'  e2e-required: {config.require_encrypted_sync}')
     print(f'  signing: {config.require_signed}')
     print(f'  nonce: ttl={config.nonce_ttl_sec}s max={config.nonce_cache_max}')
+    print(f'  streams: max-concurrent={config.stream_max_concurrent}')
     if listen_scheme == 'https':
         print(f'  tls: {config.tls_min_version} cert={config.tls_cert_file} key={config.tls_key_file}')
     print(f'  limits: events={config.events_max} wait={config.pull_wait_max_ms}ms body={config.max_body_bytes}')
