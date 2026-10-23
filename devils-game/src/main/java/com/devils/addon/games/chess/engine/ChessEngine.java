@@ -38,12 +38,12 @@ public final class ChessEngine implements AutoCloseable {
 
     // ─── Configuration ────────────────────────────────────────────────────────
 
-    private int hashMb = 128;
-    private int threads = 1;
-    private int skillLevel = 20;      // 0–20, Stockfish default = 20 (full strength)
-    private int moveOverhead = 10;     // ms
-    private boolean ponder = false;
-    private int multiPv = 1;
+    private volatile int hashMb = 128;
+    private volatile int threads = 1;
+    private volatile int skillLevel = 20;      // 0–20, Stockfish default = 20 (full strength)
+    private volatile int moveOverhead = 10;     // ms
+    private volatile boolean ponder = false;
+    private volatile int multiPv = 1;
     private int defaultDepth = 20;
     private int defaultMoveTime = 5000; // ms
 
@@ -52,6 +52,8 @@ public final class ChessEngine implements AutoCloseable {
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private Thread readerThread;
+    /** Increments per issued search; bestmove replies from an older search are ignored. */
+    private final java.util.concurrent.atomic.AtomicLong searchGeneration = new java.util.concurrent.atomic.AtomicLong();
 
     /** Queue where the reader thread pushes raw UCI lines. */
     private final BlockingQueue<String> lineQueue = new LinkedBlockingQueue<>();
@@ -59,6 +61,8 @@ public final class ChessEngine implements AutoCloseable {
     /** Pending bestmove future, set when a "go" command is in flight. */
     private volatile CompletableFuture<BestMoveResult> pendingFuture;
     private volatile BestMoveAccumulator currentAccumulator;
+    /** Generation of the search that pendingFuture belongs to; stale bestmove replies are dropped. */
+    private volatile long pendingGeneration;
     private volatile boolean handshakeComplete = false;
 
     private static final Pattern BESTMOVE_PATTERN =
@@ -74,7 +78,7 @@ public final class ChessEngine implements AutoCloseable {
 
     public ChessEngine() {}
 
-    /** Initialize the engine. Returns false if native library is unavailable. */
+    /** Initialize the engine. Returns false if the process or UCI handshake fails. */
     public boolean init() {
         if (initialized.get()) return true;
 
@@ -93,8 +97,13 @@ public final class ChessEngine implements AutoCloseable {
         readerThread.setDaemon(true);
         readerThread.start();
 
-        // Configure UCI options (sends "uci" / "isready" and waits for responses)
-        sendUciOptions();
+        // Configure UCI options (sends "uci" / "isready" and waits for responses).
+        // A corrupt or wrong-arch binary must fail here instead of pretending to be ready.
+        if (!sendUciOptions()) {
+            DevilsGameAddon.LOG.error("[ChessEngine] Stockfish UCI handshake failed; engine unusable");
+            close();
+            return false;
+        }
 
         DevilsGameAddon.LOG.info("[ChessEngine] Stockfish initialized");
         return true;
@@ -123,8 +132,10 @@ public final class ChessEngine implements AutoCloseable {
         }
 
         CompletableFuture<BestMoveResult> future = new CompletableFuture<>();
+        BestMoveAccumulator accumulator = new BestMoveAccumulator(searchGeneration.incrementAndGet());
         pendingFuture = future;
-        currentAccumulator = new BestMoveAccumulator();
+        currentAccumulator = accumulator;
+        pendingGeneration = accumulator.generation;
 
         String positionCmd = "position fen " + fen;
         StockfishBridge.sendCommand(positionCmd);
@@ -175,19 +186,34 @@ public final class ChessEngine implements AutoCloseable {
     }
 
     // ─── Configuration setters ────────────────────────────────────────────────
+    // The session re-applies these every tick, so each setter only talks to the
+    // engine when the value actually changed since the last "setoption".
 
     public ChessEngine setHashMb(int hashMb) {
         this.hashMb = hashMb;
+        if (running.get() && hashMb != appliedHashMb) {
+            appliedHashMb = hashMb;
+            sendOptionIfRunning("Hash", hashMb);
+        }
         return this;
     }
 
     public ChessEngine setThreads(int threads) {
         this.threads = threads;
+        if (running.get() && threads != appliedThreads) {
+            appliedThreads = threads;
+            sendOptionIfRunning("Threads", threads);
+        }
         return this;
     }
 
     public ChessEngine setSkillLevel(int skillLevel) {
-        this.skillLevel = Math.max(0, Math.min(20, skillLevel));
+        int clamped = Math.max(0, Math.min(20, skillLevel));
+        this.skillLevel = clamped;
+        if (running.get() && clamped != appliedSkillLevel) {
+            appliedSkillLevel = clamped;
+            sendOptionIfRunning("Skill Level", clamped);
+        }
         return this;
     }
 
@@ -199,6 +225,20 @@ public final class ChessEngine implements AutoCloseable {
     public ChessEngine setDefaultMoveTime(int ms) {
         this.defaultMoveTime = ms;
         return this;
+    }
+
+    private volatile int appliedHashMb = -1;
+    private volatile int appliedThreads = -1;
+    private volatile int appliedSkillLevel = -1;
+
+    private void sendOptionIfRunning(String name, Object value) {
+        if (!running.get() || !StockfishBridge.isRunning()) return;
+        try {
+            StockfishBridge.sendCommand("setoption name " + name + " value " + value);
+            StockfishBridge.sendCommand("isready");
+        } catch (IllegalStateException e) {
+            DevilsGameAddon.LOG.debug("[ChessEngine] Ignored option update after engine exit: {}", name);
+        }
     }
 
     // ─── Closeable ────────────────────────────────────────────────────────────
@@ -230,12 +270,13 @@ public final class ChessEngine implements AutoCloseable {
 
     // ─── Internal ─────────────────────────────────────────────────────────────
 
-    private void sendUciOptions() {
+    private boolean sendUciOptions() {
         StockfishBridge.sendCommand("uci");
 
         // Wait for "uciok" with a timeout
         if (!waitForLine("uciok", 5000)) {
             DevilsGameAddon.LOG.warn("[ChessEngine] Timed out waiting for uciok");
+            return false;
         }
 
         StockfishBridge.sendCommand("setoption name Hash value " + hashMb);
@@ -248,14 +289,19 @@ public final class ChessEngine implements AutoCloseable {
         if (!ponder) {
             StockfishBridge.sendCommand("setoption name Ponder value false");
         }
+        appliedHashMb = hashMb;
+        appliedThreads = threads;
+        appliedSkillLevel = skillLevel;
 
         StockfishBridge.sendCommand("isready");
         if (!waitForLine("readyok", 5000)) {
             DevilsGameAddon.LOG.warn("[ChessEngine] Timed out waiting for readyok");
+            return false;
         }
 
         handshakeComplete = true;
         lineQueue.clear();
+        return true;
     }
 
     private boolean waitForLine(String expected, long timeoutMs) {
@@ -310,16 +356,22 @@ public final class ChessEngine implements AutoCloseable {
         // Check for bestmove
         Matcher bmMatcher = BESTMOVE_PATTERN.matcher(line);
         if (bmMatcher.find()) {
+            BestMoveAccumulator acc = currentAccumulator;
+            if (acc == null || acc.generation != pendingGeneration) {
+                // Reply to a cancelled/previous search; a live search is still waiting
+                // for its own bestmove, so this one must not complete it.
+                return;
+            }
+
             String bestMove = bmMatcher.group(1);
             String ponderMove = bmMatcher.group(2);
 
-            BestMoveAccumulator acc = currentAccumulator;
             BestMoveResult result = new BestMoveResult(
                 bestMove,
                 ponderMove,
-                acc != null ? acc.depth : 0,
-                acc != null ? acc.score : 0,
-                acc != null ? acc.timeMs : 0
+                acc.depth,
+                acc.score,
+                acc.timeMs
             );
 
             CompletableFuture<BestMoveResult> future = pendingFuture;
@@ -354,8 +406,13 @@ public final class ChessEngine implements AutoCloseable {
 
     /** Mutable accumulator for search info while waiting for bestmove. */
     private static class BestMoveAccumulator {
+        final long generation;
         int depth;
         int score;
         long timeMs;
+
+        BestMoveAccumulator(long generation) {
+            this.generation = generation;
+        }
     }
 }

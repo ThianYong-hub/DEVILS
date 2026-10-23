@@ -208,6 +208,10 @@ public final class ChessOverlay extends Module {
 
     private void setMode(PlayMode value) {
         mode.set(value);
+        // Re-run activation so leaving STOCKFISH shuts the engine down and
+        // entering it re-initializes with the current settings.
+        session.setStockfishConfig(sfDepth.get(), sfSkill.get(), sfHash.get());
+        session.onActivate(value);
     }
 
     private static int clamp(int value, int min, int max) {

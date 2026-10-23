@@ -29,11 +29,14 @@ public final class StockfishBridge {
     private static volatile BlockingQueue<String> outputQueue;
     private static volatile Thread readerThread;
     private static volatile boolean running;
+    private static boolean shutdownHookRegistered;
 
     private StockfishBridge() {}
 
     /**
      * Initializes the Stockfish engine by launching stockfish.exe as a subprocess.
+     * The UCI handshake itself is owned by {@link ChessEngine}; this method only
+     * starts the process and its reader thread.
      *
      * @param workDir working directory path (where NNUE files reside); may be null
      * @throws Exception if the engine fails to start
@@ -58,14 +61,17 @@ public final class StockfishBridge {
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), "UTF-8"));
         outputQueue = new LinkedBlockingQueue<>();
 
-        // Start reader thread
+        // Start reader thread; capture the queue locally so the finally-block never
+        // races shutdown() nulling the field.
         running = true;
+        final BlockingQueue<String> queue = outputQueue;
+        final Process ownedProcess = process;
         readerThread = new Thread(() -> {
             try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), "UTF-8"))) {
+                    new InputStreamReader(ownedProcess.getInputStream(), "UTF-8"))) {
                 String line;
                 while (running && (line = reader.readLine()) != null) {
-                    outputQueue.offer(line);
+                    queue.offer(line);
                 }
                 DevilsGameAddon.LOG.debug("{} reader stream ended", LOG_PREFIX);
             } catch (IOException e) {
@@ -73,32 +79,31 @@ public final class StockfishBridge {
                     DevilsGameAddon.LOG.warn("{} reader error", LOG_PREFIX, e);
                 }
             } finally {
-                outputQueue.offer("__ENGINE_EXITED__");
+                queue.offer("__ENGINE_EXITED__");
             }
         }, "stockfish-process-reader");
         readerThread.setDaemon(true);
         readerThread.start();
 
-        // Wait for UCI handshake
-        Thread.sleep(200);
-        sendCommand("uci");
-
-        // Read lines until we get "uciok"
-        String line;
-        while ((line = readLine(5000)) != null) {
-            if ("uciok".equals(line)) {
-                break;
-            }
-        }
-
-        sendCommand("isready");
-        while ((line = readLine(5000)) != null) {
-            if ("readyok".equals(line)) {
-                break;
-            }
-        }
+        registerShutdownHook();
 
         DevilsGameAddon.LOG.info("{} Stockfish process started (pid={})", LOG_PREFIX, process.pid());
+    }
+
+    /** Kills the engine process on JVM exit so quitting Minecraft never orphans stockfish. */
+    private static void registerShutdownHook() {
+        if (shutdownHookRegistered) return;
+        shutdownHookRegistered = true;
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                Process p = process;
+                if (p != null && p.isAlive()) {
+                    p.destroyForcibly();
+                }
+            }, "stockfish-shutdown-hook"));
+        } catch (IllegalStateException ignored) {
+            // JVM already shutting down; nothing to protect.
+        }
     }
 
     /**
@@ -163,14 +168,16 @@ public final class StockfishBridge {
         }
 
         // Wait for process to exit
-        if (process != null && process.isAlive()) {
-            try {
-                process.waitFor(3, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
+        if (process != null) {
             if (process.isAlive()) {
-                process.destroyForcibly();
+                try {
+                    process.waitFor(3, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                if (process.isAlive()) {
+                    process.destroyForcibly();
+                }
             }
             process = null;
         }
@@ -181,7 +188,6 @@ public final class StockfishBridge {
             readerThread = null;
         }
 
-        outputQueue = null;
         DevilsGameAddon.LOG.info("{} Stockfish process shut down", LOG_PREFIX);
     }
 

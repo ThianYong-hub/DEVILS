@@ -43,6 +43,9 @@ final class ChessOverlaySession {
             initEngine();
             boardFen = ChessLogic.initialFen();
             if (!whiteToMove) scheduleStockfishTurn();
+        } else {
+            // Leaving bot mode: no reason to keep the engine process alive.
+            shutdownEngine();
         }
     }
 
@@ -189,15 +192,15 @@ final class ChessOverlaySession {
 
     private void initEngine() {
         if (stockfishEngine != null) return;
-        stockfishEngine = new ChessEngine();
-        try {
-            stockfishEngine.init();
-            stockfishEngine.setSkillLevel(sfSkill);
-            stockfishEngine.setHashMb(sfHash);
-        } catch (Exception e) {
-            statusText = "Stockfish init failed: " + e.getMessage();
-            stockfishEngine = null;
+        ChessEngine engine = new ChessEngine();
+        // Configure before init so the UCI handshake sends the real values.
+        engine.setSkillLevel(sfSkill);
+        engine.setHashMb(sfHash);
+        if (!engine.init()) {
+            statusText = "Stockfish init failed (engine missing or broken).";
+            return;
         }
+        stockfishEngine = engine;
     }
 
     void shutdownEngine() {
