@@ -226,7 +226,7 @@ class ProjectConfigSuiteTest {
         assertTrue(autoPatch.contains("group: release-tags"));
         assertTrue(autoPatch.contains("calc_next_patch_tag"));
         assertTrue(autoPatch.contains("attempts=10"));
-        assertTrue(autoPatch.contains("actions: write"));
+        assertFalse(autoPatch.contains("actions: write"));
         assertTrue(autoPatch.contains("github.token"));
         assertTrue(autoPatch.contains("game_version={version}"));
         assertTrue(autoPatch.contains("Current game build (`{version}`)"));
@@ -260,7 +260,7 @@ class ProjectConfigSuiteTest {
         assertTrue(manualTag.contains("^v[0-9]+\\.[0-9]+\\.[0-9]+$"));
         assertTrue(manualTag.contains("Auto PATCH mode selected"));
         assertTrue(manualTag.contains("group: release-tags"));
-        assertTrue(manualTag.contains("actions: write"));
+        assertFalse(manualTag.contains("actions: write"));
         assertTrue(manualTag.contains("game_version={version}"));
         assertTrue(manualTag.contains("Current game build (`{version}`)"));
         assertTrue(manualTag.contains("chore(release): prepare"));

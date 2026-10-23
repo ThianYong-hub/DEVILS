@@ -60,6 +60,13 @@ jobs:
             echo "::error::Release tag ${{ steps.resolve_tag.outputs.release_tag }} does not match game_version=${game_version}. Update gradle.properties before tagging."
             exit 1
           fi
+          # The root fabric.mod.json is a manually-bumped mirror consumed by
+          # addon directories; a stale copy must not pass the release gate.
+          root_manifest_version="$(grep -oP '"version"\s*:\s*"\K[^"]+' fabric.mod.json | head -1)"
+          if [[ "${root_manifest_version}" != "${release_version}" ]]; then
+            echo "::error::Root fabric.mod.json version '${root_manifest_version}' does not match release tag ${release_version}. Update fabric.mod.json before tagging."
+            exit 1
+          fi
           echo "addon_version=${addon_version}" >> "${GITHUB_OUTPUT}"
           echo "game_version=${game_version}" >> "${GITHUB_OUTPUT}"
 

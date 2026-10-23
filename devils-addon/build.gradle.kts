@@ -46,7 +46,6 @@ val bundledRuntimeLibs by configurations.creating {
 }
 val mergedMixinResourceDir = "META-INF/devils-addon/mixins"
 val assimilatedAccessWidenerJarPath = "META-INF/devils-addon/accesswidener/devils-addon.assimilated.accesswidener"
-val sqliteJdbcResourceJarPath = "org/rfresh/sqlite/jdbc3/sqlite-jdbc.properties"
 val relocatedMixinConfigs = setOf(
     "devils-addon.mixins.json"
 )
@@ -163,7 +162,6 @@ dependencies {
     add(bundledRuntimeLibs.name, "net.lenni0451:LambdaEvents:2.4.2")
     implementation("com.github.rfresh2:OldBiomes:1.0.0")
     add(bundledRuntimeLibs.name, "com.github.rfresh2:OldBiomes:1.0.0")
-    implementation("org.rfresh.xerial:sqlite-jdbc:3.51.2.0")
     implementation("com.twelvemonkeys.imageio:imageio-core:3.12.0")
     add(bundledRuntimeLibs.name, "com.twelvemonkeys.imageio:imageio-core:3.12.0")
     implementation("com.twelvemonkeys.imageio:imageio-webp:3.12.0")
@@ -236,7 +234,6 @@ tasks {
                     appendLine("This build intentionally keeps a single root LICENSE for Devils-Addon and consolidates third-party notice material here.")
                     appendLine("Vendored components remain subject to their upstream license terms.")
                     appendLine()
-                    append(section("sqlite-jdbc - Apache-2.0", readOrNotice(null, "sqlite-jdbc license unavailable in clean checkout", "The sqlite-jdbc license file was not present in this checkout; sqlite-jdbc is distributed under Apache-2.0.")))
                     append(section("Soundlibs - LGPL-2.1", read(soundlibsLgpl)))
                     append(section("Soundlibs - jorbis notice", read(soundlibsJorbis)))
                     append(section("Soundlibs - vorbisspi notice", read(soundlibsVorbisSpi)))
@@ -270,10 +267,6 @@ tasks {
 
         filesMatching("devils-addon.assimilated.accesswidener") {
             path = assimilatedAccessWidenerJarPath
-        }
-
-        filesMatching("sqlite-jdbc.properties") {
-            path = sqliteJdbcResourceJarPath
         }
 
         filesMatching("fabric.mod.json") {

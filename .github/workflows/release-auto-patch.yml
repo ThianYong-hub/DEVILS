@@ -4,7 +4,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
   group: release-tags
