@@ -133,10 +133,11 @@ class SyncConfigMigrationRuntimeTest {
         TestSyncModule module = TestSyncModule.create();
         SyncConfigDiagnostics.Audit legacyAudit = module.inspectSyncConfig(true, false);
         module.emitSyncConfigDiagnostics("smoke", legacyAudit);
-        module.emitSyncConfigDiagnostics("smoke", legacyAudit);
 
+        // Emitting the SAME audit again must not add warnings/errors (spam guard).
         int firstWarningCount = module.warnings.size();
         int firstErrorCount = module.errors.size();
+        module.emitSyncConfigDiagnostics("smoke", legacyAudit);
         assertEquals(firstWarningCount, module.warnings.size());
         assertEquals(firstErrorCount, module.errors.size());
 
