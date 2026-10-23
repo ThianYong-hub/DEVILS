@@ -125,9 +125,10 @@ final class BlackjackSession {
     private static final long DEALER_DRAW_DELAY_MS = 440L;
 
     private final Random random = new Random();
-    private final List<Card> shoe = new ArrayList<>();
-    private final List<Card> dealer = new ArrayList<>();
-    private final List<Card> player = new ArrayList<>();
+    // Package-private for behavioural tests.
+    final List<Card> shoe = new ArrayList<>();
+    final List<Card> dealer = new ArrayList<>();
+    final List<Card> player = new ArrayList<>();
 
     private int bankroll;
     private int baseBet;
@@ -350,7 +351,7 @@ final class BlackjackSession {
         return stage == Stage.PLAYER_TURN && player.size() == 2 && bankroll >= roundBet;
     }
 
-    private void settleNaturals() {
+    void settleNaturals() {
         HandScore p = score(player);
         HandScore d = score(dealer);
         if (!p.blackjack() && !d.blackjack()) return;
@@ -367,7 +368,8 @@ final class BlackjackSession {
         }
 
         if (p.blackjack()) {
-            int payout = (roundBet * 5) / 2;
+            // 3:2 payout with half-up rounding so odd bets don't lose half a chip.
+            int payout = (roundBet * 5 + 1) / 2;
             bankroll += payout;
             wins++;
             status = "Blackjack! Paid +" + (payout - roundBet) + ".";
@@ -438,15 +440,17 @@ final class BlackjackSession {
         return new HandScore(total, soft, blackjack, bust);
     }
 
-    private Card drawCard() {
+    Card drawCard() {
         ensureShoe();
         int index = random.nextInt(shoe.size());
         return shoe.remove(index);
     }
 
-    private void ensureShoe() {
+    void ensureShoe() {
         if (shoe.size() >= 20) return;
-        refillShoe(false);
+        // Reshuffle a fresh shoe instead of appending: appending duplicates cards
+        // already in the shoe and skews the odds.
+        refillShoe(true);
     }
 
     private void refillShoe(boolean fullReset) {
