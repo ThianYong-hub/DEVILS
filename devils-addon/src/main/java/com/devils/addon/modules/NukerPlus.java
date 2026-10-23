@@ -469,14 +469,15 @@ public class NukerPlus extends Module {
         double pX = mc.player.getX();
         double pY = mc.player.getY();
         double pZ = mc.player.getZ();
-        double rangeSq = Math.pow(range.get(), 2);
         BlockPos playerBlockPos = mc.player.getBlockPos();
 
-        if (shape.get() == Shape.UniformCube) range.set((double) Math.round(range.get()));
+        // UniformCube needs whole blocks; round locally instead of mutating the user's setting.
+        final double effectiveRange = shape.get() == Shape.UniformCube ? Math.round(range.get()) : range.get();
+        double rangeSq = effectiveRange * effectiveRange;
 
         double pX_ = pX;
         double pZ_ = pZ;
-        int r = (int) Math.round(range.get());
+        int r = (int) effectiveRange;
 
         if (shape.get() == Shape.UniformCube) {
             pX_ += 1;
@@ -501,14 +502,14 @@ public class NukerPlus extends Module {
             : NukerPlusBaritoneSelection.Snapshot.disabled();
         publishBaritoneAreaWarnings(selectionSnapshot);
 
-        BlockIterator.register(Math.max((int) Math.ceil(range.get() + 1), maxh), Math.max((int) Math.ceil(range.get()), maxv), (blockPos, blockState) -> {
+        BlockIterator.register(Math.max((int) Math.ceil(effectiveRange + 1), maxh), Math.max((int) Math.ceil(effectiveRange), maxv), (blockPos, blockState) -> {
             Vec3d center = blockPos.toCenterPos();
             switch (shape.get()) {
                 case Sphere -> {
                     if (Utils.squaredDistance(pX, pY, pZ, center.getX(), center.getY(), center.getZ()) > rangeSq) return;
                 }
                 case UniformCube -> {
-                    if (chebyshevDist(playerBlockPos.getX(), playerBlockPos.getY(), playerBlockPos.getZ(), blockPos.getX(), blockPos.getY(), blockPos.getZ()) >= range.get()) return;
+                    if (chebyshevDist(playerBlockPos.getX(), playerBlockPos.getY(), playerBlockPos.getZ(), blockPos.getX(), blockPos.getY(), blockPos.getZ()) >= effectiveRange) return;
                 }
                 case Cube -> {
                     if (!box.contains(center)) return;

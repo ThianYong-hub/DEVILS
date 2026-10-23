@@ -319,6 +319,15 @@ public class AntiWasp extends Module {
             return;
         }
 
+        // Activating outside a world leaves origin null; initialize lazily on first glide
+        // instead of NPE-ing in onMove every tick.
+        if (origin == null || activeFigure == null) {
+            origin = mc.player.getEntityPos();
+            activeFigure = figure.get();
+            phase = 0.0;
+            figureTicks = 0;
+        }
+
         if (autoCycleFigures.get()) {
             figureTicks++;
             if (figureTicks >= switchInterval.get()) {
@@ -360,6 +369,7 @@ public class AntiWasp extends Module {
         if (mc.player == null || mc.world == null) return;
         if (!mc.player.isGliding()) return;
         if (!isWearingElytra()) return;
+        if (origin == null || activeFigure == null) return;
 
         Vec3d target = AntiWaspPathMath.getPathPoint(origin, activeFigure, phase + lookAhead.get(), figureSize.get(), altitudeOffset.get());
         double xDist = target.x - mc.player.getX();

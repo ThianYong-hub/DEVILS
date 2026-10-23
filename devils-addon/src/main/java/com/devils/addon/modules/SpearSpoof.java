@@ -39,6 +39,13 @@ public class SpearSpoof extends Module {
 
     private final SettingGroup sgRender = settings.createGroup("Render");
 
+    public final Setting<Boolean> showAdvancedSetting = sgDebug.add(new BoolSetting.Builder()
+        .name("show-advanced")
+        .description("Show advanced fine-tuning settings for targeting, flight and strike gating.")
+        .defaultValue(false)
+        .build()
+    );
+
     public final Setting<Boolean> enableAutoFlight = sgFlight.add(new BoolSetting.Builder()
         .name("enable-auto-flight")
         .description("Automatically fly towards target. If false, you can use normal Flight module manually.")
@@ -463,7 +470,7 @@ public class SpearSpoof extends Module {
     }
 
     private boolean showAdvanced() {
-        return false;
+        return showAdvancedSetting.get();
     }
 
     public double permanentTargetRange() {
