@@ -16,8 +16,8 @@
 
 Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
-Current addon build (`0.0.62`)
-Current game build (`0.0.62`)
+Current addon build (`0.0.63`)
+Current game build (`0.0.63`)
 
 ## What Is In Here
 
@@ -151,6 +151,7 @@ SYNC_REQUIRE_REQUEST_SIGNING=true
 SYNC_REQUIRE_E2E=true
 SYNC_HOST=0.0.0.0
 SYNC_PORT=7878
+SYNC_MAX_STREAMS=16
 ```
 
 Put `SYNC_E2E_SECRET` in the Meteor `sync-hub` / `game-sync-hub` setting called `e2e-secret`. Do not put it in backend `.env`; the server does not need the raw secret.
@@ -162,6 +163,11 @@ Resolve order and migration behavior:
 - `auth-token` is only auth, not encryption
 - `e2e-secret` encrypts client payloads before upload
 - If `SYNC_REQUIRE_REQUEST_SIGNING=true`, the request also needs the normal `X-Devils-*` signing headers
+
+Hardening notes:
+
+- The server refuses to start without `SYNC_AUTH_TOKEN` unless you explicitly set `SYNC_ALLOW_NO_AUTH=true` for isolated local tests.
+- Sockets have a 60 s timeout and concurrent SSE streams are capped by `SYNC_MAX_STREAMS` (default 16).
 
 Useful endpoints:
 
