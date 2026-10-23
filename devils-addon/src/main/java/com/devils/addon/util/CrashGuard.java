@@ -48,6 +48,12 @@ public final class CrashGuard implements PreLaunchEntrypoint {
     public static void run(Module module, String context, Runnable action) {
         try {
             action.run();
+        } catch (VirtualMachineError | ThreadDeath t) {
+            // OOM and friends: the JVM is unrecoverable; surface it instead of
+            // pretending the game can continue.
+            String moduleName = module != null ? module.name : "unknown-module";
+            LOG.error("[Devils][{}] Fatal error in {}.", moduleName, context, t);
+            throw t;
         } catch (Throwable t) {
             log(module, context, t);
         }
@@ -58,12 +64,29 @@ public final class CrashGuard implements PreLaunchEntrypoint {
         String key = moduleName + "#" + context;
         long now = System.currentTimeMillis();
         Long last = lastLogByContext.get(key);
+        boolean cooldownElapsed = last == null || now - last >= LOG_COOLDOWN_MS;
 
-        if (last == null || now - last >= LOG_COOLDOWN_MS) {
+        // Errors (e.g. StackOverflowError) are never silenced by the cooldown:
+        // they indicate real breakage, not per-tick flakiness.
+        if (t instanceof Error || cooldownElapsed) {
             lastLogByContext.put(key, now);
+            suppressedSinceLog.remove(key);
             LOG.error("[Devils][{}] Unhandled exception in {}.", moduleName, context, t);
+            return;
+        }
+
+        // Persistent per-tick failures must stay visible even while rate-limited.
+        long suppressed = suppressedSinceLog.merge(key, 1L, Long::sum);
+        if (suppressed % STILL_FAILING_EVERY == 0) {
+            lastLogByContext.put(key, now);
+            LOG.error("[Devils][{}] {} is still failing every tick: {} suppressed repeats, latest: {}",
+                moduleName, context, suppressed, String.valueOf(t));
+            suppressedSinceLog.remove(key);
         }
     }
+
+    private static final long STILL_FAILING_EVERY = 200L;
+    private static final Map<String, Long> suppressedSinceLog = new ConcurrentHashMap<>();
 
 }
 
@@ -92,7 +115,10 @@ final class EarlyLogSpamFilter {
                 root.addFilter(new SpamFilter());
                 context.updateLoggers();
                 installed = true;
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                // Runs at PreLaunch where log4j may not be wired up yet; stderr
+                // still reaches the game log and crash reports.
+                System.err.println("[Devils][CrashGuard] Failed to install log spam filters: " + t);
             }
         }
     }

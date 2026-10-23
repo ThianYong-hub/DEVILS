@@ -5,13 +5,18 @@ import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.math.Vec3d;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 
 public final class SpearSpoofDebugLogger {
+    private static final int FLUSH_EVERY_LINES = 64;
+    private static final long FLUSH_EVERY_MS = 2_000L;
+
     private final Setting<Boolean> enabled;
     private final Setting<Boolean> packetEnabled;
     private final Setting<Boolean> devEnabled;
@@ -19,6 +24,15 @@ public final class SpearSpoofDebugLogger {
     private Path debugPath;
     private Path packetDebugPath;
     private Path devDebugPath;
+
+    // Buffered writers: logMove/logPacket fire every tick/packet, and per-line
+    // open/write/close was measurable frame-time cost.
+    private final Object ioLock = new Object();
+    private BufferedWriter debugWriter;
+    private BufferedWriter packetWriter;
+    private BufferedWriter devWriter;
+    private int linesSinceFlush;
+    private long lastFlushMs;
 
     public SpearSpoofDebugLogger(Setting<Boolean> enabled, Setting<Boolean> packetEnabled, Setting<Boolean> devEnabled) {
         this.enabled = enabled;
@@ -40,19 +54,44 @@ public final class SpearSpoofDebugLogger {
             .resolve("spearspoof")
             .resolve("dev-debug.log");
 
-        try {
-            Files.createDirectories(debugPath.getParent());
-            if (clearFile) Files.deleteIfExists(debugPath);
-            if (clearPacketFile) Files.deleteIfExists(packetDebugPath);
-            if (clearDevFile) Files.deleteIfExists(devDebugPath);
-        } catch (IOException ignored) {
+        synchronized (ioLock) {
+            closeWriters();
+            try {
+                Files.createDirectories(debugPath.getParent());
+                if (clearFile) Files.deleteIfExists(debugPath);
+                if (clearPacketFile) Files.deleteIfExists(packetDebugPath);
+                if (clearDevFile) Files.deleteIfExists(devDebugPath);
+            } catch (IOException ignored) {
+            }
         }
     }
 
     public void onDeactivate() {
+        synchronized (ioLock) {
+            closeWriters();
+        }
         debugPath = null;
         packetDebugPath = null;
         devDebugPath = null;
+    }
+
+    private void closeWriters() {
+        closeQuietly(debugWriter);
+        closeQuietly(packetWriter);
+        closeQuietly(devWriter);
+        debugWriter = null;
+        packetWriter = null;
+        devWriter = null;
+        linesSinceFlush = 0;
+    }
+
+    private static void closeQuietly(BufferedWriter writer) {
+        if (writer == null) return;
+        try {
+            writer.flush();
+            writer.close();
+        } catch (IOException ignored) {
+        }
     }
 
     public void logReject(
@@ -260,26 +299,50 @@ public final class SpearSpoofDebugLogger {
     }
 
     private void appendLine(String line) {
-        try {
-            Files.createDirectories(debugPath.getParent());
-            Files.writeString(debugPath, line + System.lineSeparator(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException ignored) {
+        synchronized (ioLock) {
+            try {
+                debugWriter = ensureWriter(debugWriter, debugPath);
+                writeBuffered(debugWriter, line);
+            } catch (IOException ignored) {
+            }
         }
     }
 
     private void appendPacketLine(String line) {
-        try {
-            Files.createDirectories(packetDebugPath.getParent());
-            Files.writeString(packetDebugPath, line + System.lineSeparator(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException ignored) {
+        synchronized (ioLock) {
+            try {
+                packetWriter = ensureWriter(packetWriter, packetDebugPath);
+                writeBuffered(packetWriter, line);
+            } catch (IOException ignored) {
+            }
         }
     }
 
     private void appendDevLine(String line) {
-        try {
-            Files.createDirectories(devDebugPath.getParent());
-            Files.writeString(devDebugPath, line + System.lineSeparator(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-        } catch (IOException ignored) {
+        synchronized (ioLock) {
+            try {
+                devWriter = ensureWriter(devWriter, devDebugPath);
+                writeBuffered(devWriter, line);
+            } catch (IOException ignored) {
+            }
+        }
+    }
+
+    private static BufferedWriter ensureWriter(BufferedWriter existing, Path path) throws IOException {
+        if (existing != null) return existing;
+        Files.createDirectories(path.getParent());
+        return Files.newBufferedWriter(path, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+    }
+
+    private void writeBuffered(BufferedWriter writer, String line) throws IOException {
+        writer.write(line);
+        writer.newLine();
+        linesSinceFlush++;
+        long now = System.currentTimeMillis();
+        if (linesSinceFlush >= FLUSH_EVERY_LINES || now - lastFlushMs >= FLUSH_EVERY_MS) {
+            writer.flush();
+            linesSinceFlush = 0;
+            lastFlushMs = now;
         }
     }
 
