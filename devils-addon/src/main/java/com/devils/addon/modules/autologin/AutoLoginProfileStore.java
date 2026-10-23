@@ -50,27 +50,34 @@ public final class AutoLoginProfileStore {
     private static final double PROFILE_USERNAME_MIN_WIDTH = 220;
     private static final double PROFILE_SERVER_MIN_WIDTH = 110;
     private final List<AutoLoginProfile> profiles = new ArrayList<>();
+    // Packet-send handlers mutate this list from the netty thread while the client
+    // thread iterates it (GUI, config save, sync snapshots); all access goes through this lock.
+    private final Object lock = new Object();
 
     public NbtCompound writeToTag(NbtCompound tag) {
         NbtList list = new NbtList();
-        for (AutoLoginProfile profile : profiles) {
-            NbtCompound entryTag = new NbtCompound();
-            entryTag.put("profile", profile.toTag());
-            list.add(entryTag);
+        synchronized (lock) {
+            for (AutoLoginProfile profile : profiles) {
+                NbtCompound entryTag = new NbtCompound();
+                entryTag.put("profile", profile.toTag());
+                list.add(entryTag);
+            }
         }
         tag.put("profiles", list);
         return tag;
     }
 
     public void loadFromTag(NbtCompound tag) {
-        profiles.clear();
-        NbtList list = tag.getListOrEmpty("profiles");
-        for (NbtElement element : list) {
-            if (!(element instanceof NbtCompound entryTag)) continue;
-            if (!(entryTag.get("profile") instanceof NbtCompound profileTag)) continue;
-            AutoLoginProfile profile = new AutoLoginProfile();
-            profile.fromTag(profileTag);
-            profiles.add(profile);
+        synchronized (lock) {
+            profiles.clear();
+            NbtList list = tag.getListOrEmpty("profiles");
+            for (NbtElement element : list) {
+                if (!(element instanceof NbtCompound entryTag)) continue;
+                if (!(entryTag.get("profile") instanceof NbtCompound profileTag)) continue;
+                AutoLoginProfile profile = new AutoLoginProfile();
+                profile.fromTag(profileTag);
+                profiles.add(profile);
+            }
         }
     }
 
@@ -87,7 +94,9 @@ public final class AutoLoginProfileStore {
     }
 
     public AutoLoginProfile findMatchingProfile(String username, String server) {
-        return findProfile(username, server, true);
+        synchronized (lock) {
+            return findProfile(username, server, true);
+        }
     }
 
     public void upsertProfile(String username, String server, AutoLogin.ParsedCommand parsed, int defaultDelay) {
@@ -103,52 +112,58 @@ public final class AutoLoginProfileStore {
         String normalizedPassword = password == null ? "" : password.trim();
         if (normalizedUsername.isBlank() || normalizedServer.isBlank() || normalizedPassword.isBlank()) return;
 
-        AutoLoginProfile existing = findProfile(normalizedUsername, normalizedServer, false);
-        if (existing == null) {
-            AutoLoginProfile profile = new AutoLoginProfile();
-            profile.enabled.set(true);
-            profile.username.set(normalizedUsername);
-            profile.server.set(normalizedServer);
-            profile.mode.set(mode);
-            profile.password.set(normalizedPassword);
-            profile.delay.set(defaultDelay);
-            profiles.add(profile);
-            return;
-        }
+        synchronized (lock) {
+            AutoLoginProfile existing = findProfile(normalizedUsername, normalizedServer, false);
+            if (existing == null) {
+                AutoLoginProfile profile = new AutoLoginProfile();
+                profile.enabled.set(true);
+                profile.username.set(normalizedUsername);
+                profile.server.set(normalizedServer);
+                profile.mode.set(mode);
+                profile.password.set(normalizedPassword);
+                profile.delay.set(defaultDelay);
+                profiles.add(profile);
+                return;
+            }
 
-        existing.username.set(normalizedUsername);
-        existing.server.set(normalizedServer);
-        existing.mode.set(mode);
-        existing.password.set(normalizedPassword);
-        existing.enabled.set(true);
+            existing.username.set(normalizedUsername);
+            existing.server.set(normalizedServer);
+            existing.mode.set(mode);
+            existing.password.set(normalizedPassword);
+            existing.enabled.set(true);
+        }
     }
 
     public List<SyncProfileData> snapshotProfiles() {
         ArrayList<SyncProfileData> snapshot = new ArrayList<>();
-        for (AutoLoginProfile profile : profiles) {
-            snapshot.add(new SyncProfileData(
-                profile.enabled.get(),
-                profile.username.get(),
-                profile.server.get(),
-                profile.mode.get(),
-                profile.password.get(),
-                profile.delay.get()
-            ));
+        synchronized (lock) {
+            for (AutoLoginProfile profile : profiles) {
+                snapshot.add(new SyncProfileData(
+                    profile.enabled.get(),
+                    profile.username.get(),
+                    profile.server.get(),
+                    profile.mode.get(),
+                    profile.password.get(),
+                    profile.delay.get()
+                ));
+            }
         }
         return snapshot;
     }
 
     public void replaceProfiles(List<SyncProfileData> remoteProfiles) {
-        profiles.clear();
-        for (SyncProfileData data : remoteProfiles) {
-            AutoLoginProfile profile = new AutoLoginProfile();
-            profile.enabled.set(data.enabled());
-            profile.username.set(data.username());
-            profile.server.set(data.server());
-            profile.mode.set(data.mode());
-            profile.password.set(data.password());
-            profile.delay.set(Math.max(0, data.delay()));
-            profiles.add(profile);
+        synchronized (lock) {
+            profiles.clear();
+            for (SyncProfileData data : remoteProfiles) {
+                AutoLoginProfile profile = new AutoLoginProfile();
+                profile.enabled.set(data.enabled());
+                profile.username.set(data.username());
+                profile.server.set(data.server());
+                profile.mode.set(data.mode());
+                profile.password.set(data.password());
+                profile.delay.set(Math.max(0, data.delay()));
+                profiles.add(profile);
+            }
         }
     }
 
@@ -160,7 +175,35 @@ public final class AutoLoginProfileStore {
     }
 
     public boolean isEmpty() {
-        return profiles.isEmpty();
+        synchronized (lock) {
+            return profiles.isEmpty();
+        }
+    }
+
+    void insertProfileCopy(AutoLoginProfile original, AutoLoginProfile duplicate) {
+        synchronized (lock) {
+            int index = profiles.indexOf(original);
+            if (index < 0 || index > profiles.size()) profiles.add(duplicate);
+            else profiles.add(index, duplicate);
+        }
+    }
+
+    void addProfile(AutoLoginProfile profile) {
+        synchronized (lock) {
+            profiles.add(profile);
+        }
+    }
+
+    void removeProfile(AutoLoginProfile profile) {
+        synchronized (lock) {
+            profiles.remove(profile);
+        }
+    }
+
+    void clearProfiles() {
+        synchronized (lock) {
+            profiles.clear();
+        }
     }
 
     private void fillWidget(
@@ -174,7 +217,11 @@ public final class AutoLoginProfileStore {
         list.clear();
         String activeUsername = currentUsernameSupplier.get();
         String activeServer = currentServerKeySupplier.get();
-        for (AutoLoginProfile profile : profiles) {
+        List<AutoLoginProfile> profilesSnapshot;
+        synchronized (lock) {
+            profilesSnapshot = new ArrayList<>(profiles);
+        }
+        for (AutoLoginProfile profile : profilesSnapshot) {
             String username = profile.username.get().isBlank() ? "(username not set)" : profile.username.get();
             String server = profile.server.get().isBlank() ? "(server not set)" : profile.server.get();
             String status = profile.enabled.get() ? "[on]" : "[off]";
@@ -222,20 +269,18 @@ public final class AutoLoginProfileStore {
             row.add(copy);
             copy.action = () -> {
                 AutoLoginProfile duplicate = profile.copy();
-                int index = profiles.indexOf(profile);
-                if (index < 0 || index > profiles.size()) profiles.add(duplicate);
-                else profiles.add(index, duplicate);
+                insertProfileCopy(profile, duplicate);
                 fillWidget(theme, list, currentUsernameSupplier, currentServerKeySupplier, newEntryDelaySupplier, loginAction);
             };
 
             WMinus remove = useActiveButtons ? new ActiveProfileMinus() : theme.minus();
             row.add(remove).padRight(theme.scale(PROFILE_ROW_PAD_X));
             remove.action = () -> {
-                profiles.remove(profile);
+                removeProfile(profile);
                 fillWidget(theme, list, currentUsernameSupplier, currentServerKeySupplier, newEntryDelaySupplier, loginAction);
             };
         }
-        if (!profiles.isEmpty()) list.add(theme.horizontalSeparator()).expandX();
+        if (!profilesSnapshot.isEmpty()) list.add(theme.horizontalSeparator()).expandX();
         WContainer controls = list.add(theme.horizontalList()).expandX().widget();
         WButton add = controls.add(theme.button("New Entry")).expandX().widget();
         add.action = () -> {
@@ -245,12 +290,12 @@ public final class AutoLoginProfileStore {
             String server = currentServerKeySupplier.get();
             if (!username.isBlank()) profile.username.set(username);
             if (!server.isBlank()) profile.server.set(server);
-            profiles.add(profile);
+            addProfile(profile);
             fillWidget(theme, list, currentUsernameSupplier, currentServerKeySupplier, newEntryDelaySupplier, loginAction);
         };
         WButton removeAll = controls.add(theme.button("Remove All")).expandX().widget();
         removeAll.action = () -> {
-            profiles.clear();
+            clearProfiles();
             fillWidget(theme, list, currentUsernameSupplier, currentServerKeySupplier, newEntryDelaySupplier, loginAction);
         };
     }
