@@ -33,7 +33,6 @@ final class PathfinderBaritoneBridge {
     }
 
     void startPickup(Predicate<net.minecraft.item.ItemStack> filter) {
-        pickupActive = true;
         if (!baritoneAvailable || pickupMethod == null || followProcess == null) return;
 
         try {
@@ -43,7 +42,11 @@ final class PathfinderBaritoneBridge {
             baritoneActive = false;
 
             pickupMethod.invoke(followProcess, (Predicate<?>) filter);
-        } catch (Exception ignored) {
+            // Only mark active once the follow process accepted the filter; a stuck
+            // true flag freezes all pathing in updatePathing().
+            pickupActive = true;
+        } catch (Exception e) {
+            com.devils.addon.DevilsAddon.LOG.warn("[HighwayBuilder] Baritone item pickup failed to start: {}", e.toString());
         }
     }
 

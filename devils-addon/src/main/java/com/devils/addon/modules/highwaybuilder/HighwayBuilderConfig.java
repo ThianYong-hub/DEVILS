@@ -129,15 +129,6 @@ public abstract class HighwayBuilderConfig extends Module {
         .sliderRange(1.0, 7.0)
         .build()
     );
-    public final Setting<Double> minDistance = sgBehavior.add(new DoubleSetting.Builder()
-        .name("min-distance")
-        .description("Minimum distance before interacting with a block.")
-        .defaultValue(0.8)
-        .min(0.0)
-        .max(3.0)
-        .sliderRange(0.0, 3.0)
-        .build()
-    );
     public final Setting<Double> moveSpeed = sgBehavior.add(new DoubleSetting.Builder()
         .name("move-speed")
         .description("Movement speed when not using Baritone.")
@@ -264,12 +255,6 @@ public abstract class HighwayBuilderConfig extends Module {
         .min(0)
         .max(20)
         .sliderRange(0, 20)
-        .build()
-    );
-    public final Setting<Boolean> multiBreak = sgMining.add(new BoolSetting.Builder()
-        .name("multi-break")
-        .description("Break multiple blocks in the same direction at once.")
-        .defaultValue(true)
         .build()
     );
     public final Setting<Boolean> packetFlood = sgMining.add(new BoolSetting.Builder()

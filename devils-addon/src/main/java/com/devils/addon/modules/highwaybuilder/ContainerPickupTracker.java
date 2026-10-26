@@ -61,7 +61,10 @@ final class ContainerPickupTracker {
             return;
         }
 
-        handler.containerTask.resetStuck();
+        // Past the grace period with no drop, no item and no fortune restock:
+        // accumulate stuck ticks so TaskManager's stuckTimeout recovery can fire.
+        // resetStuck() here kept the PICKUP state alive forever on despawned drops.
+        handler.containerTask.onStuck();
     }
 
     BlockPos getCollectingPosition() {

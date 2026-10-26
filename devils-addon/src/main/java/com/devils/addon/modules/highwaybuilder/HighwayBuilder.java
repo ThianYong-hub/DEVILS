@@ -38,7 +38,7 @@ public class HighwayBuilder extends HighwayBuilderConfig {
     public InventoryHandler inventoryHandler;
     public ContainerHandler containerHandler;
     public LiquidHandler liquidHandler;
-    public PacketHandler packetHandler;
+    public volatile PacketHandler packetHandler;
     public PathfinderHandler pathfinder;
     public HighwayRenderer renderer;
     public HighwayStatistics statistics;
@@ -92,6 +92,7 @@ public class HighwayBuilder extends HighwayBuilderConfig {
 
     @Override
     public void onDeactivate() {
+        if (inventoryHandler != null) inventoryHandler.restoreSilentSwap();
         if (taskManager != null) taskManager.clearTasks();
         if (pathfinder != null) {
             pathfinder.resetBaritone();
@@ -145,9 +146,11 @@ public class HighwayBuilder extends HighwayBuilderConfig {
 
         if (containerBusy) {
             // Hard-isolate shulker interaction cycle: no miner/no junk cleanup/no
-            // extra processing while container task is active.
+            // extra processing while container task is active. reset(false) keeps
+            // the fill-to-capacity flag and tracked farm centers so a mid-refill
+            // shulker restock does not abandon the refill.
             if (echestMiner != null && echestMiner.isActive()) {
-                echestMiner.reset();
+                EChestMinerSupport.stopForExternalState(echestMiner);
             }
 
             repopulateTimer = 0;
@@ -229,7 +232,10 @@ public class HighwayBuilder extends HighwayBuilderConfig {
     }
 
     private void onPacketReceiveSafe(PacketEvent.Receive event) {
-        if (packetHandler != null) packetHandler.handlePacket(event.packet);
+        // Packet events fire on the netty thread; onDeactivate can null the field
+        // between the check and the call. Take a local snapshot.
+        PacketHandler handler = packetHandler;
+        if (handler != null) handler.handlePacket(event.packet);
     }
 
     // в”Ђв”Ђ Public Accessors в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ

@@ -169,7 +169,6 @@ public class StashMover extends StashMoverRuntime {
                     "pearl-spawn",
                     "entityId=" + entity.getId() + " pos=" + formatVecForFeedback(entity.getEntityPos()) + " owned=true"
                 );
-                trackedPearlReadyOnRemoval = false;
                 clearPearlFailureState();
                 cancelGoal("tracked-own-pearl-spawn");
                 ownPearlStasisTicks = 0;
@@ -202,14 +201,8 @@ public class StashMover extends StashMoverRuntime {
 
         if (ownPearlTracker.onEntityRemoved(event.entity.getId()) == StashMoverOwnPearlTracker.RemovalOutcome.TRACKED_REMOVED
             && shouldResetOnTrackedPearlRemoval()) {
-            // hack: some servers remove the pearl entity before our stasis state catches up.
-            if (event.entity instanceof EnderPearlEntity pearl && shouldTreatTrackedPearlRemovalAsReady(pearl)) {
-                acceptTrackedPearlRemovalAsReady(pearl);
-                return;
-            }
             cancelGoal("tracked-pearl-removed");
             if (isChestLikeHandler(mc.player.currentScreenHandler)) closeHandledScreen();
-            trackedPearlReadyOnRemoval = false;
             recordPearlFailure("tracked-pearl-removed-during-throw");
             setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "tracked-pearl-removed");
             actionCooldownTicks = 0;
@@ -395,7 +388,6 @@ public class StashMover extends StashMoverRuntime {
         openedContainerTarget = null;
         renderedSourceChests.clear();
         loadAckReceived = false;
-        trackedPearlReadyOnRemoval = false;
         setMoverPhase(MoverPhase.WAIT_FOR_PEARL, "bootstrap-initial-return");
         actionCooldownTicks = 0;
         chestActionCooldownTicks = 0;

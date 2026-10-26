@@ -344,9 +344,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         boolean readyForPutBack = loadingReturnPearlAfterDeposit && lethalReturn
             ? (lethalReturnChestCleanupPending && lethalReturnPearlLaunched)
             : (returnPearlFlightConfirmed || returnPearlReady || genericStasisReady);
-        trackedPearlReadyOnRemoval = loadingReturnPearlAfterDeposit
-            && lethalReturn
-            && (lethalReturnPearlLaunched || lethalReturnPearlReady);
         String readyEvent = loadingReturnPearlAfterDeposit && lethalReturn
             ? (lethalReturnPearlLaunched ? "pearl-return-kill-launched" : "pearl-return-kill-ready")
             : (returnPearlFlightConfirmed
@@ -460,28 +457,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         return true;
     }
 
-    protected boolean shouldTreatTrackedPearlRemovalAsReady(EnderPearlEntity pearl) {
-        return false;
-    }
-
-    protected void acceptTrackedPearlRemovalAsReady(EnderPearlEntity pearl) {
-        if (pearl == null) return;
-
-        BlockPos water = waterPos();
-        Vec3d chamber = chamberLookPos();
-        Vec3d target = resolvePearlTarget(water, chamber);
-        if (target == null) target = lastPearlTarget;
-        StashMoverPearlFlight flight = StashMoverPearlFlight.of(target, pearl.getEntityPos(), pearl.getVelocity());
-        StrictRuntimeLogger.logStashMover(
-            "pearl-return-kill-removal-confirmed",
-            StashMoverTelemetry.pearlFlight(this, pearl.getId(), ownPearlStasisTicks, flight)
-        );
-        cancelGoal("tracked-pearl-removal-confirmed");
-        trackedPearlReadyOnRemoval = false;
-        setMoverPhase(MoverPhase.PUT_BACK_PEARLS, "tracked-own-pearl-return-kill-removal-confirmed");
-        actionCooldownTicks = 1;
-    }
-
     protected boolean hasPearlChestCleanupPendingAfterThrow() {
         return pearlChestSwapPending || resolveBorrowedPearlHotbarSlot() != -1 || playerInventoryPearlCount() > 0;
     }
@@ -498,7 +473,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         loadingReturnPearlAfterDeposit = false;
         currentLootSourceChest = null;
         renderedSourceChests.clear();
-        trackedPearlReadyOnRemoval = false;
         StrictRuntimeLogger.logStashMover(
             "pearl-return-command-dispatched",
             StashMoverTelemetry.pearlReturnCommandDispatched(this, trackedEntityId, signal, ownPearlStasisTicks, flight, command)
@@ -1084,7 +1058,6 @@ abstract class StashMoverRuntime extends StashMoverInteraction {
         if (next != MoverPhase.WAIT_FOR_PEARL) pearlChestNoPearlRetries = 0;
         if (next == MoverPhase.WAIT_FOR_PEARL) {
             ownPearlTracker.reset();
-            trackedPearlReadyOnRemoval = false;
         }
     }
 

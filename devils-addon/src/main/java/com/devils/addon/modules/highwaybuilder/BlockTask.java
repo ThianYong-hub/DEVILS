@@ -20,8 +20,8 @@ public class BlockTask {
     public boolean isFiller = false;
     public Item item = Items.AIR;
 
-    private int ranTicks = 0;
-    private int stuckTicks = 0;
+    private volatile int ranTicks = 0;
+    private volatile int stuckTicks = 0;
     private int shuffle = 0;
     private double startDistance = 0.0;
     private double eyeDistance = 0.0;

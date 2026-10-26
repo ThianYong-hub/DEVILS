@@ -28,7 +28,6 @@ abstract class StashMoverSupport extends Module {
     protected static final int STATIONARY_NUDGE_TICKS = 200;
     protected static final int LOOT_NUDGE_WAIT_TICKS = 100;
     protected static final double CONTAINER_REACH = 4.5;
-    protected static final double DESTINATION_CLOSE_SQ = 9.0;
     protected static final SettingColor DEFAULT_RENDER_COLOR = new SettingColor(255, 140, 0, 70);
 
     protected final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -68,12 +67,6 @@ abstract class StashMoverSupport extends Module {
         .visible(() -> mode.get() == Mode.MOVER)
         .build());
 
-    protected final Setting<Boolean> autoDisable = sgGeneral.add(new BoolSetting.Builder()
-        .name("auto-disable")
-        .description("Legacy compatibility toggle. Destination chest full now stays open and waits for free slots.")
-        .defaultValue(true)
-        .visible(() -> mode.get() == Mode.MOVER)
-        .build());
 
     protected final Setting<Boolean> useEChest = sgGeneral.add(new BoolSetting.Builder()
         .name("use-ender-chest")
@@ -259,7 +252,6 @@ abstract class StashMoverSupport extends Module {
     protected int failedPearlThrows;
     protected int stallRecoveryCount;
     protected int pearlChestNoPearlRetries;
-    protected boolean trackedPearlReadyOnRemoval;
     protected long lastProgressAtMs = System.currentTimeMillis();
     protected boolean sneakRecoveryInjected;
     protected boolean prevSneakRecoveryState;
@@ -323,7 +315,6 @@ abstract class StashMoverSupport extends Module {
         lastPearlThrowPitch = 0.0f;
         failedPearlThrows = 0;
         stallRecoveryCount = 0;
-        trackedPearlReadyOnRemoval = false;
     }
 
     protected void holdSneakRecovery() {
