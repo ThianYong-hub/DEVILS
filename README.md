@@ -16,8 +16,8 @@
 
 Mostly made for anarchy / private server messing around, with some sync stuff bolted on because running two clients by hand gets annoying.
 
-Current addon build (`0.0.63`)
-Current game build (`0.0.63`)
+Current addon build (`0.0.64`)
+Current game build (`0.0.64`)
 
 ## What Is In Here
 
@@ -168,6 +168,12 @@ Hardening notes:
 
 - The server refuses to start without `SYNC_AUTH_TOKEN` unless you explicitly set `SYNC_ALLOW_NO_AUTH=true` for isolated local tests.
 - Sockets have a 60 s timeout and concurrent SSE streams are capped by `SYNC_MAX_STREAMS` (default 16).
+
+Security model (read this before hosting):
+
+- Anyone holding `SYNC_AUTH_TOKEN` can read and write every namespace on the hub - there is no per-namespace ACL yet. Use a separate hub (and token) per team.
+- E2E (`e2e-secret`) protects payload contents for `auto-login` and `ping` from the hub operator; transport auth and metadata (device ids, namespaces, timestamps) are always visible to the server.
+- Prefer HTTPS (mount a reverse proxy or set the TLS env vars); the client refuses plain HTTP for password/coordinate payloads unless they are E2E-encrypted.
 
 Useful endpoints:
 
