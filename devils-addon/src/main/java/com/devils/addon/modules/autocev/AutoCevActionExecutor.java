@@ -24,9 +24,12 @@ import net.minecraft.util.math.Vec3d;
 
 public final class AutoCevActionExecutor {
     private static final int ROTATE_PRIORITY = 50;
+    /** Ticks to wait for an external instamine before falling back to vanilla digging. */
+    private static final int INSTA_FALLBACK_TICKS = 10;
 
     private final AutoCev module;
     private final AutoCevPlanner planner;
+    private int instaStallTicks;
 
     public AutoCevActionExecutor(AutoCev module, AutoCevPlanner planner) {
         this.module = module;
@@ -107,13 +110,16 @@ public final class AutoCevActionExecutor {
         EndCrystalEntity crystal = findCrystalAt(plan.pos());
 
         if (state.isOf(Blocks.OBSIDIAN)) {
+            // The obsidian base is a permanent anchor: once a crystal sits on it,
+            // pop it. Breaking the base out from under the crystal only wastes
+            // ticks and left the cycle hanging in the default Insta mode.
             if (crystal != null) {
-                if (antiSuicide(crystal.getEntityPos())) mineBase(plan.pos());
+                if (antiSuicide(crystal.getEntityPos())) attackCrystal(crystal);
                 return;
             }
 
             if (!antiSuicide(crystalCenter(plan.pos()))) return;
-            if (placeCrystal(plan.pos())) mineBase(plan.pos());
+            placeCrystal(plan.pos());
             return;
         }
 
@@ -304,8 +310,15 @@ public final class AutoCevActionExecutor {
             return false;
         }
         if (immutable.equals(module.getInstaMinePos())) {
-            module.debug("skip insta mine -> insta pos already set " + module.formatPos(immutable));
-            return false;
+            instaStallTicks++;
+            if (instaStallTicks <= INSTA_FALLBACK_TICKS) return false;
+            // The external instamine never completed the break; fall back to
+            // vanilla digging so blocker clears cannot hang forever.
+            if (instaStallTicks == INSTA_FALLBACK_TICKS + 1) {
+                module.debug("insta mine stalled -> vanilla fallback " + module.formatPos(immutable));
+            }
+            mineBlock(immutable);
+            return true;
         }
         if (isBreakingBlock(immutable)) {
             module.debug("skip insta mine -> client already breaking " + module.formatPos(immutable));
@@ -329,6 +342,7 @@ public final class AutoCevActionExecutor {
 
         if (module.isHeadType(module.getActiveType())) module.setLockedHeadMineBase(immutable);
         module.setInstaMinePos(immutable);
+        instaStallTicks = 0;
         return true;
     }
 

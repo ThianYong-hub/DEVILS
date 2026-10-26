@@ -313,7 +313,8 @@ public final class AutoCevPlanner {
         if (module.client().player.getBoundingBox().intersects(blockBox)) return false;
 
         for (Entity entity : module.client().world.getOtherEntities(null, blockBox)) {
-            if (entity instanceof EndCrystalEntity) continue;
+            // Crystals are the payload; dropped items do not block placement.
+            if (entity instanceof EndCrystalEntity || entity instanceof ItemEntity) continue;
             return false;
         }
 
