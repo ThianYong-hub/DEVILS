@@ -6,7 +6,8 @@
     "ClientPlayerInteractionManagerInvoker",
     "ClientConnectionMixin",
     "ItemListSettingScreenMixin",
-    "ModulesNameCollisionMixin"
+    "ModulesNameCollisionMixin",
+    "ModulesScreenIconsMixin"
   ],
   "injectors": {
     "defaultRequire": 1
