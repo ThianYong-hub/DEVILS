@@ -247,7 +247,7 @@ class ProjectConfigSuiteTest {
         assertTrue(releaseOnTag.contains("addon_asset=${addon_asset}"));
         assertTrue(releaseOnTag.contains("game_asset=${game_asset}"));
         assertTrue(releaseOnTag.contains("Generate release notes"));
-        assertTrue(releaseOnTag.contains("softprops/action-gh-release@v2"));
+        assertTrue(releaseOnTag.contains("softprops/action-gh-release@v3"));
         assertTrue(releaseOnTag.contains("body_path: RELEASE_NOTES.md"));
         assertTrue(releaseOnTag.contains("python3 -m unittest SyncHub.tests.test_sync_backend"));
         assertTrue(releaseOnTag.contains("steps.verify_assets.outputs.addon_asset"));
