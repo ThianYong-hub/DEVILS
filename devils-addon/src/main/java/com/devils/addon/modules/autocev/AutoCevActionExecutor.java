@@ -94,11 +94,6 @@ public final class AutoCevActionExecutor {
         if (plan == null || module.client().world == null) return;
         if (!module.client().world.getBlockState(plan.pos()).isOf(Blocks.OBSIDIAN)) return;
 
-        if (module.getMineMode() == AutoCev.MineMode.Insta && plan.pos().equals(module.getLockedHeadMineBase())) {
-            module.debug("head clear -> keep external mine " + module.formatPos(plan.pos()));
-            return;
-        }
-
         module.debug("head clear -> mine base " + module.formatPos(plan.pos()));
         mineBase(plan.pos());
     }
@@ -243,10 +238,6 @@ public final class AutoCevActionExecutor {
 
     private void mineBase(BlockPos pos) {
         if (module.getMineMode() == AutoCev.MineMode.Insta) {
-            if (module.isHeadType(module.getActiveType()) && pos != null && pos.equals(module.getLockedHeadMineBase())) {
-                module.debug("skip mineBase -> head lock owns " + module.formatPos(pos));
-                return;
-            }
             ensureInstaMine(pos);
             return;
         }
@@ -305,10 +296,6 @@ public final class AutoCevActionExecutor {
         if (pos == null || module.client().interactionManager == null) return false;
 
         BlockPos immutable = pos.toImmutable();
-        if (module.isHeadType(module.getActiveType()) && immutable.equals(module.getLockedHeadMineBase())) {
-            module.debug("skip insta mine -> head locked " + module.formatPos(immutable));
-            return false;
-        }
         if (immutable.equals(module.getInstaMinePos())) {
             instaStallTicks++;
             if (instaStallTicks <= INSTA_FALLBACK_TICKS) return false;
