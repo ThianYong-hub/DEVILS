@@ -53,6 +53,8 @@ public final class AutoLoginSyncStreamController {
     private volatile boolean syncStreamUnsupported;
     private volatile long syncStreamUnsupportedUntilMs;
     private volatile long syncStreamGeneration;
+    /** Currently open SSE response stream; closed on stop to unblock the reader. */
+    private volatile java.io.InputStream activeStream;
 
     public AutoLoginSyncStreamController(AutoLoginSyncCodec codec, BooleanSupplier verboseSupplier, Consumer<String> infoLogger, BiConsumer<String, String> problemLogger) {
         this.codec = codec;
@@ -95,6 +97,7 @@ public final class AutoLoginSyncStreamController {
     }
 
     public void stop() {
+        syncStreamGeneration++;
         syncStreamStopRequested = true;
         syncStreamConnecting = false;
         syncStreamConnected = false;
@@ -105,6 +108,17 @@ public final class AutoLoginSyncStreamController {
         CompletableFuture<Void> future = syncStreamFuture;
         syncStreamFuture = null;
         if (future != null) future.cancel(true);
+
+        // readLine() on the SSE stream is not interruptible; closing the stream
+        // is the only way to unblock a parked reader thread.
+        java.io.InputStream stream = activeStream;
+        activeStream = null;
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (java.io.IOException ignored) {
+            }
+        }
     }
 
     public void reset() {
@@ -147,6 +161,7 @@ public final class AutoLoginSyncStreamController {
             });
 
             try (InputStream input = response.body(); BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                activeStream = input;
                 String line;
                 String eventType = "";
                 StringBuilder data = new StringBuilder();
@@ -181,6 +196,7 @@ public final class AutoLoginSyncStreamController {
             String finalStreamError = streamError;
             MinecraftClient.getInstance().execute(() -> {
                 if (generation != syncStreamGeneration) return;
+                activeStream = null;
                 syncStreamConnected = false;
                 syncStreamConnecting = false;
                 syncStreamFuture = null;

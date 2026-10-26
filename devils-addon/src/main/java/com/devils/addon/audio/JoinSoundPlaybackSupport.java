@@ -82,14 +82,21 @@ final class JoinSoundOggPlayback {
 
         try (AudioInputStream inputStream = openPcmAudioStream(filePath)) {
             Clip clip = openClip(inputStream.getFormat(), diagnostics);
-            clip.addLineListener(event -> {
-                if (event.getType() == LineEvent.Type.STOP || event.getType() == LineEvent.Type.CLOSE) {
-                    clip.close();
-                }
-            });
-            clip.open(inputStream);
-            applyLocalOggVolume(clip, sanitizedVolumePercent, diagnostics);
-            clip.start();
+            try {
+                clip.addLineListener(event -> {
+                    if (event.getType() == LineEvent.Type.STOP || event.getType() == LineEvent.Type.CLOSE) {
+                        clip.close();
+                    }
+                });
+                clip.open(inputStream);
+                applyLocalOggVolume(clip, sanitizedVolumePercent, diagnostics);
+                clip.start();
+            } catch (IOException | LineUnavailableException | IllegalArgumentException failure) {
+                // The line listener never fires for a clip that never started;
+                // release the mixer line or repeated failures exhaust them all.
+                clip.close();
+                throw failure;
+            }
             return JoinSoundPlaybackStatus.OK;
         } catch (UnsupportedAudioFileException e) {
             JoinSoundPlayer.LOG.warn("Unsupported local sound format '{}'.", filePath, e);

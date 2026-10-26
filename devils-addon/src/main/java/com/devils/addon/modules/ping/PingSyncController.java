@@ -10,6 +10,12 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 public final class PingSyncController {
+    private static final java.util.concurrent.ExecutorService SYNC_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "Devils-PingSync");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private final Ping module;
     private final PingMarkerController markerController;
     private final PingSyncCodec codec = new PingSyncCodec();
@@ -59,6 +65,11 @@ public final class PingSyncController {
         return config == null ? "" : config.deviceId();
     }
 
+    private static boolean isE2eEnabled(SyncRuntimeConfig sync) {
+        String key = sync.encryptionKey();
+        return key != null && !key.isBlank();
+    }
+
     public void handleSyncTick() {
         SyncRuntimeConfig sync = resolveSyncRuntimeConfig();
         if (sync == null) {
@@ -91,6 +102,18 @@ public final class PingSyncController {
 
         if (!sync.allowHttp() && baseUrl.startsWith("http://")) {
             lastSyncStatus = "skip:http-disabled";
+            streamController.stopSyncStream();
+            return;
+        }
+        // Ping markers contain coordinates; they only travel over plain HTTP
+        // when the payload itself is E2E-encrypted, even with allow-http on.
+        if (baseUrl.startsWith("http://") && !isE2eEnabled(sync)) {
+            lastSyncStatus = "skip:http-without-e2e";
+            problemTracker.logProblem(
+                module,
+                "http-without-e2e",
+                "Ping markers include coordinates; refusing to sync them over plain HTTP without an e2e-secret."
+            );
             streamController.stopSyncStream();
             return;
         }
@@ -233,7 +256,7 @@ public final class PingSyncController {
                 snapshotAuthoritative
             );
             module.client().execute(() -> handleSyncCycleResult(result));
-        });
+        }, SYNC_EXECUTOR);
     }
 
     private void handleSyncCycleResult(SyncCycleResult result) {

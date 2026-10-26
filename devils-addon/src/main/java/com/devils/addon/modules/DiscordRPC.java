@@ -12,6 +12,7 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.systems.modules.misc.DiscordPresence;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import meteordevelopment.orbit.EventHandler;
 
 public class DiscordRPC extends Module {
@@ -145,8 +146,11 @@ public class DiscordRPC extends Module {
         DiscordIPC.stop();
 
         DiscordIPC.start(APP_ID, () -> {
-            lastWasInMainMenu = false;
-            updatePresence();
+            // Runs on the Discord IPC reader thread; mc state must be touched on the client thread.
+            MinecraftClient.getInstance().execute(() -> {
+                lastWasInMainMenu = false;
+                updatePresence();
+            });
         });
 
         updatePresence();

@@ -162,6 +162,13 @@ public class SessionCommand extends Command {
             : toString(nick, password);
 
         mc.inGameHud.getChatHud().getMessageHistory().removeLastOccurrence(commandLine);
+
+        // The reconstructed line only matches byte-exact input (single spaces,
+        // current prefix). Sweep any remaining history entry that still carries
+        // the plaintext password, whatever spacing or case was used.
+        if (password != null && !password.isBlank()) {
+            mc.inGameHud.getChatHud().getMessageHistory().removeIf(entry -> entry != null && entry.contains(password));
+        }
         mc.inGameHud.getChatHud().discardDraft();
     }
 

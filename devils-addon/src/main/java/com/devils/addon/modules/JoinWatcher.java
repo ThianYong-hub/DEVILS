@@ -218,11 +218,9 @@ public class JoinWatcher extends Module {
     private void processRules(String playerName, RuleTrigger trigger) {
         if (trackerPlayers.get().isEmpty()) return;
 
-        ArrayList<TrackerPlayerRule> updatedRules = new ArrayList<>(trackerPlayers.get());
-        boolean changed = false;
-
-        for (int i = 0; i < updatedRules.size(); i++) {
-            TrackerPlayerRule rule = updatedRules.get(i);
+        List<TrackerPlayerRule> rules = trackerPlayers.get();
+        for (int i = 0; i < rules.size(); i++) {
+            TrackerPlayerRule rule = rules.get(i);
 
             if (!playerName.equals(rule.playerName())) continue;
             if (!matchesEvent(rule.eventMode(), trigger)) continue;
@@ -244,7 +242,6 @@ public class JoinWatcher extends Module {
             }
         }
 
-        if (changed) trackerPlayers.set(updatedRules);
     }
 
     private void queueDelayedChatSend(int ruleIndex, TrackerPlayerRule ruleSnapshot, String command, int delayMs) {

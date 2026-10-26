@@ -218,9 +218,11 @@ public class Ping extends Module {
 
     private void handleBindEvent(boolean isKey, int value, int modifiers, KeyAction action, Object eventRef) {
         if (!isActive() || !keybind.matches(isKey, value, modifiers)) return;
+        // Only swallow the input for an actual ping; cancelling while a screen is
+        // open would eat keystrokes typed into chat and other GUIs.
+        if (action != KeyAction.Press || client().currentScreen != null) return;
         if (eventRef instanceof KeyEvent keyEvent) keyEvent.setCancelled(true);
         if (eventRef instanceof MouseClickEvent mouseEvent) mouseEvent.setCancelled(true);
-        if (action != KeyAction.Press || client().currentScreen != null) return;
         markerController.createPingFromCrosshair();
     }
 

@@ -5,6 +5,7 @@ import com.devils.addon.shared.sync.SyncJsonUtils;
 import com.google.gson.JsonObject;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.http.HttpResponse;
@@ -31,6 +32,10 @@ public final class PingSyncStreamController {
     private volatile boolean syncStreamUpdatePending;
     private volatile long syncStreamPendingRevision = -1;
     private volatile long syncStreamReconnectAtMs;
+    /** Bumped on every start/stop; a finished loop only touches state if it is still the current generation. */
+    private volatile long syncStreamGeneration;
+    /** Currently open SSE response stream; closed on stop to unblock the reader. */
+    private volatile InputStream activeStream;
     private volatile String syncStreamConnectionKey = "";
     private volatile boolean syncStreamUseLegacyPath;
     private volatile boolean syncStreamUnsupported;
@@ -86,12 +91,13 @@ public final class PingSyncStreamController {
         syncStreamStopRequested = false;
         syncStreamConnecting = true;
         syncStreamConnectionKey = connectionKey;
+        long generation = ++syncStreamGeneration;
 
         long safeKnownRevision = Math.max(-1, knownRevision);
         int safeWaitMs = Math.max(50, waitMs);
         int requestTimeout = Math.max(10, timeoutSec + 30);
         boolean useLegacyPath = syncStreamUseLegacyPath;
-        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, safeKnownRevision, safeWaitMs, useLegacyPath), STREAM_EXECUTOR);
+        syncStreamFuture = CompletableFuture.runAsync(() -> runSyncStreamLoop(baseUrl, deviceId, tokenValue, signingKey, requestTimeout, safeKnownRevision, safeWaitMs, useLegacyPath, generation), STREAM_EXECUTOR);
     }
 
     public boolean consumePendingPullSignal(long lastKnownSyncRevision) {
@@ -101,6 +107,7 @@ public final class PingSyncStreamController {
     }
 
     public void stopSyncStream() {
+        syncStreamGeneration++;
         syncStreamStopRequested = true;
         syncStreamConnecting = false;
         syncStreamConnected = false;
@@ -112,9 +119,20 @@ public final class PingSyncStreamController {
         CompletableFuture<Void> future = syncStreamFuture;
         syncStreamFuture = null;
         if (future != null) future.cancel(true);
+
+        // readLine() on the SSE stream is not interruptible; closing the stream
+        // is the only way to unblock a parked reader thread.
+        InputStream stream = activeStream;
+        activeStream = null;
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+            }
+        }
     }
 
-    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs, boolean useLegacyPath) {
+    private void runSyncStreamLoop(String baseUrl, String deviceId, String token, String signingKey, int timeoutSec, long knownRevision, int waitMs, boolean useLegacyPath, long generation) {
         String streamError = null;
         try {
             HttpResponse<InputStream> response = codec.sendSyncStreamRequest(baseUrl, deviceId, token, signingKey, timeoutSec, knownRevision, waitMs, useLegacyPath);
@@ -136,6 +154,7 @@ public final class PingSyncStreamController {
             }
 
             module.client().execute(() -> {
+                if (generation != syncStreamGeneration) return;
                 syncStreamConnecting = false;
                 syncStreamConnected = true;
                 syncStreamReconnectAtMs = 0;
@@ -144,6 +163,7 @@ public final class PingSyncStreamController {
 
             try (InputStream input = response.body();
                  BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+                activeStream = input;
                 String line;
                 StringBuilder data = new StringBuilder();
                 while (!syncStreamStopRequested && (line = reader.readLine()) != null) {
@@ -165,6 +185,8 @@ public final class PingSyncStreamController {
         } finally {
             String finalStreamError = streamError;
             module.client().execute(() -> {
+                if (generation != syncStreamGeneration) return;
+                activeStream = null;
                 syncStreamConnected = false;
                 syncStreamConnecting = false;
                 syncStreamFuture = null;

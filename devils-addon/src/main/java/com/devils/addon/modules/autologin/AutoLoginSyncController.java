@@ -23,6 +23,12 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import net.minecraft.client.MinecraftClient;
 
 public final class AutoLoginSyncController {
+    private static final java.util.concurrent.ExecutorService SYNC_EXECUTOR = java.util.concurrent.Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "Devils-AutoLoginSync");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private static final long PULL_FALLBACK_INTERVAL_MS = 2_500;
     private static final int SYNC_ERROR_DETAIL_MAX = 120;
 
@@ -126,8 +132,19 @@ public final class AutoLoginSyncController {
             streamController.stop();
             return;
         }
-        if (!sync.allowHttp() && baseUrl.startsWith("http://")) {
+        if (baseUrl.startsWith("http://") && !sync.allowHttp()) {
             lastSyncStatus = "skip:http-disabled";
+            streamController.stop();
+            return;
+        }
+        // Plain HTTP may only carry the payload when it is E2E-encrypted; otherwise
+        // stored login passwords would travel in cleartext even with allow-http.
+        if (baseUrl.startsWith("http://") && !isE2eEnabled(sync) && profileStoreCarriesPasswords()) {
+            lastSyncStatus = "skip:http-without-e2e";
+            diagnostics.logProblem(
+                "http-without-e2e",
+                "Stored login passwords cannot sync over plain HTTP without an e2e-secret; set e2e-secret or use HTTPS."
+            );
             streamController.stop();
             return;
         }
@@ -181,6 +198,18 @@ public final class AutoLoginSyncController {
             shouldPull,
             syncInitialSyncPending
         );
+    }
+
+    private static boolean isE2eEnabled(AutoLoginProfile.SyncRuntimeConfig sync) {
+        String key = sync.encryptionKey();
+        return key != null && !key.isBlank();
+    }
+
+    private boolean profileStoreCarriesPasswords() {
+        for (AutoLoginProfile.SyncProfileData profile : profileStore.snapshotProfiles()) {
+            if (profile.password() != null && !profile.password().isBlank()) return true;
+        }
+        return false;
     }
 
     private void runSyncCycleAsync(
@@ -258,7 +287,7 @@ public final class AutoLoginSyncController {
 
             SyncCycleResult result = new SyncCycleResult(pullResult, pushResult, remoteApplied, localChanged, effectiveFingerprint, error);
             MinecraftClient.getInstance().execute(() -> finishSyncCycle(result));
-        });
+        }, SYNC_EXECUTOR);
     }
 
     private void finishSyncCycle(SyncCycleResult result) {

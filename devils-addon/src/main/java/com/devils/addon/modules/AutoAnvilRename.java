@@ -144,7 +144,7 @@ public class AutoAnvilRename extends Module {
             stuckCycles = 0;
 
             int cost = anvil.getLevelCost();
-            boolean canAfford = mc.player.isCreative() || mc.player.experienceLevel >= cost;
+            boolean canAfford = mc.player.isCreative() || (cost >= 0 && mc.player.experienceLevel >= cost);
 
             if (!canAfford) {
                 // Waiting for levels is not a stall, we simply have nothing to click yet.

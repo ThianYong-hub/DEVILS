@@ -29,6 +29,7 @@ public abstract class AbstractSyncConfigModule extends Module {
         .name("auth-token")
         .description("Bearer credential for sync transport authentication. Preferred backend env: SYNC_AUTH_TOKEN.")
         .defaultValue("")
+        .renderer(MaskedTextBoxRenderer.class)
         .build()
     );
 
@@ -36,6 +37,7 @@ public abstract class AbstractSyncConfigModule extends Module {
         .name("transport-signing-key")
         .description("HMAC key for signed sync requests. Keep this separate from the E2E secret. Preferred backend env: SYNC_REQUEST_SIGNING_KEY.")
         .defaultValue("")
+        .renderer(MaskedTextBoxRenderer.class)
         .build()
     );
 
@@ -43,6 +45,7 @@ public abstract class AbstractSyncConfigModule extends Module {
         .name("e2e-secret")
         .description("Client-only secret for E2E payload encryption. The backend never needs this value. Preferred client env: SYNC_E2E_SECRET.")
         .defaultValue("")
+        .renderer(MaskedTextBoxRenderer.class)
         .build()
     );
 
