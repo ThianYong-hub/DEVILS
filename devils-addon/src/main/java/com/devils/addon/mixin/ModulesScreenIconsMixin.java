@@ -38,7 +38,7 @@ public abstract class ModulesScreenIconsMixin {
     @Unique
     private static final Map<String, Identifier> DEVILS_CATEGORY_ICONS = Map.of(
         "Devils", Identifier.of("devils-addon", "category_icon.png"),
-        "Devils-Game", Identifier.of("devils-game", "Devils-Game.jpg")
+        "Devils-Game", Identifier.of("devils-game", "icon.png")
     );
 
     @Unique
