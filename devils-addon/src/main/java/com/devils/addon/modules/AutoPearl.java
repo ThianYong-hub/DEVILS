@@ -271,7 +271,11 @@ public class AutoPearl extends Module {
         double ldx = landSpot.x - playerPos.x;
         double ldz = landSpot.z - playerPos.z;
         float yaw = (float) Math.toDegrees(-Math.atan2(ldx, ldz));
-        float pitch = AutoPearlTrajectory.pitchToPoint(mc, landSpot, yaw, -30f);
+        AutoPearlTrajectory.PitchSolution solution = AutoPearlTrajectory.solvePitchToPoint(mc, landSpot, yaw, -30f);
+        // The pitch search only covers upward arcs; for short descents the best arc can
+        // still land far off the ledge. Refuse to waste a pearl on a bad throw.
+        if (solution.landingError() > MAX_DESCENT_LANDING_ERROR) return false;
+        float pitch = solution.pitch();
 
         posBeforeThrow = mc.player.getEntityPos();
         waitingForTeleport = true;
@@ -302,8 +306,13 @@ public class AutoPearl extends Module {
         return baseYaw + offsetDeg;
     }
 
+    private static final double MAX_DESCENT_LANDING_ERROR = 2.0;
+
     private void doThrow(int pearlSlot) {
-        if (mc.player == null || mc.interactionManager == null) return;
+        // Runs immediately or from a rotation callback that can outlive the module;
+        // never use an item unless we are still active and the slot still holds a pearl.
+        if (!isActive() || mc.player == null || mc.interactionManager == null) return;
+        if (mc.player.getInventory().getStack(pearlSlot).getItem() != Items.ENDER_PEARL) return;
         InvUtils.swap(pearlSlot, true);
         mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
         InvUtils.swapBack();

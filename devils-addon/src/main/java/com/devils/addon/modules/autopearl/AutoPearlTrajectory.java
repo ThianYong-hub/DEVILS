@@ -27,8 +27,17 @@ public final class AutoPearlTrajectory {
         return pitchToPoint(mc, targetCenter, yaw, fallbackPitch);
     }
 
+    /** A throw solution: the best pitch found and how far (blocks) its arc passes from the target. */
+    public record PitchSolution(float pitch, double landingError) {}
+
     public static float pitchToPoint(MinecraftClient mc, Vec3d targetPoint, float yaw, float fallbackPitch) {
-        if (mc == null || mc.player == null || mc.world == null || targetPoint == null) return fallbackPitch;
+        return solvePitchToPoint(mc, targetPoint, yaw, fallbackPitch).pitch();
+    }
+
+    public static PitchSolution solvePitchToPoint(MinecraftClient mc, Vec3d targetPoint, float yaw, float fallbackPitch) {
+        if (mc == null || mc.player == null || mc.world == null || targetPoint == null) {
+            return new PitchSolution(fallbackPitch, Double.MAX_VALUE);
+        }
         Vec3d eye = mc.player.getEyePos();
 
         float bestPitch = fallbackPitch;
@@ -41,7 +50,7 @@ public final class AutoPearlTrajectory {
                 bestPitch = deg;
             }
         }
-        return bestPitch;
+        return new PitchSolution(bestPitch, bestScore);
     }
 
     private static double scorePitch(MinecraftClient mc, Vec3d eyePos, float yawDeg, float pitchDeg, Vec3d targetCenter) {
@@ -101,6 +110,22 @@ public final class AutoPearlTrajectory {
             this.module = module;
         }
 
+        /** Extracts the sender nickname from common chat formats: "<Name> ...", "Name > ...", "[Name -> you] ...". */
+        private static String extractChatSender(String msg, int cmdIdx) {
+            String head = msg.substring(0, cmdIdx).trim();
+            if (head.isEmpty()) return "";
+            char first = head.charAt(0);
+            if (first == '<' || first == '[') head = head.substring(1);
+            for (String delim : new String[] {">", "]", ":"}) {
+                int idx = head.indexOf(delim);
+                if (idx > 0) return head.substring(0, idx).trim();
+            }
+            // Private-message style "Name -> you" without brackets
+            int arrow = head.indexOf("->");
+            if (arrow > 0) return head.substring(0, arrow).trim();
+            return head;
+        }
+
         public void handleChat(ReceiveMessageEvent event) {
             if (mc.player == null) return;
 
@@ -113,8 +138,10 @@ public final class AutoPearlTrajectory {
 
             String auth = module.commandPlayer.get().trim();
             if (!auth.isEmpty()) {
-                String beforeCmd = msg.substring(0, cmdIdx);
-                if (!beforeCmd.toLowerCase().contains(auth.toLowerCase())) return;
+                // Authenticating by "nickname appears anywhere before the command"
+                // let anyone write "hey MasterNick !pearl victim" and hijack the bot.
+                // Require the command to come from the authorized sender itself.
+                if (!auth.equalsIgnoreCase(extractChatSender(msg, cmdIdx))) return;
             }
 
             String afterCmd = msg.substring(cmdIdx + prefix.length()).trim();
@@ -218,9 +245,12 @@ public final class AutoPearlTrajectory {
             double maxHeightDiff,
             double range
         ) {
-            if (mc == null || mc.player == null || target == null) return false;
+            if (mc == null || mc.player == null || mc.world == null || target == null) return false;
             if (target == mc.player) return false;
             if (target.isDead() || target.getHealth() <= 0) return false;
+            // Disconnects, unloads and dimension changes all mark the entity removed;
+            // without this check the chase loop keeps throwing pearls at a ghost.
+            if (target.isRemoved()) return false;
             if (ignoreFriends && Friends.get().isFriend(target)) return false;
             if (skipGliding && target.isGliding()) return false;
             if (target.getY() - mc.player.getY() > maxHeightDiff) return false;
@@ -238,7 +268,8 @@ public final class AutoPearlTrajectory {
 
             if (forcedTargetName != null) {
                 PlayerEntity forced = findPlayerByName(mc, forcedTargetName);
-                if (forced != null && forced != mc.player && !forced.isDead() && forced.getHealth() > 0) {
+                if (forced != null && forced != mc.player && !forced.isDead() && forced.getHealth() > 0
+                    && !forced.isRemoved()) {
                     return forced;
                 }
                 return null;

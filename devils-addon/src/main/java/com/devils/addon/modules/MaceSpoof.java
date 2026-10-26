@@ -76,21 +76,12 @@ public class MaceSpoof extends Module {
         int blocks = getMaxHeightAbovePlayer();
         if (blocks <= 0) return;
 
-        int packetsRequired = (int) Math.ceil(Math.abs(blocks / 10.0));
-        if (packetsRequired > 20) packetsRequired = 1;
-
         boolean hc = mc.player.horizontalCollision;
 
         if (blocks <= 22) {
-            for (int i = 0; i < 4; i++) {
-                mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, hc));
-            }
             double heightY = Math.min(mc.player.getY() + 22, mc.player.getY() + blocks);
             doTeleports(heightY, hc);
         } else {
-            for (int i = 0; i < packetsRequired - 1; i++) {
-                mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.OnGroundOnly(false, hc));
-            }
             double heightY = mc.player.getY() + blocks;
             doTeleports(heightY, hc);
         }
@@ -127,6 +118,12 @@ public class MaceSpoof extends Module {
     private int getMaxHeightAbovePlayer() {
         BlockPos playerPos = mc.player.getBlockPos();
         int maxHeight = playerPos.getY() + (maxPower.get() ? 170 : fallHeight.get());
+        // Above the build ceiling the world returns replaceable void air; spoofing a
+        // position past it gets rejected by servers (rubberband/kick). Never scan there.
+        if (mc.world != null) {
+            // Keep the pair (scan Y, scan Y+1) inside the build limit.
+            maxHeight = Math.min(maxHeight, mc.world.getTopYInclusive() - 1);
+        }
 
         for (int i = maxHeight; i > playerPos.getY(); i--) {
             BlockPos up1 = new BlockPos(playerPos.getX(), i, playerPos.getZ());
@@ -138,8 +135,10 @@ public class MaceSpoof extends Module {
     }
 
     private boolean isSafeBlock(BlockPos pos) {
-        return mc.world.getBlockState(pos).isReplaceable()
+        var state = mc.world.getBlockState(pos);
+        return state.isReplaceable()
+            && !state.isOf(Blocks.VOID_AIR)
             && mc.world.getFluidState(pos).isEmpty()
-            && !mc.world.getBlockState(pos).isOf(Blocks.POWDER_SNOW);
+            && !state.isOf(Blocks.POWDER_SNOW);
     }
 }

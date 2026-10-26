@@ -107,6 +107,7 @@ public class AutoCev extends Module {
     private BlockPos lockedHeadMineBase;
     private BlockPos instaMinePos;
     private int debugCounter;
+    private long lastClipboardPushMs;
 
     public AutoCev() {
         super(DevilsAddon.CATEGORY, "auto-cev", "Places obsidian and crystals for a simple, aggressive cev cycle.");
@@ -303,7 +304,14 @@ public class AutoCev extends Module {
         ));
 
         while (debugLines.size() > DEBUG_LOG_LIMIT) debugLines.removeFirst();
-        mc.keyboard.setClipboard(String.join(System.lineSeparator(), debugLines));
+
+        // debug() fires several times per tick; rewriting the OS clipboard on each
+        // call destroyed whatever the user copied. Push at most twice a second.
+        long now = System.currentTimeMillis();
+        if (now - lastClipboardPushMs >= 500) {
+            lastClipboardPushMs = now;
+            mc.keyboard.setClipboard(String.join(System.lineSeparator(), debugLines));
+        }
     }
 
     public String formatPos(BlockPos pos) {

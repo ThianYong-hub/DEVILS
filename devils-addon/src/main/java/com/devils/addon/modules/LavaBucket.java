@@ -107,9 +107,14 @@ public class LavaBucket extends Module {
             return;
         }
 
-        timer = delay.get();
+        timer = Math.max(0, delay.get() - 1);
 
-        if (dropLava.get()) dropAllLavaBuckets();
+        // Per its description: only drop full buckets when we have no empty ones
+        // to collect with, not unconditionally every cycle.
+        if (dropLava.get() && !InvUtils.findInHotbar(Items.BUCKET).found()
+            && !InvUtils.find(stack -> stack.isOf(Items.BUCKET), 9, 35).found()) {
+            dropAllLavaBuckets();
+        }
 
         FindItemResult bucket = ensureBucketAvailable();
         if (!bucket.found()) return;

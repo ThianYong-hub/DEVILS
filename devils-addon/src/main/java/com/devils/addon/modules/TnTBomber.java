@@ -86,6 +86,8 @@ public class TnTBomber extends Module {
     private Stage stage;
     private final List<BlockPos> boxPositions = new ArrayList<>();
     private int boxIndex;
+    private int boxedTargetId = -1;
+    private BlockPos boxedTargetPos;
     private BlockPos tntPos;
 
     public TnTBomber() {
@@ -131,9 +133,15 @@ public class TnTBomber extends Module {
     }
 
     private void tickBoxing() {
-        if (boxIndex == 0) {
+        // findTarget() re-picks the closest player every tick; a cage built from a
+        // stale snapshot ends up dumped in open air when the target moves a block.
+        if (boxIndex == 0 || boxedTargetId != target.getId() || boxedTargetPos == null
+            || !boxedTargetPos.equals(target.getBlockPos())) {
             boxPositions.clear();
             buildBoxPositions();
+            boxedTargetId = target.getId();
+            boxedTargetPos = target.getBlockPos().toImmutable();
+            boxIndex = 0;
             if (boxPositions.isEmpty()) return;
         }
 
